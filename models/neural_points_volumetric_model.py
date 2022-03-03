@@ -82,7 +82,9 @@ class NeuralPointsVolumetricModel(BaseRenderingModel):
             opt.visual_items.append('fine_raycolor')
 
     def run_network_models(self):
-        return self.fill_invalid(self.net_ray_marching(**self.input), self.input)
+        mid = self.net_ray_marching(**self.input)
+        return self.fill_invalid(mid, self.input)
+        #return self.fill_invalid(self.net_ray_marching(**self.input), self.input)
 
     def fill_invalid(self, output, input):
         # ray_mask:             torch.Size([1, 1024])
@@ -266,8 +268,27 @@ class NeuralPointsRayMarching(nn.Module):
         output = {}
         # B, channel, 292, 24, 32;      B, 3, 294, 24, 32;     B, 294, 24;     B, 291, 2
         sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, ray_mask_tensor, vsize, grid_vox_sz = self.neural_points({"pixel_idx": pixel_idx, "camrotc2w": camrotc2w, "campos": campos, "near": near, "far": far,"focal": focal, "h": h, "w": w, "intrinsic": intrinsic,"gt_image":gt_image, "raydir":raydir})
-
-        decoded_features, ray_valid, weight, conf_coefficient = self.aggregator(sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, vsize, grid_vox_sz)
+        #from utils import format as fmt
+        #print (fmt.RED+'======')
+        #print ('sampled_color requires_grad==', sampled_color.requires_grad)
+        #print ('sampled_Rw2c requires_grad==', sampled_Rw2c.requires_grad)
+        #print ('sampled_dir requires_grad==', sampled_dir.requires_grad)
+        #print ('sampled_conf requires_grad==', sampled_conf.requires_grad)
+        #print ('sampled_embedding requires_grad==', sampled_embedding.requires_grad)
+        #print ('sampled_xyz_pers requires_grad==', sampled_xyz_pers.requires_grad)
+        #print ('sampled_xyz requires_grad==', sampled_xyz.requires_grad)
+        #print ('sample_pnt_mask requires_grad==', sample_pnt_mask.requires_grad)
+        #print ('sample_loc requires_grad==', sample_loc.requires_grad)
+        #print ('sample_loc_w requires_grad==', sample_loc_w.requires_grad)
+        #print ('sample_ray_dirs requires_grad==', sample_ray_dirs.requires_grad)
+        #print ('ray_mask_tensor requires_grad==', ray_mask_tensor.requires_grad)
+        #print ('======'+fmt.END)
+        decoded_features, ray_valid, weight, conf_coefficient = self.aggregator(sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, \
+            sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, vsize, grid_vox_sz)
+        #print (fmt.CYAN+'======')
+        #print ('decoded_features requires_grad==', decoded_features.requires_grad)
+        #print ('ray_valid requires_grad==', ray_valid.requires_grad)
+        #print ('======'+fmt.END)
         ray_dist = torch.cummax(sample_loc[..., 2], dim=-1)[0]
         ray_dist = torch.cat([ray_dist[..., 1:] - ray_dist[..., :-1], torch.full((ray_dist.shape[0], ray_dist.shape[1], 1), vsize[2], device=ray_dist.device)], dim=-1)
 
@@ -277,20 +298,11 @@ class NeuralPointsRayMarching(nn.Module):
         mask = mask.to(torch.float32)
         ray_dist = ray_dist * (1.0 - mask) + mask * vsize[2]
         ray_dist *= ray_valid.float()
-        # raydir: N x Rays x 3sampled_color
-        # raypos: N x Rays x Samples x 3
-        # ray_dist: N x Rays x Samples
-        # ray_valid: N x Rays x Samples
-        # ray_features: N x Rays x Samples x Features
-        # Output
-        # ray_color: N x Rays x 3
-        # point_color: N x Rays x Samples x 3
-        # opacity: N x Rays x Samples
-        # acc_transmission: N x Rays x Samples
-        # blend_weight: N x Rays x Samples x 1
-        # background_transmission: N x Rays x 1
-        # ray march
         output["queried_shading"] = torch.logical_not(torch.any(ray_valid, dim=-1, keepdims=True)).repeat(1, 1, 3).to(torch.float32)
+        #print (fmt.PURPLE+'======')
+        #print ('ray_dist requires_grad==', ray_dist.requires_grad)
+        #print ('decoded_features requires_grad==', decoded_features.requires_grad)
+        #print ('======'+fmt.END)
         if self.return_color:
             if "bg_ray" in kargs:
                 bg_color = None
@@ -304,6 +316,10 @@ class NeuralPointsRayMarching(nn.Module):
                 _,
             ) = ray_march(ray_dist, ray_valid, decoded_features, self.render_func, self.blend_func, bg_color)
             ray_color = self.tone_map(ray_color)
+            #print (fmt.GREEN+'======')
+            #print ('!!! ==== ', ray_color.requires_grad, '!!!!')
+            #print ('======'+fmt.END)
+
             output["coarse_raycolor"] = ray_color
             output["coarse_point_opacity"] = opacity
         else:

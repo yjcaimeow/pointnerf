@@ -101,6 +101,7 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
             # print("self.loss_total", self.ray_masked_coarse_color.grad)
             # print("self.loss_total", self.loss_total)
             if self.loss_total != 0:
+                print (self.loss_total.requires_grad)
                 self.loss_total.backward()
             else:
                 print(fmt.RED + "Loss == 0" +

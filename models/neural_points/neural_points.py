@@ -51,7 +51,7 @@ class NeuralPoints(nn.Module):
                             type=int,
                             default=64,
                             help='number of coarse samples')
-        
+
         parser.add_argument('--gpu_maxthr',
                             type=int,
                             default=1024,
@@ -396,7 +396,7 @@ class NeuralPoints(nn.Module):
         if self.eulers is not None and self.eulers.dim() > 1:
             self.eulers = nn.Parameter(torch.cat([self.eulers, add_eulers[None,...]], dim=1))
             self.eulers.requires_grad = False
-            
+
         if self.Rw2c is not None and self.Rw2c.dim() > 2:
             self.Rw2c = nn.Parameter(torch.cat([self.Rw2c, add_Rw2c[None,...]], dim=1))
             self.Rw2c.requires_grad = False
@@ -632,14 +632,18 @@ class NeuralPoints(nn.Module):
 
 
     def get_point_indices(self, inputs, cam_rot_tensor, cam_pos_tensor, pixel_idx_tensor, near_plane, far_plane, h, w, intrinsic, vox_query=False):
-
         point_xyz_pers_tensor = self.w2pers(self.xyz, cam_rot_tensor, cam_pos_tensor)
+        #point_xyz_pers_tensor = self.xyz.unsqueeze(0)
+#        np.savetxt('scannet_self.xyz.txt', self.xyz.squeeze().cpu().numpy())
+#        np.savetxt('scannet_point_xyz_pers_tensor.txt', point_xyz_pers_tensor.squeeze().cpu().numpy())
         actual_numpoints_tensor = torch.ones([point_xyz_pers_tensor.shape[0]], device=point_xyz_pers_tensor.device, dtype=torch.int32) * point_xyz_pers_tensor.shape[1]
         # print("pixel_idx_tensor", pixel_idx_tensor)
         # print("point_xyz_pers_tensor", point_xyz_pers_tensor.shape)
         # print("actual_numpoints_tensor", actual_numpoints_tensor.shape)
         # sample_pidx_tensor: B, R, SR, K
         ray_dirs_tensor = inputs["raydir"]
+#        np.savetxt('scannet_ray_dirs_tensor.txt', ray_dirs_tensor.squeeze().cpu().numpy())
+
         # print("ray_dirs_tensor", ray_dirs_tensor.shape, self.xyz.shape)
         sample_pidx_tensor, sample_loc_tensor, sample_loc_w_tensor, sample_ray_dirs_tensor, ray_mask_tensor, vsize, ranges = self.querier.query_points(pixel_idx_tensor, point_xyz_pers_tensor, self.xyz[None,...], actual_numpoints_tensor, h, w, intrinsic, near_plane, far_plane, ray_dirs_tensor, cam_pos_tensor, cam_rot_tensor)
 
@@ -776,7 +780,6 @@ class NeuralPoints(nn.Module):
 
 
     def forward(self, inputs):
-
         pixel_idx, camrotc2w, campos, near_plane, far_plane, h, w, intrinsic = inputs["pixel_idx"].to(torch.int32), inputs["camrotc2w"], inputs["campos"], inputs["near"], inputs["far"], inputs["h"], inputs["w"], inputs["intrinsic"]
         # 1, 294, 24, 32;   1, 294, 24;     1, 291, 2
 

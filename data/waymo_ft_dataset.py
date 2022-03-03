@@ -1,3 +1,4 @@
+from data.load_waymo import load_waymo_data
 from models.mvs.mvs_utils import read_pfm
 import os
 import numpy as np
@@ -22,8 +23,8 @@ from os.path import join
 import cv2
 # import torch.nn.functional as F
 from .data_utils import get_dtu_raydir
+from .data_utils import get_blender_raydir
 from plyfile import PlyData, PlyElement
-
 FLIP_Z = np.asarray([
     [1,0,0],
     [0,1,0],
@@ -85,15 +86,15 @@ def get_ray_directions(H, W, focal, center=None):
 
     return directions
 
-class ScannetFtDataset(BaseDataset):
+class WaymoFtDataset(BaseDataset):
 
-    def initialize(self, opt, img_wh=[800,800], downSample=1.0, max_len=-1, norm_w2c=None, norm_c2w=None):
+    def __init__(self, opt, img_wh=[1920,1280], downSample=0.1, max_len=-1, norm_w2c=None, norm_c2w=None):
         self.opt = opt
         self.data_dir = opt.data_root
         self.scan = opt.scan
         self.split = opt.split
 
-        self.img_wh = (int(opt.img_wh[0] * downSample), int(opt.img_wh[1] * downSample))
+        self.img_wh = (int(img_wh[0] * downSample), int(img_wh[1] * downSample))
         self.downSample = downSample
 
         self.scale_factor = 1.0 / 1.0
@@ -114,29 +115,81 @@ class ScannetFtDataset(BaseDataset):
             self.bg_color = [float(one) for one in self.opt.bg_color.split(",")]
 
         self.define_transforms()
+        #import pdb; pdb.set_trace()
+        FILENAME = '/home/yjcai/projects/mipnerf-pytorch/data/waymo/segment-10061305430875486848_1080_000_1100_000_with_camera_labels.tfrecord'
+        self.images, self.poses, self.hwf, self.intrinsic, self.all_id_list, self.test_id_list, self.train_id_list, \
+            self.points_xyz_all, self.camposes, self.centerdirs = load_waymo_data(FILENAME=FILENAME)
 
-        self.build_init_metas()
+        print("test_id_list",len(self.test_id_list))
+        print("train_id_list",len(self.train_id_list))
+        self.id_list = self.train_id_list if self.split=="train" else self.test_id_list
+        self.view_id_list=[]
 
         self.norm_w2c, self.norm_c2w = torch.eye(4, device="cuda", dtype=torch.float32), torch.eye(4, device="cuda", dtype=torch.float32)
-        # if opt.normview > 0:
-        #     _, _ , w2cs, c2ws = self.build_proj_mats(list=torch.load('../data/dtu_configs/pairs.th')[f'{self.scan}_test'])
-        #     norm_w2c, norm_c2w = self.normalize_cam(w2cs, c2ws)
-        # if opt.normview >= 2:
-        #     self.norm_w2c, self.norm_c2w = torch.as_tensor(norm_w2c, device="cuda", dtype=torch.float32), torch.as_tensor(norm_c2w, device="cuda", dtype=torch.float32)
-        #     norm_w2c, norm_c2w = None, None
-        # self.proj_mats, self.intrinsics, self.world2cams, self.cam2worlds = self.build_proj_mats()
-        self.intrinsic = np.loadtxt(os.path.join(self.data_dir, self.scan, "exported/intrinsic/intrinsic_color.txt")).astype(np.float32)[:3,:3]
-        self.depth_intrinsic = np.loadtxt(
-            os.path.join(self.data_dir, self.scan, "exported/intrinsic/intrinsic_depth.txt")).astype(np.float32)[:3, :3]
-        img = Image.open(self.image_paths[0])
-        ori_img_shape = list(self.transform(img).shape)  # (4, h, w)
-        self.intrinsic[0, :] *= (self.width / ori_img_shape[2])
-        self.intrinsic[1, :] *= (self.height / ori_img_shape[1])
-        # print(self.intrinsic)
         self.total = len(self.id_list)
         print("dataset total:", self.split, self.total)
 
+    def __getitem__(self, id, crop=False, full_img=False):
+        item = {}
+        img = self.images[id]
+        c2w = self.poses[id]
+        intrinsic = self.intrinsic
+        camrot = (c2w[0:3, 0:3])
+        campos = c2w[0:3, 3]
 
+        item["intrinsic"] = intrinsic
+        item["campos"] = campos
+        item["c2w"] = c2w
+        item["camrotc2w"] = camrot
+        item['lightpos'] = item["campos"]
+
+        dist = np.linalg.norm(campos)
+
+        middle = dist + 0.7
+        item['middle'] = torch.FloatTensor([middle]).view(1, 1)
+        item['far'] = torch.FloatTensor([self.near_far[1]]).view(1, 1)
+        item['near'] = torch.FloatTensor([self.near_far[0]]).view(1, 1)
+        item['h'] = self.height
+        item['w'] = self.width
+        item['id'] = id
+        if full_img:
+            item['images'] = img[None,...].clone()
+        # gt_image = np.transpose(img, (1, 2, 0))
+        subsamplesize = self.opt.random_sample_size
+        if self.opt.random_sample == "random":
+            px = np.random.randint(0,
+                                   self.width,
+                                   size=(subsamplesize,
+                                         subsamplesize)).astype(np.float32)
+            py = np.random.randint(self.height//2,
+                                   self.height,
+                                   size=(subsamplesize,
+                                         subsamplesize)).astype(np.float32)
+        else:
+            px, py = np.meshgrid(
+                        np.arange(0, self.width).astype(np.float32),
+                        np.arange(0, self.height).astype(np.float32))
+        pixelcoords = np.stack((px, py), axis=-1).astype(np.float32)  # H x W x 2
+        # raydir = get_cv_raydir(pixelcoords, self.height, self.width, focal, camrot)
+        item["pixel_idx"] = pixelcoords
+        raydir = get_blender_raydir(pixelcoords, self.height, self.width, item["intrinsic"][0][0], camrot.numpy(), self.opt.dir_norm > 0)
+        #raydir = get_dtu_raydir(pixelcoords, item["intrinsic"].numpy(), camrot.numpy(), self.opt.dir_norm > 0)
+        raydir = np.reshape(raydir, (-1, 3))
+        item['raydir'] = torch.from_numpy(raydir).float()
+        gt_image = img[py.astype(np.int32), px.astype(np.int32),:]
+        gt_image = np.reshape(gt_image, (-1, 3))
+        item['gt_image'] = gt_image
+        if self.bg_color:
+            if self.bg_color == 'random':
+                val = np.random.rand()
+                if val > 0.5:
+                    item['bg_color'] = torch.FloatTensor([1, 1, 1])
+                else:
+                    item['bg_color'] = torch.FloatTensor([0, 0, 0])
+            else:
+                item['bg_color'] = torch.FloatTensor(self.bg_color)
+
+        return item
 
     @staticmethod
     def modify_commandline_options(parser, is_train):
@@ -292,25 +345,16 @@ class ScannetFtDataset(BaseDataset):
 
 
     def build_init_metas(self):
-        colordir = os.path.join(self.data_dir, self.scan, "exported/color")
-        self.image_paths = [f for f in os.listdir(colordir) if os.path.isfile(os.path.join(colordir, f))]
-        self.image_paths = [os.path.join(self.data_dir, self.scan, "exported/color/{}.jpg".format(i)) for i in range(len(self.image_paths))]
-        self.all_id_list = self.filter_valid_id(list(range(len(self.image_paths))))
-        if len(self.all_id_list) > 2900: # neural point-based graphics' configuration
-            self.test_id_list = self.all_id_list[::100]
-            self.train_id_list = [self.all_id_list[i] for i in range(len(self.all_id_list)) if (((i % 100) > 19) and ((i % 100) < 81 or (i//100+1)*100>=len(self.all_id_list)))]
-        else:  # nsvf configuration
-            step=5
-            self.train_id_list = self.all_id_list[::step]
-            self.test_id_list = [self.all_id_list[i] for i in range(len(self.all_id_list)) if (i % step) !=0] if self.opt.test_num_step != 1 else self.all_id_list
+        from data.load_waymo import load_waymo_data
+        self.images, self.poses, self.hwf, self.K, self.all_id_list, self.world_xyz_all = load_waymo_data(FILENAME='/home/yjcai/projects/mipnerf-pytorch/data/waymo/segment-10061305430875486848_1080_000_1100_000_with_camera_labels.tfrecord')
+        step=10
+        self.test_id_list = self.all_id_list[::step]
+        self.train_id_list = [self.all_id_list[i] for i in range(len(self.all_id_list)) if (i % step) !=0] if self.opt.test_num_step != 1 else self.all_id_list
 
-        print("all_id_list",len(self.all_id_list))
-        print("test_id_list",len(self.test_id_list), self.test_id_list)
+        print("test_id_list",len(self.test_id_list))
         print("train_id_list",len(self.train_id_list))
-        self.train_id_list = self.remove_blurry(self.train_id_list)
         self.id_list = self.train_id_list if self.split=="train" else self.test_id_list
         self.view_id_list=[]
-
 
     def filter_valid_id(self, id_list):
         empty_lst=[]
@@ -416,7 +460,6 @@ class ScannetFtDataset(BaseDataset):
         depth_im[depth_im < 0.3] = 0
         return depth_im
 
-
     def load_init_depth_points(self, device="cuda", vox_res=0):
         py, px = torch.meshgrid(
             torch.arange(0, 480, dtype=torch.float32, device=device),
@@ -439,8 +482,10 @@ class ScannetFtDataset(BaseDataset):
             cam_xyz = torch.cat([cam_xyz, torch.ones_like(cam_xyz[...,:1])], dim=-1)
             world_xyz = (cam_xyz.view(-1,4) @ c2w.t())[...,:3]
             # print("cam_xyz", torch.min(cam_xyz, dim=-2)[0], torch.max(cam_xyz, dim=-2)[0])
+            # print("world_xyz", world_xyz.shape) #, torch.min(world_xyz.view(-1,3), dim=-2)[0], torch.max(world_xyz.view(-1,3), dim=-2)[0])
             if vox_res > 0:
                 world_xyz = mvs_utils.construct_vox_points_xyz(world_xyz, vox_res)
+                # print("world_xyz", world_xyz.shape)
             world_xyz_all = torch.cat([world_xyz_all, world_xyz], dim=0)
         if self.opt.ranges[0] > -99.0:
             ranges = torch.as_tensor(self.opt.ranges, device=world_xyz_all.device, dtype=torch.float32)
@@ -538,107 +583,6 @@ class ScannetFtDataset(BaseDataset):
                     sample[key] = value.unsqueeze(0)
 
         return sample
-
-
-
-    def __getitem__(self, id, crop=False, full_img=False):
-
-        item = {}
-        vid = self.id_list[id]
-        image_path = os.path.join(self.data_dir, self.scan, "exported/color/{}.jpg".format(vid))
-        # print("vid",vid)
-        img = Image.open(image_path)
-        img = img.resize(self.img_wh, Image.LANCZOS)
-        img = self.transform(img)  # (4, h, w)
-        c2w = np.loadtxt(os.path.join(self.data_dir, self.scan, "exported/pose", "{}.txt".format(vid))).astype(np.float32)
-        # w2c = np.linalg.inv(c2w)
-        intrinsic = self.intrinsic
-
-        # print("gt_image", gt_image.shape)
-        width, height = img.shape[2], img.shape[1]
-        camrot = (c2w[0:3, 0:3])
-        campos = c2w[0:3, 3]
-        # print("camrot", camrot, campos)
-
-        item["intrinsic"] = intrinsic
-        # item["intrinsic"] = sample['intrinsics'][0, ...]
-        item["campos"] = torch.from_numpy(campos).float()
-        item["c2w"] = torch.from_numpy(c2w).float()
-        item["camrotc2w"] = torch.from_numpy(camrot).float() # @ FLIP_Z
-        item['lightpos'] = item["campos"]
-
-        dist = np.linalg.norm(campos)
-
-        middle = dist + 0.7
-        item['middle'] = torch.FloatTensor([middle]).view(1, 1)
-        item['far'] = torch.FloatTensor([self.near_far[1]]).view(1, 1)
-        item['near'] = torch.FloatTensor([self.near_far[0]]).view(1, 1)
-        item['h'] = height
-        item['w'] = width
-        item['id'] = id
-        item['vid'] = vid
-        # bounding box
-        margin = self.opt.edge_filter
-        if full_img:
-            item['images'] = img[None,...].clone()
-        gt_image = np.transpose(img, (1, 2, 0))
-        subsamplesize = self.opt.random_sample_size
-        if self.opt.random_sample == "patch":
-            indx = np.random.randint(margin, width - margin - subsamplesize + 1)
-            indy = np.random.randint(margin, height - margin - subsamplesize + 1)
-            px, py = np.meshgrid(
-                np.arange(indx, indx + subsamplesize).astype(np.float32),
-                np.arange(indy, indy + subsamplesize).astype(np.float32))
-        elif self.opt.random_sample == "random":
-            px = np.random.randint(margin,
-                                   width-margin,
-                                   size=(subsamplesize,
-                                         subsamplesize)).astype(np.float32)
-            py = np.random.randint(margin,
-                                   height-margin,
-                                   size=(subsamplesize,
-                                         subsamplesize)).astype(np.float32)
-        elif self.opt.random_sample == "random2":
-            px = np.random.uniform(margin,
-                                   width - margin - 1e-5,
-                                   size=(subsamplesize,
-                                         subsamplesize)).astype(np.float32)
-            py = np.random.uniform(margin,
-                                   height - margin - 1e-5,
-                                   size=(subsamplesize,
-                                         subsamplesize)).astype(np.float32)
-        elif self.opt.random_sample == "proportional_random":
-            raise Exception("no gt_mask, no proportional_random !!!")
-        else:
-            px, py = np.meshgrid(
-                np.arange(margin, width - margin).astype(np.float32),
-                np.arange(margin, height- margin).astype(np.float32))
-        pixelcoords = np.stack((px, py), axis=-1).astype(np.float32)  # H x W x 2
-        # raydir = get_cv_raydir(pixelcoords, self.height, self.width, focal, camrot)
-        item["pixel_idx"] = pixelcoords
-        # print("pixelcoords", pixelcoords.reshape(-1,2)[:10,:])
-        raydir = get_dtu_raydir(pixelcoords, item["intrinsic"], camrot, self.opt.dir_norm > 0)
-        raydir = np.reshape(raydir, (-1, 3))
-        item['raydir'] = torch.from_numpy(raydir).float()
-        gt_image = gt_image[py.astype(np.int32), px.astype(np.int32)]
-        # gt_mask = gt_mask[py.astype(np.int32), px.astype(np.int32), :]
-        gt_image = np.reshape(gt_image, (-1, 3))
-        item['gt_image'] = gt_image
-
-        if self.bg_color:
-            if self.bg_color == 'random':
-                val = np.random.rand()
-                if val > 0.5:
-                    item['bg_color'] = torch.FloatTensor([1, 1, 1])
-                else:
-                    item['bg_color'] = torch.FloatTensor([0, 0, 0])
-            else:
-                item['bg_color'] = torch.FloatTensor(self.bg_color)
-
-        return item
-
-
-
     def get_item(self, idx, crop=False, full_img=False):
         item = self.__getitem__(idx, crop=crop, full_img=full_img)
 
@@ -683,39 +627,9 @@ class ScannetFtDataset(BaseDataset):
         item['near'] = torch.FloatTensor([near]).view(1, 1)
         item['h'] = self.height
         item['w'] = self.width
-
-
-        subsamplesize = self.opt.random_sample_size
-        if self.opt.random_sample == "patch":
-            indx = np.random.randint(0, width - subsamplesize + 1)
-            indy = np.random.randint(0, height - subsamplesize + 1)
-            px, py = np.meshgrid(
-                np.arange(indx, indx + subsamplesize).astype(np.float32),
-                np.arange(indy, indy + subsamplesize).astype(np.float32))
-        elif self.opt.random_sample == "random":
-            px = np.random.randint(0,
-                                   width,
-                                   size=(subsamplesize,
-                                         subsamplesize)).astype(np.float32)
-            py = np.random.randint(0,
-                                   height,
-                                   size=(subsamplesize,
-                                         subsamplesize)).astype(np.float32)
-        elif self.opt.random_sample == "random2":
-            px = np.random.uniform(0,
-                                   width - 1e-5,
-                                   size=(subsamplesize,
-                                         subsamplesize)).astype(np.float32)
-            py = np.random.uniform(0,
-                                   height - 1e-5,
-                                   size=(subsamplesize,
-                                         subsamplesize)).astype(np.float32)
-        elif self.opt.random_sample == "proportional_random":
-            px, py = self.proportional_select(gt_mask)
-        else:
-            px, py = np.meshgrid(
-                np.arange(width).astype(np.float32),
-                np.arange(height).astype(np.float32))
+        px, py = np.meshgrid(
+                np.arange(0, self.width).astype(np.float32),
+                np.arange(0, self.height).astype(np.float32))
 
         pixelcoords = np.stack((px, py), axis=-1).astype(np.float32)  # H x W x 2
         # raydir = get_cv_raydir(pixelcoords, self.height, self.width, focal, camrot)
@@ -736,7 +650,7 @@ class ScannetFtDataset(BaseDataset):
 
         for key, value in item.items():
             if not torch.is_tensor(value):
-                value = torch.as_tensor(value)
+                value = torch.as_tensor(value).cuda()
             item[key] = value.unsqueeze(0)
 
         return item

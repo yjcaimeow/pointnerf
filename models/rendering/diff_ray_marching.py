@@ -383,6 +383,7 @@ def near_far_linear_ray_generation(campos,
     end_point_ts = near + end_point_ts
 
     middle_point_ts = (end_point_ts[:, :, :-1] + end_point_ts[:, :, 1:]) / 2
+    #import pdb; pdb.set_trace()
     raypos = campos[:, None, None, :] + raydir[:, :, None, :] * middle_point_ts[:, :, :, None]
     valid = torch.ones_like(middle_point_ts,
                             dtype=middle_point_ts.dtype,

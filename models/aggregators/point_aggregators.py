@@ -738,6 +738,7 @@ class PointAggregator(torch.nn.Module):
         :param vsize:
         :return:
         '''
+        #import pdb;pdb.set_trace()
         ray_valid = torch.any(sample_pnt_mask, dim=-1).view(-1)
         total_len = len(ray_valid)
         in_shape = sample_loc_w.shape
