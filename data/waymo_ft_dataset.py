@@ -1,4 +1,3 @@
-from data.load_waymo import load_waymo_data
 from models.mvs.mvs_utils import read_pfm
 import os
 import numpy as np
@@ -88,14 +87,15 @@ def get_ray_directions(H, W, focal, center=None):
 
 class WaymoFtDataset(BaseDataset):
 
-    def __init__(self, opt, img_wh=[1920,1280], downSample=0.1, max_len=-1, norm_w2c=None, norm_c2w=None):
+    def __init__(self, opt, img_wh=[1920,1280], scale_factor=20, max_len=-1, norm_w2c=None, norm_c2w=None):
         self.opt = opt
         self.data_dir = opt.data_root
         self.scan = opt.scan
         self.split = opt.split
-
-        self.img_wh = (int(img_wh[0] * downSample), int(img_wh[1] * downSample))
-        self.downSample = downSample
+        self.scale_factor = scale_factor
+        self.img_wh = (int(img_wh[0] // scale_factor), int(img_wh[1] // scale_factor))
+        print ('self.img_wh', self.img_wh)
+        #self.img_wh = (int(img_wh[0] * downSample), int(img_wh[1] * downSample))
 
         self.scale_factor = 1.0 / 1.0
         self.max_len = max_len
@@ -115,14 +115,28 @@ class WaymoFtDataset(BaseDataset):
             self.bg_color = [float(one) for one in self.opt.bg_color.split(",")]
 
         self.define_transforms()
-        #import pdb; pdb.set_trace()
-        FILENAME = '/home/yjcai/projects/mipnerf-pytorch/data/waymo/segment-10061305430875486848_1080_000_1100_000_with_camera_labels.tfrecord'
+#        data_file_name = '/home/xschen/yjcai/pointnerf/data/waymo/waymo_f30_1006_wovox.npz'
+        data_file_name = '/home/xschen/yjcai/pointnerf/data/waymo/waymo_f30_1006_wovox_scale20.npz'
+        #data_file_name = 'data/waymo/waymo_f30_1006_wovox_scale20_img256.npz'
+#        data_file_name = 'data/waymo/waymo_fall_1006_wovox.npz'
+        #data_file_name = opt.filename
+        #print ('data file name ======', opt.filename)
+        #FILENAME = '/home/xschen/yjcai/segment-10061305430875486848_1080_000_1100_000_with_camera_labels.tfrecord'
+        #from data.load_waymo import load_waymo_data
+        #self.images, self.poses, self.hwf, self.intrinsic, self.all_id_list, self.test_id_list, self.train_id_list, \
+        #    self.points_xyz_all, self.camposes, self.centerdirs = load_waymo_data(FILENAME=FILENAME)
+        #np.savez(data_file_name, images=self.images, poses = self.poses, hwf=self.hwf, intrinsic=self.intrinsic, all_id_list=self.all_id_list, test_id_list=self.test_id_list, train_id_list=self.train_id_list, oints_xyz_all=self.points_xyz_all, camposes=self.camposes, centerdirs=self.centerdirs)
+        #exit()
+        waymo_data = np.load(data_file_name)
         self.images, self.poses, self.hwf, self.intrinsic, self.all_id_list, self.test_id_list, self.train_id_list, \
-            self.points_xyz_all, self.camposes, self.centerdirs = load_waymo_data(FILENAME=FILENAME)
+            self.points_xyz_all, self.camposes, self.centerdirs = torch.from_numpy(waymo_data['images']), torch.from_numpy(waymo_data['poses']), \
+            torch.from_numpy(waymo_data['hwf']), torch.from_numpy(waymo_data['intrinsic']), torch.from_numpy(waymo_data['all_id_list']), \
+            torch.from_numpy(waymo_data['test_id_list']), torch.from_numpy(waymo_data['train_id_list']), torch.from_numpy(waymo_data['oints_xyz_all']), \
+            torch.from_numpy(waymo_data['camposes']), torch.from_numpy(waymo_data['centerdirs'])
 
         print("test_id_list",len(self.test_id_list))
         print("train_id_list",len(self.train_id_list))
-        self.id_list = self.train_id_list if self.split=="train" else self.test_id_list
+        self.id_list = self.train_id_list if self.split=="train" else self.all_id_list
         self.view_id_list=[]
 
         self.norm_w2c, self.norm_c2w = torch.eye(4, device="cuda", dtype=torch.float32), torch.eye(4, device="cuda", dtype=torch.float32)
@@ -161,7 +175,7 @@ class WaymoFtDataset(BaseDataset):
                                    self.width,
                                    size=(subsamplesize,
                                          subsamplesize)).astype(np.float32)
-            py = np.random.randint(self.height//2,
+            py = np.random.randint(0, #self.height//2,
                                    self.height,
                                    size=(subsamplesize,
                                          subsamplesize)).astype(np.float32)
@@ -179,6 +193,7 @@ class WaymoFtDataset(BaseDataset):
         gt_image = img[py.astype(np.int32), px.astype(np.int32),:]
         gt_image = np.reshape(gt_image, (-1, 3))
         item['gt_image'] = gt_image
+        #item['gt_image'] = img
         if self.bg_color:
             if self.bg_color == 'random':
                 val = np.random.rand()
@@ -345,8 +360,6 @@ class WaymoFtDataset(BaseDataset):
 
 
     def build_init_metas(self):
-        from data.load_waymo import load_waymo_data
-        self.images, self.poses, self.hwf, self.K, self.all_id_list, self.world_xyz_all = load_waymo_data(FILENAME='/home/yjcai/projects/mipnerf-pytorch/data/waymo/segment-10061305430875486848_1080_000_1100_000_with_camera_labels.tfrecord')
         step=10
         self.test_id_list = self.all_id_list[::step]
         self.train_id_list = [self.all_id_list[i] for i in range(len(self.all_id_list)) if (i % step) !=0] if self.opt.test_num_step != 1 else self.all_id_list
