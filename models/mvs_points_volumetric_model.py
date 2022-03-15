@@ -73,6 +73,7 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
         mvs_lr = opt.mvs_lr if opt.mvs_lr is not None else opt.lr
 
         if len(mvs_params) > 0:
+            #print ('======', 2//0)
             self.mvs_optimizer = torch.optim.Adam(mvs_params,
                                               lr=mvs_lr,
                                               betas=(0.9, 0.999))
@@ -83,9 +84,11 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
                                           lr=opt.lr,
                                           betas=(0.9, 0.999))
             self.optimizers.append(self.optimizer)
-
+            print("net_params", [(par[0], par[1].shape, par[1].requires_grad)  for par in param_lst if not par[0].startswith("module.neural_points")])
+        
         if len(neural_params) > 0:
-            self.neural_point_optimizer = torch.optim.Adam(neural_params,
+            #print ('======', 1//0)
+            self.neural_point_optimizer = torch.optim.Adam(neural_params + [self.bg_color],
                                           lr=opt.plr, #/ 5.0,
                                           betas=(0.9, 0.999))
             self.optimizers.append(self.neural_point_optimizer)
@@ -101,7 +104,7 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
             # print("self.loss_total", self.ray_masked_coarse_color.grad)
             # print("self.loss_total", self.loss_total)
             if self.loss_total != 0:
-                print (self.loss_total.requires_grad)
+                #print (self.loss_total.requires_grad)
                 self.loss_total.backward()
             else:
                 print(fmt.RED + "Loss == 0" +
@@ -166,12 +169,13 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
         self.top_ray_miss_loss = torch.zeros([self.num_probe + 1], dtype=torch.float32, device=self.device)
         self.top_ray_miss_ids = torch.arange(self.num_probe + 1, dtype=torch.int32, device=self.device)
 
-    def set_points(self, points_xyz, points_embedding, points_color=None, points_dir=None, points_conf=None, Rw2c=None, eulers=None, editing=False):
+    def set_points(self, points_xyz, points_embedding, points_color=None, points_dir=None, points_conf=None, Rw2c=None, eulers=None, editing=False, bg_color=None):
         if not editing:
             self.neural_points.set_points(points_xyz, points_embedding, points_color=points_color, points_dir=points_dir, points_conf=points_conf, parameter=self.opt.feedforward == 0, Rw2c=Rw2c, eulers=eulers)
         else:
             self.neural_points.editing_set_points(points_xyz, points_embedding, points_color=points_color, points_dir=points_dir, points_conf=points_conf, parameter=self.opt.feedforward == 0, Rw2c=Rw2c, eulers=eulers)
         if self.opt.feedforward == 0 and self.opt.is_train:
+            self.bg_color = bg_color
             self.setup_optimizer(self.opt)
 
 

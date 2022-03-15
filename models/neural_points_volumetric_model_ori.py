@@ -4,6 +4,7 @@ from .aggregators.point_aggregators import PointAggregator
 import os
 from utils import format as fmt
 
+
 class NeuralPointsVolumetricModel(BaseRenderingModel):
 
     @staticmethod
@@ -82,53 +83,50 @@ class NeuralPointsVolumetricModel(BaseRenderingModel):
             opt.visual_items.append('fine_raycolor')
 
     def run_network_models(self):
-        res = self.net_ray_marching(**self.input)
-        #res =self.fill_invalid(mid, self.input)
-        #for key in res.keys():
-        #    print (key, res[key].shape)
-        #exit()
-        return res
+        mid = self.net_ray_marching(**self.input)
+        return self.fill_invalid(mid, self.input)
         #return self.fill_invalid(self.net_ray_marching(**self.input), self.input)
 
-    # def fill_invalid(self, output, input):
-    #     # ray_mask:             torch.Size([1, 1024])
-    #     # coarse_is_background: torch.Size([1, 336, 1])  -> 1, 1024, 1
-    #     # coarse_raycolor:      torch.Size([1, 336, 3])  -> 1, 1024, 3
-    #     # coarse_point_opacity: torch.Size([1, 336, 24]) -> 1, 1024, 24
-    #     ray_mask = output["ray_mask"]
-    #     B, OR = ray_mask.shape
-    #     ray_inds = torch.nonzero(ray_mask) # 336, 2
-    #     coarse_is_background_tensor = torch.ones([B, OR, 1], dtype=output["coarse_is_background"].dtype, device=output["coarse_is_background"].device)
-    #     # print("coarse_is_background", output["coarse_is_background"].shape)
-    #     # print("coarse_is_background_tensor", coarse_is_background_tensor.shape)
-    #     # print("ray_inds", ray_inds.shape, ray_mask.shape)
-    #     coarse_is_background_tensor[ray_inds[..., 0], ray_inds[..., 1], :] = output["coarse_is_background"]
-    #     output["coarse_is_background"] = coarse_is_background_tensor
-    #     output['coarse_mask'] = 1 - coarse_is_background_tensor
-    #     print ("bg_ray" in self.input)
-    #     print (input["bg_color"])
-    #     exit()
-    #     if "bg_ray" in self.input:
-    #         coarse_raycolor_tensor = coarse_is_background_tensor * self.input["bg_ray"]
-    #         coarse_raycolor_tensor[ray_inds[..., 0], ray_inds[..., 1], :] += output["coarse_raycolor"][0]
-    #     else:
-    #         coarse_raycolor_tensor = self.tonemap_func(
-    #             torch.ones([B, OR, 3], dtype=output["coarse_raycolor"].dtype, device=output["coarse_raycolor"].device) * input["bg_color"][None, ...])
-    #         coarse_raycolor_tensor[ray_inds[..., 0], ray_inds[..., 1], :] = output["coarse_raycolor"]
-    #     output["coarse_raycolor"] = coarse_raycolor_tensor
+    def fill_invalid(self, output, input):
+        # ray_mask:             torch.Size([1, 1024])
+        # coarse_is_background: torch.Size([1, 336, 1])  -> 1, 1024, 1
+        # coarse_raycolor:      torch.Size([1, 336, 3])  -> 1, 1024, 3
+        # coarse_point_opacity: torch.Size([1, 336, 24]) -> 1, 1024, 24
+        #import pdb; pdb.set_trace()
+        ray_mask = output["ray_mask"]
+        B, OR = ray_mask.shape
+        ray_inds = torch.nonzero(ray_mask) # 336, 2
+        coarse_is_background_tensor = torch.ones([B, OR, 1], dtype=output["coarse_is_background"].dtype, device=output["coarse_is_background"].device)
+        # print("coarse_is_background", output["coarse_is_background"].shape)
+        # print("coarse_is_background_tensor", coarse_is_background_tensor.shape)
+        # print("ray_inds", ray_inds.shape, ray_mask.shape)
+        coarse_is_background_tensor[ray_inds[..., 0], ray_inds[..., 1], :] = output["coarse_is_background"]
+        output["coarse_is_background"] = coarse_is_background_tensor
+        output['coarse_mask'] = 1 - coarse_is_background_tensor
+        #print (fmt.RED+'========')
+        #print (input['bg_color'], input["bg_color"].requires_grad)
+        #print ('========'+fmt.END)
+        if "bg_ray" in self.input:
+            coarse_raycolor_tensor = coarse_is_background_tensor * self.input["bg_ray"]
+            coarse_raycolor_tensor[ray_inds[..., 0], ray_inds[..., 1], :] += output["coarse_raycolor"][0]
+        else:
+            coarse_raycolor_tensor = self.tonemap_func(
+                torch.ones([B, OR, 3], dtype=output["coarse_raycolor"].dtype, device=output["coarse_raycolor"].device) * input["bg_color"][None, ...])
+            coarse_raycolor_tensor[ray_inds[..., 0], ray_inds[..., 1], :] = output["coarse_raycolor"]
+        output["coarse_raycolor"] = coarse_raycolor_tensor
 
-    #     coarse_point_opacity_tensor = torch.zeros([B, OR, output["coarse_point_opacity"].shape[2]], dtype=output["coarse_point_opacity"].dtype, device=output["coarse_point_opacity"].device)
-    #     coarse_point_opacity_tensor[ray_inds[..., 0], ray_inds[..., 1], :] = output["coarse_point_opacity"]
-    #     output["coarse_point_opacity"] = coarse_point_opacity_tensor
+        coarse_point_opacity_tensor = torch.zeros([B, OR, output["coarse_point_opacity"].shape[2]], dtype=output["coarse_point_opacity"].dtype, device=output["coarse_point_opacity"].device)
+        coarse_point_opacity_tensor[ray_inds[..., 0], ray_inds[..., 1], :] = output["coarse_point_opacity"]
+        output["coarse_point_opacity"] = coarse_point_opacity_tensor
 
-    #     queried_shading_tensor = torch.ones([B, OR, output["queried_shading"].shape[2]], dtype=output["queried_shading"].dtype, device=output["queried_shading"].device)
-    #     queried_shading_tensor[ray_inds[..., 0], ray_inds[..., 1], :] = output["queried_shading"]
-    #     output["queried_shading"] = queried_shading_tensor
+        queried_shading_tensor = torch.ones([B, OR, output["queried_shading"].shape[2]], dtype=output["queried_shading"].dtype, device=output["queried_shading"].device)
+        queried_shading_tensor[ray_inds[..., 0], ray_inds[..., 1], :] = output["queried_shading"]
+        output["queried_shading"] = queried_shading_tensor
 
-    #     if self.opt.prob == 1 and "ray_max_shading_opacity" in output:
-    #         # print("ray_inds", ray_inds.shape, torch.sum(output["ray_mask"]))
-    #         output = self.unmask(ray_inds, output, ["ray_max_sample_loc_w", "ray_max_shading_opacity", "shading_avg_color", "shading_avg_dir", "shading_avg_conf", "shading_avg_embedding", "ray_max_far_dist"], B, OR)
-    #     return output
+        if self.opt.prob == 1 and "ray_max_shading_opacity" in output:
+            # print("ray_inds", ray_inds.shape, torch.sum(output["ray_mask"]))
+            output = self.unmask(ray_inds, output, ["ray_max_sample_loc_w", "ray_max_shading_opacity", "shading_avg_color", "shading_avg_dir", "shading_avg_conf", "shading_avg_embedding", "ray_max_far_dist"], B, OR)
+        return output
 
     def unmask(self, ray_inds, output, names, B, OR):
         for name in names:
@@ -221,7 +219,7 @@ class NeuralPointsVolumetricModel(BaseRenderingModel):
 
     def optimize_parameters(self, backward=True, total_steps=0):
         self.forward()
-        #self.update_rank_ray_miss(total_steps)
+        self.update_rank_ray_miss(total_steps)
         self.backward(total_steps)
 
     def update_rank_ray_miss(self, total_steps):
@@ -255,8 +253,7 @@ class NeuralPointsRayMarching(nn.Module):
         self.return_color = True
         self.opt = opt
         self.neural_points = neural_points
-        from models.neural_render.neural_renderer import NeuralRenderer
-        self.neural_render_2d = NeuralRenderer(input_dim=3)
+
 
     def forward(self,
                 campos,
@@ -383,52 +380,5 @@ class NeuralPointsRayMarching(nn.Module):
                     "shading_avg_conf": torch.zeros([0, 0, 1], device="cuda"),
                     "shading_avg_embedding": torch.zeros([0, 0, sampled_embedding.shape[-1]], device="cuda"),
                 })
-        # print ('debug=============1111111111')
-        # for key in output.keys():
-        #     print (key, output[key].shape)
-        res = self.fill_invalid(output, bg_color)
-        #print ('debug=============2222222222')
-        #for key in res.keys():
-        #    print (key, res[key].shape)
-        #exit()
-        img_h, img_w = h.item(), w.item()
-        res['final_coarse_raycolor'] = self.neural_render_2d(res['coarse_raycolor'].reshape(1, img_h, img_w, 3)).reshape(1, img_h*img_w, 3)
-        # print (res['coarse_raycolor'].shape, '=======DEBUG')
-        return res
 
-    def fill_invalid(self, output, bg_color):
-        #print (fmt.RED+'========')
-        #print (bg_color, bg_color.requires_grad)
-        #print ('========'+fmt.END)
-        # ray_mask:             torch.Size([1, 1024])
-        # coarse_is_background: torch.Size([1, 336, 1])  -> 1, 1024, 1
-        # coarse_raycolor:      torch.Size([1, 336, 3])  -> 1, 1024, 3
-        # coarse_point_opacity: torch.Size([1, 336, 24]) -> 1, 1024, 24
-        ray_mask = output["ray_mask"]
-        B, OR = ray_mask.shape
-        ray_inds = torch.nonzero(ray_mask) # 336, 2
-        coarse_is_background_tensor = torch.ones([B, OR, 1], dtype=output["coarse_is_background"].dtype, device=output["coarse_is_background"].device)
-        # print("coarse_is_background", output["coarse_is_background"].shape)
-        # print("coarse_is_background_tensor", coarse_is_background_tensor.shape)
-        # print("ray_inds", ray_inds.shape, ray_mask.shape)
-        coarse_is_background_tensor[ray_inds[..., 0], ray_inds[..., 1], :] = output["coarse_is_background"]
-        output["coarse_is_background"] = coarse_is_background_tensor
-        output['coarse_mask'] = 1 - coarse_is_background_tensor
-        # coarse_raycolor_tensor = self.tonemap_func(
-        coarse_raycolor_tensor = self.tone_map(
-                torch.ones([B, OR, 3], dtype=output["coarse_raycolor"].dtype, device=output["coarse_raycolor"].device) * bg_color[None, ...])
-        coarse_raycolor_tensor[ray_inds[..., 0], ray_inds[..., 1], :] = output["coarse_raycolor"]
-        output["coarse_raycolor"] = coarse_raycolor_tensor
-
-        coarse_point_opacity_tensor = torch.zeros([B, OR, output["coarse_point_opacity"].shape[2]], dtype=output["coarse_point_opacity"].dtype, device=output["coarse_point_opacity"].device)
-        coarse_point_opacity_tensor[ray_inds[..., 0], ray_inds[..., 1], :] = output["coarse_point_opacity"]
-        output["coarse_point_opacity"] = coarse_point_opacity_tensor
-
-        queried_shading_tensor = torch.ones([B, OR, output["queried_shading"].shape[2]], dtype=output["queried_shading"].dtype, device=output["queried_shading"].device)
-        queried_shading_tensor[ray_inds[..., 0], ray_inds[..., 1], :] = output["queried_shading"]
-        output["queried_shading"] = queried_shading_tensor
-
-        # if self.opt.prob == 1 and "ray_max_shading_opacity" in output:
-        #     # print("ray_inds", ray_inds.shape, torch.sum(output["ray_mask"]))
-        #     output = self.unmask(ray_inds, output, ["ray_max_sample_loc_w", "ray_max_shading_opacity", "shading_avg_color", "shading_avg_dir", "shading_avg_conf", "shading_avg_embedding", "ray_max_far_dist"], B, OR)
         return output

@@ -545,8 +545,8 @@ class lighting_fast_querier():
 
     def build_occ_vox(self, point_xyz_w_tensor, actual_numpoints_tensor, B, N, P, max_o, scaled_vdim_np, kMaxThreadsPerBlock, gridSize, scaled_vsize_gpu, scaled_vdim_gpu, kernel_size_gpu, grid_size_vol, d_coord_shift):
         device = point_xyz_w_tensor.device
-        print("world_xyz", point_xyz_w_tensor.shape, torch.min(point_xyz_w_tensor.view(-1,3), dim=-2)[0], torch.max(point_xyz_w_tensor.view(-1,3), dim=-2)[0])
-        print (scaled_vdim_np,'!!!!', kMaxThreadsPerBlock, gridSize)
+        #print("world_xyz", point_xyz_w_tensor.shape, torch.min(point_xyz_w_tensor.view(-1,3), dim=-2)[0], torch.max(point_xyz_w_tensor.view(-1,3), dim=-2)[0])
+        #print (scaled_vdim_np,'!!!!', kMaxThreadsPerBlock, gridSize)
         coor_occ_tensor = torch.zeros([B, scaled_vdim_np[0], scaled_vdim_np[1], scaled_vdim_np[2]], dtype=torch.int32, device=device)
         occ_2_pnts_tensor = torch.full([B, max_o, P], -1, dtype=torch.int32, device=device)
         occ_2_coor_tensor = torch.full([B, max_o, 3], -1, dtype=torch.int32, device=device)

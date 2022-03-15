@@ -1,5 +1,4 @@
 #!/bin/bash
-
 nrCheckpoint="../checkpoints"
 nrDataRoot="../data_src"
 name='scene241'
@@ -14,7 +13,7 @@ feat_grad=1
 conf_grad=1
 dir_grad=1
 color_grad=1
-vox_res=900
+vox_res=3000
 normview=0
 prune_thresh=-1
 prune_iter=-1
@@ -27,7 +26,7 @@ depth_vid="0"
 trgt_id=0
 manual_depth_view=1
 init_view_num=3
-pre_d_est="${nrCheckpoint}/MVSNet/model_000014.ckpt"
+pre_d_est="checkpoints/MVSNet/model_000014.ckpt"
 manual_std_depth=0.0
 depth_conf_thresh=0.8
 geo_cnsst_num=0
@@ -50,7 +49,8 @@ depth_limit_scale=0
 vscale=" 2 2 2 "
 kernel_size=" 3 3 3 "
 query_size=" 3 3 3 "
-vsize=" 0.025 0.025 0.025 " #" 0.005 0.005 0.005 "
+#vsize=" 0.08 0.08 0.08 " #" 0.005 0.005 0.005 "
+vsize=" 0.020 0.020 0.020 " #" 0.005 0.005 0.005 "
 #vsize=" 0.008 0.008 0.008 " #" 0.005 0.005 0.005 "
 wcoord_query=1
 z_depth_dim=400
@@ -103,7 +103,8 @@ out_channels=4
 num_pos_freqs=10
 num_viewdir_freqs=4 #6
 
-random_sample='random'
+random_sample='full_image'
+#random_sample='random'
 random_sample_size=56 # 32 * 32 = 1024
 
 batch_size=1
@@ -114,9 +115,11 @@ lr_policy="iter_exponential_decay"
 lr_decay_iters=1000000
 lr_decay_exp=0.1
 
-gpu_ids='1'
+gpu_ids='0'
 
-checkpoints_dir="${nrCheckpoint}/waymo/"
+checkpoints_dir="./checkpoints/nndebug"
+#checkpoints_dir=$2
+#checkpoints_dir="${nrCheckpoint}/waymo_allp_4000_res8/"
 resume_dir="${nrCheckpoint}/init/dtu_dgt_d012_img0123_conf_agg2_32_dirclr20"
 
 save_iter_freq=10000
@@ -129,9 +132,9 @@ n_threads=0
 
 train_and_test=0 #1
 test_num=10
-test_freq=10000 #  #100 #1200 #1200 #30184 #30184 #50000
+test_freq=1000 #  #100 #1200 #1200 #30184 #30184 #50000
 print_freq=40
-test_num_step=50
+test_num_step=1
 
 prob_freq=10000 #10001
 prob_num_step=100
@@ -143,27 +146,30 @@ prob_mul=0.4
 
 zero_epsilon=1e-3
 
-visual_items='coarse_raycolor gt_image '
+visual_items='ray_masked_coarse_raycolor gt_image_ray_masked final_coarse_raycolor'
+#visual_items='coarse_raycolor gt_image ray_masked_coarse_raycolor gt_image_ray_masked'
 zero_one_loss_items='conf_coefficient' #regularize background to be either 0 or 1
 zero_one_loss_weights=" 0.0001 "
 sparse_loss_weight=0
 
-color_loss_weights=" 1.0 0.0 0.0 "
-color_loss_items='ray_masked_coarse_raycolor ray_miss_coarse_raycolor coarse_raycolor'
-test_color_loss_items='coarse_raycolor ray_miss_coarse_raycolor ray_masked_coarse_raycolor'
+color_loss_weights=" 1.0 1.0 "
+color_loss_items='ray_masked_coarse_raycolor final_coarse_raycolor'
+test_color_loss_items='coarse_raycolor ray_miss_coarse_raycolor ray_masked_coarse_raycolor final_coarse_raycolor'
 
-
+#color_loss_weights=" 1.0 0.0 0.0 1.0 "
+#color_loss_items='ray_masked_coarse_raycolor ray_miss_coarse_raycolor coarse_raycolor final_coarse_raycolor'
+#test_color_loss_items='coarse_raycolor ray_miss_coarse_raycolor ray_masked_coarse_raycolor final_coarse_raycolor'
 
 bg_color="white" #"0.0,0.0,0.0,1.0,1.0,1.0"
 split="train"
 
-cd run
+#cd run
 
 #for i in $(seq 1 $prob_freq $maximum_step)
 
 #do
 
-python3 train_waymo.py \
+CUDA_VISIBLE_DEVICES=0 python3 train_waymo.py \
         --name $name \
         --scan $scan \
         --data_root $data_root \
