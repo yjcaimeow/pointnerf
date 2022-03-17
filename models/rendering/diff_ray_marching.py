@@ -522,7 +522,7 @@ def ray_march(ray_dist,
     # acc_transmission: N x Rays x Samples
     # blend_weight: N x Rays x Samples x 1
     # background_transmission: N x Rays x 1
-
+    #import pdb; pdb.set_trace()
 
     point_color = render_func(ray_features)
 
@@ -543,7 +543,7 @@ def ray_march(ray_dist,
     ray_color = torch.sum(point_color * blend_weight, dim=-2, keepdim=False)
     if bg_color is not None:
         ray_color += bg_color.to(opacity.device).float().view(
-            background_transmission.shape[0], 1, 3) * background_transmission
+            background_transmission.shape[0], 1, 128) * background_transmission
     # #
     # if point_color.shape[1] > 0 and (torch.any(torch.isinf(point_color)) or torch.any(torch.isnan(point_color))):
     #     print("ray_color", torch.min(ray_color),torch.max(ray_color))

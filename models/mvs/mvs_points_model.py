@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 import os
 from torch.utils.data import DataLoader
 import imageio

@@ -152,8 +152,8 @@ zero_one_loss_items='conf_coefficient' #regularize background to be either 0 or 
 zero_one_loss_weights=" 0.0001 "
 sparse_loss_weight=0
 
-color_loss_weights=" 1.0 "
-color_loss_items='final_coarse_raycolor '
+color_loss_weights=" 1.0 1.0 "
+color_loss_items='ray_masked_coarse_raycolor final_coarse_raycolor'
 test_color_loss_items='coarse_raycolor ray_miss_coarse_raycolor ray_masked_coarse_raycolor final_coarse_raycolor'
 
 #color_loss_weights=" 1.0 0.0 0.0 1.0 "
@@ -250,22 +250,13 @@ CUDA_VISIBLE_DEVICES=0 python3 train_waymo.py \
         --color_loss_items $color_loss_items \
         --feedforward $feedforward \
         --trgt_id $trgt_id \
-        --depth_vid $depth_vid \
-        --ref_vid $ref_vid \
-        --manual_depth_view $manual_depth_view \
-        --pre_d_est $pre_d_est \
-        --depth_occ $depth_occ \
-        --manual_std_depth $manual_std_depth \
         --visual_items $visual_items \
-        --appr_feature_str0 $appr_feature_str0 \
         --init_view_num $init_view_num \
         --feat_grad $feat_grad \
         --conf_grad $conf_grad \
         --dir_grad $dir_grad \
         --color_grad $color_grad \
-        --depth_conf_thresh $depth_conf_thresh \
         --bgmodel $bgmodel \
-        --vox_res $vox_res \
         --act_type $act_type \
         --geo_cnsst_num $geo_cnsst_num \
         --point_conf_mode $point_conf_mode \
@@ -284,7 +275,6 @@ CUDA_VISIBLE_DEVICES=0 python3 train_waymo.py \
         --ranges $ranges \
         --z_depth_dim $z_depth_dim \
         --max_o $max_o \
-        --prob_thresh $prob_thresh \
         --prob_mul $prob_mul \
         --prob_kernel_size $prob_kernel_size \
         --prob_tiers $prob_tiers \

@@ -25,12 +25,12 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
         parser.add_argument(
             '--mode',
             type=int,
-            default=0,
+            default=2,
             help='0 for both mvs and pointnerf, 1 for only mvs, 2 for only pointnerf')
         parser.add_argument(
             '--add_shading_dist',
             type=int,
-            default=0,
+            default=2,
             help='0 for both mvs and pointnerf, 1 for only mvs, 2 for only pointnerf')
 
 
@@ -70,7 +70,8 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
         self.net_params = net_params
         self.neural_params = neural_params
         self.mvs_params = mvs_params
-        mvs_lr = opt.mvs_lr if opt.mvs_lr is not None else opt.lr
+        mvs_lr = opt.lr
+        #mvs_lr = opt.mvs_lr if opt.mvs_lr is not None else opt.lr
 
         if len(mvs_params) > 0:
             #print ('======', 2//0)

@@ -299,11 +299,11 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
         rootdir = os.path.join(opt.checkpoints_dir, 'resulst', str(total_steps))
         os.makedirs(rootdir, exist_ok=True)
         filepath = os.path.join(rootdir, str(i).zfill(4)+'_pred.png')
-        save_image(np.asarray(pred.squeeze().cpu()), filepath)
+        save_image(np.asarray(pred.squeeze().cpu().reshape(height, width, 3)), filepath)
 
         if total_steps==opt.test_freq:
             filepath = os.path.join(rootdir, str(i).zfill(4)+'_gt.png')
-            save_image(np.asarray(gt.squeeze().cpu()), filepath)
+            save_image(np.asarray(gt.squeeze().cpu().reshape(height, width,3)), filepath)
         
         #print("num.{} in {} cases: time used: {} s".format(i, total_num // opt.test_num_step, time.time() - stime), " at ", visualizer.image_dir)
     test_psnr_value = (sum(test_psnr)/len(test_psnr))
@@ -498,18 +498,20 @@ def main():
     best_PSNR=0.0
     best_iter=0
     with torch.no_grad():
-        print(opt.checkpoints_dir + opt.name + "/*_net_ray_marching.pth")
-        opt.mode = 1
-        opt.load_points = 0
-        model = create_model(opt)
-        model.setup(opt)
-        model.eval()
+        #print(opt.checkpoints_dir + opt.name + "/*_net_ray_marching.pth")
+        #opt.mode = 1
+        #opt.load_points = 0
+        #model = create_model(opt)
+        #model.setup(opt)
+        #model.eval()
         #if opt.ranges[0] > -99.0:
         #    ranges = torch.as_tensor(opt.ranges, dtype=torch.float32).cuda()
         #    mask = torch.prod(
         #        torch.logical_and(points_xyz_all[..., :3] >= ranges[None, :3], points_xyz_all[..., :3] <= ranges[None, 3:]),
         #        dim=-1) > 0
         #    points_xyz_all = points_xyz_all[mask]
+        opt.mode = 2
+        opt.vox_res=3000
         if opt.vox_res > 0:
             print (fmt.RED+'========')
             print (points_xyz_all.shape, 'points_xyz_all shape', torch.min(points_xyz_all, dim=-2), torch.max(points_xyz_all, dim=-2))
@@ -539,7 +541,7 @@ def main():
         points_dir_all = torch.randn((1, len(points_xyz_all), 3))
         points_conf_all = torch.ones((1, len(points_xyz_all), 1))
 
-        bg_color = nn.Parameter(torch.rand((1, 3))).cuda()
+        bg_color = nn.Parameter(torch.rand((1, 128))).cuda()
         bg_color.requires_grad_()
 
         opt.resume_iter = opt.resume_iter if opt.resume_iter != "latest" else get_latest_epoch(opt.resume_dir)
@@ -661,7 +663,7 @@ def main():
             #    model.opt.is_train = 1
             #    del test_dataset
 
-            if total_steps == 1 or (total_steps % opt.test_freq == 0 and total_steps < (opt.maximum_step - 1) and total_steps > 0):
+            if total_steps == 1000 or (total_steps % opt.test_freq == 0 and total_steps < (opt.maximum_step - 1) and total_steps > 0):
                 torch.cuda.empty_cache()
                 #test_dataset = create_test_dataset(test_opt, opt, total_steps, test_num_step=opt.test_num_step)
                 model.opt.is_train = 0

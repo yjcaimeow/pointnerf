@@ -256,7 +256,11 @@ class NeuralPointsRayMarching(nn.Module):
         self.opt = opt
         self.neural_points = neural_points
         from models.neural_render.neural_renderer import NeuralRenderer
-        self.neural_render_2d = NeuralRenderer(input_dim=3)
+        self.neural_render_2d = NeuralRenderer(input_dim=128)
+
+#        from neural_render.stylegan2_pytorch import StyleVectorizer, Generator
+#        self.S = StyleVectorizer(emb=256, depth=8)
+#        self.G = Generator(image_size=256, latent_dim=256, network_capacity=16)
 
     def forward(self,
                 campos,
@@ -351,38 +355,6 @@ class NeuralPointsRayMarching(nn.Module):
             output["conf_coefficient"] = conf_coefficient
 
 
-        if self.opt.prob == 1 and output["coarse_point_opacity"].shape[1] > 0 :
-            B, OR, _, _ = sample_pnt_mask.shape
-            if weight is not None:
-                output["ray_max_shading_opacity"], opacity_ind = torch.max(output["coarse_point_opacity"], dim=-1, keepdim=True)
-                opacity_ind=opacity_ind[..., None] # 1, 1024, 1, 1
-
-                output["ray_max_sample_loc_w"] = torch.gather(sample_loc_w, 2, opacity_ind.expand(-1, -1, -1, sample_loc_w.shape[-1])).squeeze(2) # 1, 1024, 24, 3 -> 1, 1024, 3
-                weight = torch.gather(weight*conf_coefficient, 2, opacity_ind.expand(-1, -1, -1, weight.shape[-1])).squeeze(2)[..., None] # 1, 1024, 8
-                opacity_ind = opacity_ind[...,None]
-
-                sampled_xyz_max_opacity = torch.gather(sampled_xyz, 2, opacity_ind.expand(-1, -1, -1, sampled_xyz.shape[-2], sampled_xyz.shape[-1])).squeeze(2) # 1, 1024, 8, 3
-                output["ray_max_far_dist"] = torch.min(torch.norm(sampled_xyz_max_opacity - output["ray_max_sample_loc_w"][..., None,:], dim=-1), axis=-1, keepdim=True)[0]
-
-                sampled_color = torch.gather(sampled_color, 2, opacity_ind.expand(-1, -1, -1, sampled_color.shape[-2], sampled_color.shape[-1])).squeeze(2) if sampled_color is not None else None # 1, 1024, 8, 3
-                sampled_dir = torch.gather(sampled_dir, 2, opacity_ind.expand(-1, -1, -1, sampled_dir.shape[-2], sampled_dir.shape[-1])).squeeze(2)  if sampled_dir is not None else None # 1, 1024, 8, 3
-                sampled_conf = torch.gather(sampled_conf, 2, opacity_ind.expand(-1, -1, -1, sampled_conf.shape[-2], sampled_conf.shape[-1])).squeeze(2)  if sampled_conf is not None else None # 1, 1024, 8, 1
-                sampled_embedding = torch.gather(sampled_embedding, 2, opacity_ind.expand(-1, -1, -1, sampled_embedding.shape[-2], sampled_embedding.shape[-1])).squeeze(2) # 1, 1024, 8, 1
-
-                output["shading_avg_color"] = torch.sum(sampled_color * weight, dim=-2)  if sampled_color is not None else None
-                output["shading_avg_dir"] = torch.sum(sampled_dir * weight, dim=-2) if sampled_dir is not None else None
-                output["shading_avg_conf"] = torch.sum(sampled_conf * weight, dim=-2) if sampled_conf is not None else None
-                output["shading_avg_embedding"] = torch.sum(sampled_embedding * weight, dim=-2)
-            else:
-                output.update({
-                    "ray_max_shading_opacity": torch.zeros([0, 0, 1, 1], device="cuda"),
-                    "ray_max_sample_loc_w": torch.zeros([0, 0, 3], device="cuda"),
-                    "ray_max_far_dist": torch.zeros([0, 0, 1], device="cuda"),
-                    "shading_avg_color": torch.zeros([0, 0, 3], device="cuda"),
-                    "shading_avg_dir": torch.zeros([0, 0, 3], device="cuda"),
-                    "shading_avg_conf": torch.zeros([0, 0, 1], device="cuda"),
-                    "shading_avg_embedding": torch.zeros([0, 0, sampled_embedding.shape[-1]], device="cuda"),
-                })
         # print ('debug=============1111111111')
         # for key in output.keys():
         #     print (key, output[key].shape)
@@ -392,7 +364,7 @@ class NeuralPointsRayMarching(nn.Module):
         #    print (key, res[key].shape)
         #exit()
         img_h, img_w = h.item(), w.item()
-        res['final_coarse_raycolor'] = self.neural_render_2d(res['coarse_raycolor'].reshape(1, img_h, img_w, 3)).reshape(1, img_h*img_w, 3)
+        res['final_coarse_raycolor'] = self.neural_render_2d(res['coarse_raycolor'].reshape(1, img_h, img_w, 128)).reshape(1, img_h*img_w, 3)
         # print (res['coarse_raycolor'].shape, '=======DEBUG')
         return res
 
@@ -416,7 +388,7 @@ class NeuralPointsRayMarching(nn.Module):
         output['coarse_mask'] = 1 - coarse_is_background_tensor
         # coarse_raycolor_tensor = self.tonemap_func(
         coarse_raycolor_tensor = self.tone_map(
-                torch.ones([B, OR, 3], dtype=output["coarse_raycolor"].dtype, device=output["coarse_raycolor"].device) * bg_color[None, ...])
+                torch.ones([B, OR, 128], dtype=output["coarse_raycolor"].dtype, device=output["coarse_raycolor"].device) * bg_color[None, ...])
         coarse_raycolor_tensor[ray_inds[..., 0], ray_inds[..., 1], :] = output["coarse_raycolor"]
         output["coarse_raycolor"] = coarse_raycolor_tensor
 
