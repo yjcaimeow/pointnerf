@@ -27,6 +27,12 @@ from tqdm import tqdm
 # from pcdet.ops.pointnet2.pointnet2_stack import pointnet2_utils as pointnet2_stack_utils
 #import gc
 
+def noise(n, latent_dim, device):
+    return torch.randn(n, latent_dim).cuda(device)
+
+def get_latents_fn(n, layers, latent_dim, device):
+    return [(noise(n, latent_dim, device), layers)]
+
 def mse2psnr(x): return -10.* torch.log(x)/np.log(10.)
 
 def save_image(img_array, filepath):
@@ -550,6 +556,12 @@ def main():
 
         bg_color = nn.Parameter(torch.rand((1, 128))).cuda()
         bg_color.requires_grad_()
+        
+        z = None
+        if opt.neural_render=='style':
+            batch_size = opt.frames_length-((opt.frames_length-1)//10 + 1)
+            z = get_latents_fn(batch_size, 8, opt.z_dim, device='cuda')[0][0]
+            z.requires_grad_()
 
         opt.resume_iter = opt.resume_iter if opt.resume_iter != "latest" else get_latest_epoch(opt.resume_dir)
         opt.is_train = True
@@ -559,7 +571,7 @@ def main():
         if points_xyz_all is not None:
             model.set_points(points_xyz_all.cuda(), points_embedding_all.cuda(), points_color=points_color_all.cuda(),
                              points_dir=points_dir_all.cuda(), points_conf=points_conf_all.cuda(),
-                             Rw2c=None, bg_color=bg_color)
+                             Rw2c=None, bg_color=bg_color, stylecode=z)
             epoch_count = 1
             total_steps = 0
             del points_xyz_all, points_embedding_all, points_color_all, points_dir_all, points_conf_all
@@ -608,7 +620,7 @@ def main():
     #        model.train()
     #        exit()
 
-    if total_steps == 0 and (len(train_dataset.id_list) > 30 or len(train_dataset.view_id_list)  > 30):
+    if total_steps == 0 and (len(train_dataset.id_list) > 30):
         other_states = {
             'epoch_count': 0,
             'total_steps': total_steps,
@@ -622,8 +634,8 @@ def main():
         epoch_start_time = time.time()
         for i, data in enumerate(data_loader):
             test_psnr, train_psnr = test(total_steps, model, train_dataset, Visualizer(test_opt), test_opt, test_bg_info, test_steps=total_steps, lpips=True, bg_color=bg_color)
-
             total_steps += 1
+            data['style_code'] = z[data['id']]
             data['bg_color'] = bg_color
             model.set_input(data)
             model.optimize_parameters(total_steps=total_steps)

@@ -51,6 +51,10 @@ class BaseOptions:
 
 
         #================================ model ================================#
+        parser.add_argument('--neural_render',
+                            default="cnn",
+                            type=str,
+                            help='cnn | style | condition')
         parser.add_argument('--bgmodel',
                             default="No",
                             type=str,
@@ -63,6 +67,18 @@ class BaseOptions:
             help='name of model, determine which network model to use')
 
         #================================ running ================================#
+        parser.add_argument('--network_capacity',
+                            type=int,
+                            default=16,
+                            help='latent_dim')
+        parser.add_argument('--z_dim',
+                            type=int,
+                            default=256,
+                            help='latent_dim')
+        parser.add_argument('--frames_length',
+                            type=int,
+                            default=30,
+                            help='frames length')
         parser.add_argument('--batch_size',
                             type=int,
                             default=1,

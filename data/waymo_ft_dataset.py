@@ -87,7 +87,7 @@ def get_ray_directions(H, W, focal, center=None):
 
 class WaymoFtDataset(BaseDataset):
 
-    def __init__(self, opt, img_wh=[1920,1280], scale_factor=20, max_len=-1, norm_w2c=None, norm_c2w=None):
+    def __init__(self, opt, img_wh=[1920,1280], scale_factor=10, max_len=-1, norm_w2c=None, norm_c2w=None):
         self.opt = opt
         self.data_dir = opt.data_root
         self.scan = opt.scan
@@ -95,9 +95,7 @@ class WaymoFtDataset(BaseDataset):
         self.scale_factor = scale_factor
         self.img_wh = (int(img_wh[0] // scale_factor), int(img_wh[1] // scale_factor))
         print ('self.img_wh', self.img_wh)
-        #self.img_wh = (int(img_wh[0] * downSample), int(img_wh[1] * downSample))
 
-        self.scale_factor = 1.0 / 1.0
         self.max_len = max_len
         self.near_far = [opt.near_plane, opt.far_plane]
         self.blender2opencv = np.array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
@@ -115,33 +113,29 @@ class WaymoFtDataset(BaseDataset):
             self.bg_color = [float(one) for one in self.opt.bg_color.split(",")]
 
         self.define_transforms()
-#        data_file_name = '/home/xschen/yjcai/pointnerf/data/waymo/waymo_f30_1006_wovox.npz'
-        data_file_name = '/home/xschen/yjcai/pointnerf/data/waymo/waymo_f30_1006_wovox_scale20.npz'
-        #data_file_name = 'data/waymo/waymo_f30_1006_wovox_scale20_img256.npz'
-#        data_file_name = 'data/waymo/waymo_fall_1006_wovox.npz'
-        #data_file_name = opt.filename
-        #print ('data file name ======', opt.filename)
-        #FILENAME = '/home/xschen/yjcai/segment-10061305430875486848_1080_000_1100_000_with_camera_labels.tfrecord'
-        #from data.load_waymo import load_waymo_data
-        #self.images, self.poses, self.hwf, self.intrinsic, self.all_id_list, self.test_id_list, self.train_id_list, \
-        #    self.points_xyz_all, self.camposes, self.centerdirs = load_waymo_data(FILENAME=FILENAME)
-        #np.savez(data_file_name, images=self.images, poses = self.poses, hwf=self.hwf, intrinsic=self.intrinsic, all_id_list=self.all_id_list, test_id_list=self.test_id_list, train_id_list=self.train_id_list, oints_xyz_all=self.points_xyz_all, camposes=self.camposes, centerdirs=self.centerdirs)
-        #exit()
-        waymo_data = np.load(data_file_name)
+        data_file_name = '/home/xschen/yjcai/pointnerf/data/waymo/waymo_f30_1006_wovox_res256-512.npz'
+        FILENAME = '/home/xschen/yjcai/segment-10061305430875486848_1080_000_1100_000_with_camera_labels.tfrecord'
+        from data.load_waymo import load_waymo_data
         self.images, self.poses, self.hwf, self.intrinsic, self.all_id_list, self.test_id_list, self.train_id_list, \
-            self.points_xyz_all, self.camposes, self.centerdirs = torch.from_numpy(waymo_data['images']), torch.from_numpy(waymo_data['poses']), \
-            torch.from_numpy(waymo_data['hwf']), torch.from_numpy(waymo_data['intrinsic']), torch.from_numpy(waymo_data['all_id_list']), \
-            torch.from_numpy(waymo_data['test_id_list']), torch.from_numpy(waymo_data['train_id_list']), torch.from_numpy(waymo_data['oints_xyz_all']), \
-            torch.from_numpy(waymo_data['camposes']), torch.from_numpy(waymo_data['centerdirs'])
-
-        print("test_id_list",len(self.test_id_list))
-        print("train_id_list",len(self.train_id_list))
+            self.points_xyz_all, self.camposes, self.centerdirs = load_waymo_data(FILENAME=FILENAME)
+        np.savez(data_file_name, images=self.images, poses = self.poses, hwf=self.hwf, intrinsic=self.intrinsic, all_id_list=self.all_id_list, test_id_list=self.test_id_list, train_id_list=self.train_id_list, oints_xyz_all=self.points_xyz_all, camposes=self.camposes, centerdirs=self.centerdirs)
+        exit()
+        waymo_data = np.load(data_file_name)
+        self.images, self.poses, self.hwf, self.intrinsic, self.points_xyz_all, self.camposes, self.centerdirs = \
+                torch.from_numpy(waymo_data['images']), torch.from_numpy(waymo_data['poses']), torch.from_numpy(waymo_data['hwf']), \
+                torch.from_numpy(waymo_data['intrinsic']), torch.from_numpy(waymo_data['oints_xyz_all']), \
+                torch.from_numpy(waymo_data['camposes']), torch.from_numpy(waymo_data['centerdirs'])
+        self.all_id_list = list(range(self.opt.frames_length))
+        self.train_id_list = [self.all_id_list[i] for i in self.all_id_list if i%10!=0]
         self.id_list = self.train_id_list if self.split=="train" else self.all_id_list
-        self.view_id_list=[]
 
+        self.images = self.images[self.id_list]
+        self.poses = self.poses[self.id_list]
+        self.camposes = self.camposes[self.id_list]
+        self.centerdirs = self.centerdirs[self.id_list]
         self.norm_w2c, self.norm_c2w = torch.eye(4, device="cuda", dtype=torch.float32), torch.eye(4, device="cuda", dtype=torch.float32)
         self.total = len(self.id_list)
-        print("dataset total:", self.split, self.total)
+        print("dataset total: including (images, poses, camposes, centerdirs) \n", self.split, self.images.shape, self.poses.shape, self.camposes.shape, self.centerdirs.shape)
 
     def __getitem__(self, id, crop=False, full_img=False):
         item = {}
@@ -508,9 +502,7 @@ class WaymoFtDataset(BaseDataset):
 
 
     def __len__(self):
-        if self.split == 'train':
-            return len(self.id_list) if self.max_len <= 0 else self.max_len
-        return len(self.id_list) if self.max_len <= 0 else self.max_len
+        return len(self.id_list)
 
 
     def name(self):

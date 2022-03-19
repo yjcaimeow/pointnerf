@@ -174,9 +174,9 @@ pose_nerf2camera = np.array([
     ])
 pose_camera2nerf = np.linalg.inv(pose_nerf2camera).astype(np.float32)
 
-def load_waymo_data(FILENAME, frames_length=11,  half_res=True, step=10, \
+def load_waymo_data(FILENAME, frames_length=30,  half_res=True, step=10, \
                     load_point=True, start_frame=0, \
-                    split='test', scale_factor=10, args=None, device = None, vox_res=100, width=1920, height=1280):
+                    split='test', scale_factor=5, args=None, device = None, vox_res=100, width=1920, height=1280):
     dataset = tf.data.TFRecordDataset(FILENAME, compression_type='')
     all_imgs, all_poses, all_depths, all_mask, all_points = [], [], [], [], []
     camposes=[]
@@ -247,13 +247,8 @@ def load_waymo_data(FILENAME, frames_length=11,  half_res=True, step=10, \
             point_at_world_frame = pose_vehicle2world[:3,:3] @ point_at_vehicle_frame.T + pose_vehicle2world[:3, 3][:, None]
             point_at_world_frame = point_at_world_frame.T
 
-            if vox_res > 0:
-                # print("world_xyz", point_at_world_frame.shape, torch.min(point_at_world_frame.view(-1,3), dim=-2)[0], torch.max(point_at_world_frame.view(-1,3), dim=-2)[0])
-                # np.savetxt('original.txt', point_at_world_frame.numpy())
-                point_at_world_frame = mvs_utils.construct_vox_points_xyz(torch.from_numpy(point_at_world_frame), vox_res)
-                #print("world_xyz", point_at_world_frame.shape, torch.min(point_at_world_frame.view(-1,3), dim=-2)[0], torch.max(point_at_world_frame.view(-1,3), dim=-2)[0])
-                # np.savetxt('after.txt', point_at_world_frame.numpy())
-                # exit()
+            #if vox_res > 0:
+                #point_at_world_frame = mvs_utils.construct_vox_points_xyz(torch.from_numpy(point_at_world_frame), vox_res)
             all_points.append(point_at_world_frame)
         pose_camera2world = pose_vehicle2world @ pose_camera2vehicle
         c2w = pose_camera2world
@@ -291,13 +286,13 @@ def load_waymo_data(FILENAME, frames_length=11,  half_res=True, step=10, \
     test_id_list = all_id_list[::step]
     train_id_list = [all_id_list[i] for i in range(len(all_id_list)) if (i % step) !=0]
     if half_res:
-        H = H//scale_factor
-        W = W//scale_factor
+        H = int(H//scale_factor)
+        W = int(W//scale_factor)
         focal = focal/scale_factor
         K = K/scale_factor
         K[2][2] = 1
         ### for target img size
-        img_H, img_W = H*1, W*1
+        img_H, img_W = H*2, W*2
         imgs_half_res = np.zeros((imgs.shape[0], img_H, img_W, 3))
 
         for i, img in enumerate(imgs):

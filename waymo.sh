@@ -7,7 +7,7 @@ resume_iter=best #latest
 
 data_root="${nrDataRoot}/scannet/scans/"
 scan="scene0241_01"
-
+frames_length=30
 load_points=2
 feat_grad=1
 conf_grad=1
@@ -49,7 +49,7 @@ depth_limit_scale=0
 vscale=" 2 2 2 "
 kernel_size=" 3 3 3 "
 query_size=" 3 3 3 "
-vsize=" 0.2 0.2 0.2 " #" 0.005 0.005 0.005 "
+vsize=" 0.04 0.04 0.04 " #" 0.005 0.005 0.005 "
 #vsize=" 0.020 0.020 0.020 " #" 0.005 0.005 0.005 "
 #vsize=" 0.008 0.008 0.008 " #" 0.005 0.005 0.005 "
 wcoord_query=1
@@ -115,9 +115,9 @@ lr_policy="iter_exponential_decay"
 lr_decay_iters=1000000
 lr_decay_exp=0.1
 
-gpu_ids='0'
+gpu_ids='1'
 
-checkpoints_dir="./checkpoints/nndebug"
+checkpoints_dir="./checkpoints/nndebug_vsize0.3"
 #checkpoints_dir=$2
 #checkpoints_dir="${nrCheckpoint}/waymo_allp_4000_res8/"
 resume_dir="${nrCheckpoint}/init/dtu_dgt_d012_img0123_conf_agg2_32_dirclr20"
@@ -169,7 +169,8 @@ split="train"
 
 #do
 
-CUDA_VISIBLE_DEVICES=0 python3 train_waymo.py \
+#CUDA_VISIBLE_DEVICES=1 python3 train_waymo.py \
+python3 train_waymo_style.py \
         --name $name \
         --scan $scan \
         --data_root $data_root \
@@ -289,4 +290,5 @@ CUDA_VISIBLE_DEVICES=0 python3 train_waymo.py \
         --prob_kernel_size $prob_kernel_size \
         --prob_tiers $prob_tiers \
         --query_size $query_size \
+	--frames_length $frames_length \
         --debug

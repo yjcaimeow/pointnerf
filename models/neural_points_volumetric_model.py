@@ -255,13 +255,20 @@ class NeuralPointsRayMarching(nn.Module):
         self.return_color = True
         self.opt = opt
         self.neural_points = neural_points
-        from models.neural_render.neural_renderer import NeuralRenderer
-        self.neural_render_2d = NeuralRenderer(input_dim=128)
-
-#        from neural_render.stylegan2_pytorch import StyleVectorizer, Generator
-#        self.S = StyleVectorizer(emb=256, depth=8)
-#        self.G = Generator(image_size=256, latent_dim=256, network_capacity=16)
-
+        if self.opt.neural_render=='cnn':
+            from models.neural_render.neural_renderer import NeuralRenderer
+            self.neural_render_2d = NeuralRenderer(input_dim=128)
+        elif self.opt.neural_render=='style':
+            from neural_render.stylegan2_pytorch import StyleVectorizer, Generator
+            self.S = StyleVectorizer(emb=self.opt.z_dim, depth=8)
+            self.G = Generator(image_size=512, latent_dim=self.opt.z_dim, network_capacity=self.opt.network_capacity)
+    
+    def latent_to_w(iself, style_vectorizer, latent_descr):
+        return [(style_vectorizer(latent_descr.cuda()), 8)]
+    
+    def styles_def_to_tensor(self, styles_def):
+        return torch.cat([t[:, None, :].expand(-1, n, -1) for t, n in styles_def], dim=1)
+    
     def forward(self,
                 campos,
                 raydir,
@@ -274,32 +281,15 @@ class NeuralPointsRayMarching(nn.Module):
                 focal=None,
                 h=None,
                 w=None,
+                style_code=None,
                 intrinsic=None,
                 **kargs):
         output = {}
         # B, channel, 292, 24, 32;      B, 3, 294, 24, 32;     B, 294, 24;     B, 291, 2
         sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, ray_mask_tensor, vsize, grid_vox_sz = self.neural_points({"pixel_idx": pixel_idx, "camrotc2w": camrotc2w, "campos": campos, "near": near, "far": far,"focal": focal, "h": h, "w": w, "intrinsic": intrinsic,"gt_image":gt_image, "raydir":raydir})
-        #from utils import format as fmt
-        #print (fmt.RED+'======')
-        #print ('sampled_color requires_grad==', sampled_color.requires_grad)
-        #print ('sampled_Rw2c requires_grad==', sampled_Rw2c.requires_grad)
-        #print ('sampled_dir requires_grad==', sampled_dir.requires_grad)
-        #print ('sampled_conf requires_grad==', sampled_conf.requires_grad)
-        #print ('sampled_embedding requires_grad==', sampled_embedding.requires_grad)
-        #print ('sampled_xyz_pers requires_grad==', sampled_xyz_pers.requires_grad)
-        #print ('sampled_xyz requires_grad==', sampled_xyz.requires_grad)
-        #print ('sample_pnt_mask requires_grad==', sample_pnt_mask.requires_grad)
-        #print ('sample_loc requires_grad==', sample_loc.requires_grad)
-        #print ('sample_loc_w requires_grad==', sample_loc_w.requires_grad)
-        #print ('sample_ray_dirs requires_grad==', sample_ray_dirs.requires_grad)
-        #print ('ray_mask_tensor requires_grad==', ray_mask_tensor.requires_grad)
-        #print ('======'+fmt.END)
+        
         decoded_features, ray_valid, weight, conf_coefficient = self.aggregator(sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, \
             sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, vsize, grid_vox_sz)
-        #print (fmt.CYAN+'======')
-        #print ('decoded_features requires_grad==', decoded_features.requires_grad)
-        #print ('ray_valid requires_grad==', ray_valid.requires_grad)
-        #print ('======'+fmt.END)
         ray_dist = torch.cummax(sample_loc[..., 2], dim=-1)[0]
         ray_dist = torch.cat([ray_dist[..., 1:] - ray_dist[..., :-1], torch.full((ray_dist.shape[0], ray_dist.shape[1], 1), vsize[2], device=ray_dist.device)], dim=-1)
 
@@ -310,10 +300,6 @@ class NeuralPointsRayMarching(nn.Module):
         ray_dist = ray_dist * (1.0 - mask) + mask * vsize[2]
         ray_dist *= ray_valid.float()
         output["queried_shading"] = torch.logical_not(torch.any(ray_valid, dim=-1, keepdims=True)).repeat(1, 1, 3).to(torch.float32)
-        #print (fmt.PURPLE+'======')
-        #print ('ray_dist requires_grad==', ray_dist.requires_grad)
-        #print ('decoded_features requires_grad==', decoded_features.requires_grad)
-        #print ('======'+fmt.END)
         if self.return_color:
             if "bg_ray" in kargs:
                 bg_color = None
@@ -327,9 +313,6 @@ class NeuralPointsRayMarching(nn.Module):
                 _,
             ) = ray_march(ray_dist, ray_valid, decoded_features, self.render_func, self.blend_func, bg_color)
             ray_color = self.tone_map(ray_color)
-            #print (fmt.GREEN+'======')
-            #print ('!!! ==== ', ray_color.requires_grad, '!!!!')
-            #print ('======'+fmt.END)
 
             output["coarse_raycolor"] = ray_color
             output["coarse_point_opacity"] = opacity
@@ -355,17 +338,15 @@ class NeuralPointsRayMarching(nn.Module):
             output["conf_coefficient"] = conf_coefficient
 
 
-        # print ('debug=============1111111111')
-        # for key in output.keys():
-        #     print (key, output[key].shape)
         res = self.fill_invalid(output, bg_color)
-        #print ('debug=============2222222222')
-        #for key in res.keys():
-        #    print (key, res[key].shape)
-        #exit()
         img_h, img_w = h.item(), w.item()
-        res['final_coarse_raycolor'] = self.neural_render_2d(res['coarse_raycolor'].reshape(1, img_h, img_w, 128)).reshape(1, img_h*img_w, 3)
-        # print (res['coarse_raycolor'].shape, '=======DEBUG')
+        if self.opt.neural_render=='cnn':
+            res['final_coarse_raycolor'] = self.neural_render_2d(res['coarse_raycolor'].reshape(1, img_h, img_w, 128)).reshape(1, img_h*img_w, 3)
+        elif self.opt.neural_render=='style':
+            w_space = self.latent_to_w(self.S, z)
+            w_styles = self.styles_def_to_tensor(w_space)
+            res['final_coarse_raycolor'] = self.G(w_styles, initial=res['coarse_raycolor'].reshape(1, img_h, img_w, 128).permute(0,3,1,2), \
+                    style=style_code).reshape(1, img_h*img_w, 3)
         return res
 
     def fill_invalid(self, output, bg_color):
