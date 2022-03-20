@@ -1,4 +1,4 @@
-from data.load_waymo import load_waymo_data
+#from data.load_waymo import load_waymo_data
 import sys
 import os
 #import pathlib
@@ -256,8 +256,8 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
     patch_size = opt.random_sample_size
     chunk_size = patch_size * patch_size
 
-    height = dataset.height
-    width = dataset.width
+    height = dataset.height * opt.zoom_in_scale
+    width = dataset.width * opt.zoom_in_scale
     visualizer.reset()
     count = 0
     train_psnr = []
@@ -320,7 +320,6 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
         #print("num.{} in {} cases: time used: {} s".format(i, total_num // opt.test_num_step, time.time() - stime), " at ", visualizer.image_dir)
     test_psnr_value = (sum(test_psnr)/len(test_psnr))
     train_psnr_value =  (sum(train_psnr)/len(train_psnr))
-    exit()
     return test_psnr_value, train_psnr_value
 
 
@@ -489,14 +488,11 @@ def main():
     torch.backends.cudnn.benchmark = True
     from options import TrainOptions
     opt = TrainOptions().parse()
-    #cur_device = torch.device('cuda:{}'.format(opt.gpu_ids[0]) if opt.
-    #                          gpu_ids else torch.device('cpu'))
-    from data.waymo_ft_dataset import WaymoFtDataset
+    from data.waymo_ft_dataset_multi import WaymoFtDataset
     train_dataset = WaymoFtDataset(opt)
     data_loader = torch.utils.data.DataLoader(train_dataset, \
         batch_size=opt.batch_size, \
         shuffle=True, \
-        #shuffle=not opt.serial_batches, \
         num_workers=int(opt.n_threads))
     dataset_size = len(data_loader)
     print (fmt.RED+'========')
@@ -511,24 +507,9 @@ def main():
     best_PSNR=0.0
     best_iter=0
     with torch.no_grad():
-        #print(opt.checkpoints_dir + opt.name + "/*_net_ray_marching.pth")
-        #opt.mode = 1
-        #opt.load_points = 0
-        #model = create_model(opt)
-        #model.setup(opt)
-        #model.eval()
-        #if opt.ranges[0] > -99.0:
-        #    ranges = torch.as_tensor(opt.ranges, dtype=torch.float32).cuda()
-        #    mask = torch.prod(
-        #        torch.logical_and(points_xyz_all[..., :3] >= ranges[None, :3], points_xyz_all[..., :3] <= ranges[None, 3:]),
-        #        dim=-1) > 0
-        #    points_xyz_all = points_xyz_all[mask]
         opt.mode = 2
         opt.vox_res=3000
         if opt.vox_res > 0:
-            print (fmt.RED+'========')
-            print (points_xyz_all.shape, 'points_xyz_all shape', torch.min(points_xyz_all, dim=-2), torch.max(points_xyz_all, dim=-2))
-            print ('========'+fmt.END)
             points_xyz_all = [points_xyz_all] if not isinstance(points_xyz_all, list) else points_xyz_all
             points_xyz_holder = torch.zeros([0,3], dtype=torch.float32).cpu()
             for i in range(len(points_xyz_all)):
@@ -604,22 +585,6 @@ def main():
     test_bg_info, render_bg_info = None, None
     img_lst, c2ws_lst, w2cs_lst, intrinsics_all, HDWD_lst = None, None, None, None, None
 
-    ############ initial test ###############
-    #if total_steps == 0 and opt.maximum_step <= 0:
-    #    with torch.no_grad():
-    #        test_opt.nerf_splits = ["test"]
-    #        test_opt.split = "test"
-    #        test_opt.name = opt.name + "/test_{}".format(total_steps)
-    #        test_opt.test_num_step = opt.test_num_step
-    #        test_dataset = create_dataset(test_opt)
-    #        model.opt.is_train = 0
-    #        model.opt.no_loss = 1
-    #        test(model, test_dataset, Visualizer(test_opt), test_opt, test_bg_info, test_steps=total_steps)
-    #        model.opt.no_loss = 0
-    #        model.opt.is_train = 1
-    #        model.train()
-    #        exit()
-
     if total_steps == 0 and (len(train_dataset.id_list) > 30):
         other_states = {
             'epoch_count': 0,
@@ -633,7 +598,7 @@ def main():
     for epoch in range(epoch_count, opt.niter + opt.niter_decay + 1):
         epoch_start_time = time.time()
         for i, data in enumerate(data_loader):
-            test_psnr, train_psnr = test(total_steps, model, train_dataset, Visualizer(test_opt), test_opt, test_bg_info, test_steps=total_steps, lpips=True, bg_color=bg_color)
+            #test_psnr, train_psnr = test(total_steps, model, test_dataset, Visualizer(test_opt), test_opt, test_bg_info, test_steps=total_steps, lpips=True, bg_color=bg_color)
             total_steps += 1
             data['style_code'] = z[data['id']]
             data['bg_color'] = bg_color
@@ -669,25 +634,13 @@ def main():
             except Exception as e:
                 visualizer.print_details(e)
 
-
-            #if opt.vid > 0 and total_steps % opt.vid == 0 and total_steps > 0:
-            #    torch.cuda.empty_cache()
-            #    test_dataset = create_render_dataset(test_opt, opt, total_steps, test_num_step=opt.test_num_step)
-            #    model.opt.is_train = 0
-            #    model.opt.no_loss = 1
-            #    with torch.no_grad():
-            #        render_vid(model, test_dataset, Visualizer(test_opt), test_opt, render_bg_info, steps=total_steps)
-            #    model.opt.no_loss = 0
-            #    model.opt.is_train = 1
-            #    del test_dataset
-
-            if total_steps == 1 or (total_steps % opt.test_freq == 0 and total_steps < (opt.maximum_step - 1) and total_steps > 0):
+            if (total_steps % opt.test_freq == 0 and total_steps < (opt.maximum_step - 1) and total_steps > 0):
                 torch.cuda.empty_cache()
                 #test_dataset = create_test_dataset(test_opt, opt, total_steps, test_num_step=opt.test_num_step)
                 model.opt.is_train = 0
                 model.opt.no_loss = 1
                 with torch.no_grad():
-                    test_psnr, train_psnr = test(total_steps, model, train_dataset, Visualizer(test_opt), test_opt, test_bg_info, test_steps=total_steps, lpips=True, bg_color=bg_color)
+                    test_psnr, train_psnr = test(total_steps, model, test_dataset, Visualizer(test_opt), test_opt, test_bg_info, test_steps=total_steps, lpips=True, bg_color=bg_color)
                 model.opt.no_loss = 0
                 model.opt.is_train = 1
                 #del test_dataset
@@ -713,7 +666,6 @@ def main():
     model.save_networks(total_steps, other_states)
 
     torch.cuda.empty_cache()
-#    test_dataset = create_test_dataset(test_opt, opt, total_steps, test_num_step=1)
     model.opt.no_loss = 1
     model.opt.is_train = 0
 

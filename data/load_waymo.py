@@ -176,7 +176,7 @@ pose_camera2nerf = np.linalg.inv(pose_nerf2camera).astype(np.float32)
 
 def load_waymo_data(FILENAME, frames_length=30,  half_res=True, step=10, \
                     load_point=True, start_frame=0, \
-                    split='test', scale_factor=5, args=None, device = None, vox_res=100, width=1920, height=1280):
+                    split='test', scale_factor=10, args=None, device = None, vox_res=100, width=1920, height=1280):
     dataset = tf.data.TFRecordDataset(FILENAME, compression_type='')
     all_imgs, all_poses, all_depths, all_mask, all_points = [], [], [], [], []
     camposes=[]
@@ -247,8 +247,8 @@ def load_waymo_data(FILENAME, frames_length=30,  half_res=True, step=10, \
             point_at_world_frame = pose_vehicle2world[:3,:3] @ point_at_vehicle_frame.T + pose_vehicle2world[:3, 3][:, None]
             point_at_world_frame = point_at_world_frame.T
 
-            #if vox_res > 0:
-                #point_at_world_frame = mvs_utils.construct_vox_points_xyz(torch.from_numpy(point_at_world_frame), vox_res)
+            if vox_res > 0:
+                point_at_world_frame = mvs_utils.construct_vox_points_xyz(torch.from_numpy(point_at_world_frame), vox_res)
             all_points.append(point_at_world_frame)
         pose_camera2world = pose_vehicle2world @ pose_camera2vehicle
         c2w = pose_camera2world
