@@ -1,5 +1,5 @@
 from .base_rendering_model import *
-from .neural_points_volumetric_model import NeuralPointsVolumetricModel
+from .neural_points_volumetric_multiseq_model import NeuralPointsVolumetricMultiseqModel
 from .neural_points.neural_points import NeuralPoints
 from .mvs.mvs_points_model import MvsPointsModel
 from .mvs import mvs_utils
@@ -10,18 +10,16 @@ import torch.nn.functional as F
 import time
 from utils import format as fmt
 
-
-class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
+class MvsPointsVolumetricMultiseqModel(NeuralPointsVolumetricMultiseqModel):
 
     def __init__(self,):
         super().__init__()
         self.optimizer, self.neural_point_optimizer, self.output, self.raygen_func, self.render_func, self.blend_func, self.coarse_raycolor, self.gt_image, self.input, self.l1loss, self.l2loss, self.tonemap_func, self.top_ray_miss_ids, self.top_ray_miss_loss, self.loss_ray_masked_coarse_raycolor, self.loss_ray_miss_coarse_raycolor, self.loss_total, self.loss_coarse_raycolor, self.loss_conf_coefficient = None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
 
-    #
     @staticmethod
     def modify_commandline_options(parser, is_train=True):
         MvsPointsModel.modify_commandline_options(parser, is_train)
-        NeuralPointsVolumetricModel.modify_commandline_options(parser, is_train=is_train)
+        NeuralPointsVolumetricMultiseqModel.modify_commandline_options(parser, is_train=is_train)
         parser.add_argument(
             '--mode',
             type=int,
@@ -33,16 +31,13 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
             default=2,
             help='0 for both mvs and pointnerf, 1 for only mvs, 2 for only pointnerf')
 
-
-
     def create_network_models(self, opt):
         if opt.mode != 2:
             self.net_mvs = MvsPointsModel(opt).to(self.device)
             self.model_names = ['mvs']
 
         if opt.mode != 1:
-            super(MvsPointsVolumetricModel, self).create_network_models(opt)
-
+            super(MvsPointsVolumetricMultiseqModel, self).create_network_models(opt)
 
     def setup_optimizer(self, opt):
         '''
@@ -50,7 +45,6 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
             This assumes network modules have been added to self.model_names
             By default, it uses an adam optimizer for all parameters.
         '''
-
         net_params = []
         neural_params = []
         mvs_params = []
@@ -66,7 +60,6 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
 
                 net_params = net_params + [par[1] for par in param_lst if not par[0].startswith("module.neural_points")]
                 neural_params = neural_params + [par[1] for par in param_lst if par[0].startswith("module.neural_points")]
-
         self.net_params = net_params
         self.neural_params = neural_params
         self.mvs_params = mvs_params
@@ -159,7 +152,7 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
             return losses, inds
 
     def setup(self, opt, train_len=None):
-        super(MvsPointsVolumetricModel, self).setup(opt)
+        super(MvsPointsVolumetricMultiseqModel, self).setup(opt)
         if opt.prob_freq > 0 and train_len is not None and opt.prob_num_step > 1:
             self.num_probe = train_len // opt.prob_num_step
             self.reset_ray_miss_ranking()

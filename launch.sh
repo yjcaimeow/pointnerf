@@ -1,5 +1,6 @@
 #!/bin/bash
-filename='/mnt/cache/caiyingjie/vox100/'
+#filename='/mnt/cache/caiyingjie/vox100/'
+filename='/home/yjcai/tmp/'
 scale_factor=10
 frames_length=10
 zoom_in_scale=4
@@ -9,7 +10,6 @@ name='waymo'
 
 resume_iter=30000
 #resume_iter=best #latest
-combination='add'
 
 data_root="${nrDataRoot}/scannet/scans/"
 scan="scene0241_01"
@@ -19,8 +19,8 @@ feat_grad=1
 conf_grad=1
 dir_grad=1
 color_grad=1
-vox_res=300
-vox_res_middle=400
+vox_res=100
+vox_res_middle=100
 normview=0
 prune_thresh=-1
 prune_iter=-1
@@ -92,7 +92,7 @@ dist_xyz_deno=0
 raydist_mode_unit=1
 dataset_name='scannet_ft'
 pin_data_in_memory=1
-model='mvs_points_volumetric_multi64'
+model='mvs_points_volumetric_multiseq'
 near_plane=0
 far_plane=100
 which_ray_generation='near_far_linear' #'nerf_near_far_linear' #
@@ -171,10 +171,9 @@ JOBNAME=pointnerf
 PART=pat_taurus
 
 #--multi_res \
-CUDA_LAUNCH_BLOCKING=1 srun --partition=${PART} --gres=gpu:1 -N${NODENUM} --ntasks-per-node ${GPUNUM} --job-name=${JOBNAME} --kill-on-bad-exit=1 python ./train.py \
+#CUDA_LAUNCH_BLOCKING=1 srun --partition=${PART} --gres=gpu:1 -N${NODENUM} --ntasks-per-node ${GPUNUM} --job-name=${JOBNAME} --kill-on-bad-exit=1 python ./train.py \
+CUDA_LAUNCH_BLOCKING=1 python ./train.py \
     --zoom_in_scale $zoom_in_scale \
-    --context_weight \
-    --combination $combination \
     --catWithLocaldir \
     --fov \
     --filename $filename \

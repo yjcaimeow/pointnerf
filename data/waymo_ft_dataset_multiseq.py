@@ -121,7 +121,7 @@ class WaymoFtDataset(BaseDataset):
             self.points_xyz_all.append(torch.from_numpy(waymo_data['oints_xyz_all']))
             self.camposes.append(torch.from_numpy(waymo_data['camposes'])[id_list])
             self.centerdirs.append(torch.from_numpy(waymo_data['centerdirs'])[id_list])
-            self.seq_id.append(torch.ones(len(id_list)) * fidx)
+            self.seq_id.append((torch.ones(len(id_list)) * fidx).long())
         self.images = torch.cat(self.images)
         self.poses = torch.cat(self.poses)
         self.intrinsic = torch.stack(self.intrinsic)

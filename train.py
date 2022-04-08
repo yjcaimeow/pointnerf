@@ -587,13 +587,22 @@ def main():
                 _, _, sampled_pnt_idx = mvs_utils.construct_vox_points_closest(points_xyz.cuda() if len(points_xyz) < 80000000 else points_xyz[::(len(points_xyz) // 80000000 + 1), ...].cuda(), vox_res)
                 points_xyz = points_xyz[sampled_pnt_idx, :]
                 points_xyz_holder = torch.cat([points_xyz_holder, points_xyz], dim=0)
-            points_xyz_all_list.append(points_xyz_holder.cuda())
+
+            sample_indexs = np.random.choice(np.arange(len(points_xyz_holder)), size=opt.point_number, replace=False)
+            points_xyz_holder = points_xyz_holder[sample_indexs]
             print (points_xyz_holder.shape, ':D AFTER VOXLIZED')
+            points_xyz_all_list.append(points_xyz_holder.cuda())
             points_embedding_all.append(torch.randn((1, len(points_xyz_holder), 32)).cuda())
             points_color_all.append(torch.randn((1, len(points_xyz_holder), 3)).cuda())
             points_dir_all.append(torch.randn((1, len(points_xyz_holder), 3)).cuda())
             points_conf_all.append(torch.ones((1, len(points_xyz_holder), 1)).cuda())
-
+            '''
+            points_xyz_all_list = points_xyz_holder.cuda()
+            points_embedding_all = torch.randn((1, len(points_xyz_holder), 32)).cuda()
+            points_color_all = torch.randn((1, len(points_xyz_holder), 3)).cuda()
+            points_dir_all = torch.randn((1, len(points_xyz_holder), 3)).cuda()
+            points_conf_all = torch.ones((1, len(points_xyz_holder), 1)).cuda()
+            '''
         z = get_latents_fn(opt.frames_length, 8, opt.z_dim, device='cuda')[0][0]
         z.requires_grad_()
 
@@ -602,6 +611,8 @@ def main():
         opt.mode = 2
         model = create_model(opt)
 
+        bg_color = nn.Parameter(torch.rand((1, opt.shading_color_channel_num))).cuda()
+        bg_color.requires_grad_()
         model.set_points(points_xyz_all_list, points_embedding_all, points_color=points_color_all, points_dir=points_dir_all, points_conf=points_conf_all,
                              Rw2c=None, bg_color=bg_color, stylecode=z)
         epoch_count = 1
@@ -642,7 +653,7 @@ def main():
     test_bg_info, render_bg_info = None, None
     img_lst, c2ws_lst, w2cs_lst, intrinsics_all, HDWD_lst = None, None, None, None, None
 
-    if total_steps == 0 and (len(train_dataset.id_list) > 30):
+    if total_steps == 0 and (train_dataset.total > 30):
         other_states = {
             'epoch_count': 0,
             'total_steps': total_steps,

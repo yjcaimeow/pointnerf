@@ -5,7 +5,7 @@ import os
 from utils import format as fmt
 import random
 
-class NeuralPointsVolumetricModel(BaseRenderingModel):
+class NeuralPointsVolumetricMultiseqModel(BaseRenderingModel):
 
     @staticmethod
     def modify_commandline_options(parser, is_train=True):

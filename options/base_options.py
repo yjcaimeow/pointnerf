@@ -8,6 +8,10 @@ import torch
 class BaseOptions:
     def initialize(self, parser: argparse.ArgumentParser):
         #================================ global ================================#
+        parser.add_argument('--point_number',
+                            type=int,
+                            default=1000,
+                            help='name of the experiment')
         parser.add_argument('--zoom_in_scale',
                             type=int,
                             default=4,
