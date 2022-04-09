@@ -1,5 +1,5 @@
 #!/bin/bash
-#filename='/mnt/cache/caiyingjie/vox100/'
+#filename='/mnt/cache/caiyingjie/vox_res/'
 filename='/home/yjcai/tmp/'
 scale_factor=10
 frames_length=20
