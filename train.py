@@ -48,7 +48,6 @@ def save_image(img_array, filepath):
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
     Image.fromarray(img_array).save(filepath)
 
-
 def nearest_view(campos, raydir, xyz, id_list):
     cam_ind = torch.zeros([0,1], device=campos.device, dtype=torch.long)
     step=10000
@@ -220,66 +219,67 @@ def render_vid(model, dataset, visualizer, opt, bg_info, steps=0, gen_vid=True):
     return
 
 def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, gen_vid=False, lpips=True, max_test_psnr=0, \
-         max_train_psnr=0, bg_color=None, z=None, best_PSNR_half=None):
+         max_train_psnr=0, bg_color=None, all_z=None, best_PSNR_half=None, sequence_length_list=None, train_sequence_length_list=None):
     print('-----------------------------------Testing-----------------------------------')
     model.eval()
     total_num = dataset.total
     print("test set size {}, interval {}".format(total_num, opt.test_num_step)) # 1 if test_steps == 10000 else opt.test_num_step
-    patch_size = opt.random_sample_size
-    chunk_size = patch_size * patch_size
 
     height = dataset.height*opt.zoom_in_scale
     width = dataset.width*opt.zoom_in_scale
     visualizer.reset()
-    count = 0
-    train_psnr = []
-    test_psnr = []
     train_psnr_half = []
     test_psnr_half = []
-    ssim_train, ssim_test, ssim_train_half, ssim_test_half = [],[],[],[]
-    lpips_train, lpips_test, lpips_train_half, lpips_test_half = [],[],[],[]
-    lpips_train_vgg, lpips_test_vgg, lpips_train_half_vgg, lpips_test_half_vgg = [],[],[],[]
+    ssim_train_half, ssim_test_half = [],[]
+    lpips_train_half, lpips_test_half = [],[]
+    lpips_train_half_vgg, lpips_test_half_vgg = [],[]
+    start, end = 0, 0
     if opt.neural_render == 'style':
-        tmp = torch.zeros(size=(1, z.shape[-1])).cuda()
-        train_idx=0
+        tmp = torch.zeros(size=(1, opt.z_dim))
         all_z_new = []
-        all_z = z.cuda()
-        for index in range(opt.frames_length):
-            if index%10==0:
-                all_z_new.append(tmp.squeeze())
-            else:
-                all_z_new.append(all_z[train_idx])
-                train_idx = train_idx+1
-        all_z_new = torch.stack(all_z_new)
-    preds, gts = [], []
+        for seq_index in range(len(sequence_length_list)):
+            start = end
+            end = end + train_sequence_length_list[seq_index]
+            seq_codes = all_z[start:end]
+            seq_codes_filltest = []
+            train_idx=0
+            for frame_index in range(sequence_length_list[seq_index]):
+                if frame_index%10==0:
+                    seq_codes_filltest.append(tmp.squeeze())
+                else:
+                    seq_codes_filltest.append(seq_codes[train_idx])
+                    train_idx = train_idx+1
+            seq_codes_filltest = torch.stack(seq_codes_filltest)
+            all_z_new.append(seq_codes_filltest)
+    preds = []
+
+    seq_frame_index = 0
+    seq_index = 0
     for i in range(total_num): # 1 if test_steps == 10000 else opt.test_num_step
+        if seq_frame_index%10 != 0:
+            seq_frame_index += 1
+            if seq_frame_index>=sequence_length_list[seq_index]:
+                seq_frame_index = 0
+                seq_index = seq_index + 1
+            continue
         data = dataset.get_item(i)
-        raydir = data['raydir'].clone()
         pixel_idx = data['pixel_idx'].view(data['pixel_idx'].shape[0], -1, data['pixel_idx'].shape[3]).clone()
         edge_mask = torch.zeros([height, width], dtype=torch.bool)
         edge_mask[pixel_idx[0,...,1].to(torch.long), pixel_idx[0,...,0].to(torch.long)] = 1
         edge_mask=edge_mask.reshape(-1) > 0
-        np_edge_mask=edge_mask.numpy().astype(bool)
-        totalpixel = pixel_idx.shape[1]
         tmpgts = {}
         tmpgts["gt_image"] = data['gt_image'].clone()
         tmpgts["gt_mask"] = data['gt_mask'].clone() if "gt_mask" in data else None
-
-        tmpgtssave = tmpgts["gt_image"].view(1, -1, 3).clone()
         data.pop('gt_mask', None)
 
-        visuals = None
-        stime = time.time()
-        ray_masks = []
-
         if opt.neural_render=='style':
-            if i%10==0:
-                if i==0:
-                    data['style_code'] = all_z_new[1].unsqueeze(0)
+            if seq_frame_index%10==0:
+                if seq_frame_index==0:
+                    data['style_code'] = all_z_new[seq_index][1].unsqueeze(0)
                 else:
-                    data['style_code'] = ((all_z_new[i-1]+all_z_new[i+1])/2).unsqueeze(0)
+                    data['style_code'] = ((all_z_new[seq_index][seq_frame_index-1]+all_z_new[seq_index][seq_frame_index+1])/2).unsqueeze(0)
             else:
-                data['style_code'] = all_z_new[i].unsqueeze(0)
+                data['style_code'] = all_z_new[seq_frame_index].unsqueeze(0)
         data['bg_color'] = bg_color
         model.set_input(data)
         model.test()
@@ -290,86 +290,60 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
         pred_half = pred.reshape(height, width, 3)[height//2:, ...]
         gt_half = gt.reshape(height, width, 3)[height//2:, ...]
         loss_half = torch.nn.MSELoss().to("cuda")(pred_half.cuda(), gt_half.cuda()).detach()
-        loss = torch.nn.MSELoss().to("cuda")(pred.cuda(), gt.cuda()).detach()
         psnr_half = mse2psnr(loss_half)
-        psnr = mse2psnr(loss)
 
         img_tensor = pred.reshape(height, width, 3)[None].permute(0, 3, 1, 2).float() * 2 - 1.0
         gt_tensor = gt.reshape(height, width, 3)[None].permute(0, 3, 1, 2).float() * 2 - 1.0
-
-        ssim = compare_ssim(pred.reshape(height, width, 3).cpu().numpy(), gt.reshape(height, width, 3).cpu().numpy(),11, multichannel=True)
-        lpips_value = loss_fn(img_tensor, gt_tensor.cuda()).detach().item()
-        lpips_value_vgg = loss_fn_vgg(img_tensor, gt_tensor.cuda()).detach().item()
 
         ssim_half = compare_ssim(pred.reshape(height, width, 3).cpu().numpy()[height//2:,...], gt.reshape(height, width, 3).cpu().numpy()[height//2:,...],11, multichannel=True)
         lpips_value_half = loss_fn(img_tensor[:,:,height//2:,:], gt_tensor.cuda()[:,:,height//2:,:]).detach().item()
         lpips_value_half_vgg = loss_fn_vgg(img_tensor[:,:,height//2:,:], gt_tensor.cuda()[:,:,height//2:,:]).detach().item()
 
-        if i%10==0:
-            test_psnr.append(psnr.detach().cpu().item())
+        if seq_frame_index%10==0:
             test_psnr_half.append(psnr_half.detach().cpu().item())
-            ssim_test.append(ssim)
             ssim_test_half.append(ssim_half)
-            lpips_test.append(lpips_value)
             lpips_test_half.append(lpips_value_half)
-            lpips_test_vgg.append(lpips_value_vgg)
             lpips_test_half_vgg.append(lpips_value_half_vgg)
         else:
-            train_psnr.append(psnr.detach().cpu().item())
             train_psnr_half.append(psnr_half.detach().cpu().item())
-            ssim_train.append(ssim)
             ssim_train_half.append(ssim_half)
-            lpips_train.append(lpips_value)
             lpips_train_half.append(lpips_value_half)
-            lpips_train_vgg.append(lpips_value_vgg)
             lpips_train_half_vgg.append(lpips_value_half_vgg)
 
         preds.append(np.asarray(pred.detach().squeeze().cpu().reshape(height, width, 3)))
         rootdir = os.path.join(opt.checkpoints_dir, 'results')
-#        rootdir = os.path.join(opt.checkpoints_dir, 'resulst', str(total_steps))
-#        os.makedirs(rootdir, exist_ok=True)
-#        filepath = os.path.join(rootdir, str(i).zfill(4)+'_pred.png')
-#        save_image(np.asarray(pred.detach().squeeze().cpu().reshape(height, width, 3)), filepath)
 
         if total_steps==0:
             os.makedirs(rootdir, exist_ok=True)
             filepath = os.path.join(rootdir, str(i).zfill(4)+'_gt.png')
             gt = gt.detach().squeeze().cpu().reshape(height, width,3)
             save_image(np.asarray(gt), filepath)
-            #if opt.zoom_in_scale==1:
-            #    gt[model.output["ray_mask"].view(height, width).cpu().numpy() <= 0,:] = 0.0
-            #    filepath = os.path.join(rootdir, str(i).zfill(4)+'_gt_masked.png')
-            #    save_image(np.asarray(gt), filepath)
+        seq_frame_index += 1
+        if seq_frame_index>=sequence_length_list[seq_index]:
+            seq_frame_index = 0
+            seq_index = seq_index + 1
 
-    test_psnr_value = (sum(test_psnr)/len(test_psnr))
-    train_psnr_value =  (sum(train_psnr)/len(train_psnr))
     test_psnr_value_half = (sum(test_psnr_half)/len(test_psnr_half))
-    train_psnr_value_half =  (sum(train_psnr_half)/len(train_psnr_half))
+    train_psnr_value_half =  (sum(train_psnr_half)/max(1,len(train_psnr_half)))
 
-    test_ssim_value = (sum(ssim_test)/len(ssim_test))
-    train_ssim_value =  (sum(ssim_train)/len(ssim_train))
     test_ssim_value_half = (sum(ssim_test_half)/len(ssim_test_half))
-    train_ssim_value_half =  (sum(ssim_train_half)/len(ssim_train_half))
+    train_ssim_value_half =  sum(ssim_train_half)/max(1,len(ssim_train_half))
 
-    test_lpips_value = (sum(lpips_test)/len(lpips_test))
-    train_lpips_value =  (sum(lpips_train)/len(lpips_train))
     test_lpips_value_half = (sum(lpips_test_half)/len(lpips_test_half))
-    train_lpips_value_half =  (sum(lpips_train_half)/len(lpips_train_half))
+    train_lpips_value_half =  (sum(lpips_train_half)/max(1,len(lpips_train_half)))
 
-    test_lpips_value_vgg = (sum(lpips_test_vgg)/len(lpips_test_vgg))
-    train_lpips_value_vgg =  (sum(lpips_train_vgg)/len(lpips_train_vgg))
     test_lpips_value_half_vgg = (sum(lpips_test_half_vgg)/len(lpips_test_half_vgg))
-    train_lpips_value_half_vgg =  (sum(lpips_train_half_vgg)/len(lpips_train_half_vgg))
+    train_lpips_value_half_vgg =  (sum(lpips_train_half_vgg)/max(1,len(lpips_train_half_vgg)))
 
     if total_steps>0 and best_PSNR_half < test_psnr_value_half:
         for img_index, img in enumerate(preds):
             filepath = os.path.join(rootdir, str(img_index).zfill(4)+'_pred.png')
             save_image(np.asarray(img), filepath)
 
-    return test_psnr_value, train_psnr_value, test_psnr_value_half, train_psnr_value_half, \
-        test_ssim_value, train_ssim_value, test_ssim_value_half, train_ssim_value_half, \
-        test_lpips_value, train_lpips_value, test_lpips_value_half, train_lpips_value_half, \
-        test_lpips_value_vgg, train_lpips_value_vgg, test_lpips_value_half_vgg, train_lpips_value_half_vgg
+    return test_psnr_value_half, train_psnr_value_half, \
+        test_ssim_value_half, train_ssim_value_half, \
+        test_lpips_value_half, train_lpips_value_half, \
+        test_lpips_value_half_vgg, train_lpips_value_half_vgg
 
 def probe_hole(model, dataset, visualizer, opt, bg_info, test_steps=0, opacity_thresh=0.7):
     print('-----------------------------------Probing Holes-----------------------------------')
@@ -547,7 +521,6 @@ def main():
     print (dataset_size)
     print (train_dataset.poses.shape)
     print (train_dataset.images.shape)
-    opt.frames_length = train_dataset.total
     print ('========'+fmt.END)
     visualizer = Visualizer(opt)
     best_PSNR=0.0
@@ -560,25 +533,16 @@ def main():
     best_LPIPS_half=1.0
     best_iter=0
     with torch.no_grad():
-        #print(opt.checkpoints_dir + opt.name + "/*_net_ray_marching.pth")
-        #opt.mode = 1
-        #opt.load_points = 0
-        #model = create_model(opt)
-        #model.setup(opt)
-        #model.eval()
-        #if opt.ranges[0] > -99.0:
-        #    ranges = torch.as_tensor(opt.ranges, dtype=torch.float32).cuda()
-        #    mask = torch.prod(
-        #        torch.logical_and(points_xyz_all[..., :3] >= ranges[None, :3], points_xyz_all[..., :3] <= ranges[None, 3:]),
-        #        dim=-1) > 0
-        #    points_xyz_all = points_xyz_all[mask]
         opt.mode = 2
         print (fmt.RED+'========')
         print ('VOXLIZED POINT CLOUD')
         print ('========'+fmt.END)
-        points_xyz_all_list, points_embedding_all, points_color_all, points_dir_all, points_conf_all, frames_length = [],[],[],[],[],0
-        for points_xyz_all in train_dataset.points_xyz_all:
-            print (points_xyz_all.shape, ':D BEFORE VOXLIZED')
+        points_xyz_all_list, points_embedding_all, points_color_all, points_dir_all, points_conf_all = [],[],[],[],[]
+        for seq_index, points_xyz_all in enumerate(train_dataset.points_xyz_all):
+            print (fmt.RED+'========')
+            print (points_xyz_all.shape, ':D ----- BEFORE VOXLIZED')
+            print ('========'+fmt.END)
+            
             points_xyz_all = [points_xyz_all] if not isinstance(points_xyz_all, list) else points_xyz_all
             points_xyz_holder = torch.zeros([0,3], dtype=torch.float32).cpu()
             for i in range(len(points_xyz_all)):
@@ -588,23 +552,18 @@ def main():
                 points_xyz = points_xyz[sampled_pnt_idx, :]
                 points_xyz_holder = torch.cat([points_xyz_holder, points_xyz], dim=0)
 
-            sample_indexs = np.random.choice(np.arange(len(points_xyz_holder)), size=opt.point_number, replace=False)
-            points_xyz_holder = points_xyz_holder[sample_indexs]
-            print (points_xyz_holder.shape, ':D AFTER VOXLIZED')
+            print (fmt.RED+'========')
+            print (points_xyz_holder.shape, ':D ----- AFTER VOXLIZED')
+            print ('========'+fmt.END)
+            
             points_xyz_all_list.append(points_xyz_holder.cuda())
             points_embedding_all.append(torch.randn((1, len(points_xyz_holder), 32)).cuda())
             points_color_all.append(torch.randn((1, len(points_xyz_holder), 3)).cuda())
             points_dir_all.append(torch.randn((1, len(points_xyz_holder), 3)).cuda())
             points_conf_all.append(torch.ones((1, len(points_xyz_holder), 1)).cuda())
-            '''
-            points_xyz_all_list = points_xyz_holder.cuda()
-            points_embedding_all = torch.randn((1, len(points_xyz_holder), 32)).cuda()
-            points_color_all = torch.randn((1, len(points_xyz_holder), 3)).cuda()
-            points_dir_all = torch.randn((1, len(points_xyz_holder), 3)).cuda()
-            points_conf_all = torch.ones((1, len(points_xyz_holder), 1)).cuda()
-            '''
-        z = get_latents_fn(opt.frames_length, 8, opt.z_dim, device='cuda')[0][0]
-        z.requires_grad_()
+
+        all_z = nn.Parameter(get_latents_fn(train_dataset.total, 8, opt.z_dim, device='cuda')[0][0])
+        all_z.requires_grad_()
 
         opt.resume_iter = opt.resume_iter if opt.resume_iter != "latest" else get_latest_epoch(opt.resume_dir)
         opt.is_train = True
@@ -614,7 +573,7 @@ def main():
         bg_color = nn.Parameter(torch.rand((1, opt.shading_color_channel_num))).cuda()
         bg_color.requires_grad_()
         model.set_points(points_xyz_all_list, points_embedding_all, points_color=points_color_all, points_dir=points_dir_all, points_conf=points_conf_all,
-                             Rw2c=None, bg_color=bg_color, stylecode=z)
+                             Rw2c=None, bg_color=bg_color, stylecode=all_z)
         epoch_count = 1
         total_steps = 0
         del points_xyz_all_list, points_embedding_all, points_color_all, points_dir_all, points_conf_all
@@ -648,10 +607,8 @@ def main():
         for scheduler in model.schedulers:
             for i in range(total_steps):
                 scheduler.step()
-    fg_masks = None
-    bg_ray_train_lst, bg_ray_test_lst = [], []
-    test_bg_info, render_bg_info = None, None
-    img_lst, c2ws_lst, w2cs_lst, intrinsics_all, HDWD_lst = None, None, None, None, None
+
+    test_bg_info = None
 
     if total_steps == 0 and (train_dataset.total > 30):
         other_states = {
@@ -661,18 +618,16 @@ def main():
         model.save_networks(total_steps, other_states)
         visualizer.print_details('saving model ({}, epoch {}, total_steps {})'.format(opt.name, 0, total_steps))
 
-    real_start=total_steps
-    train_random_sample_size = opt.random_sample_size
     bg_color = nn.Parameter(torch.rand((1, opt.shading_color_channel_num))).cuda()
     for epoch in range(epoch_count, opt.niter + opt.niter_decay + 1):
         epoch_start_time = time.time()
         for i, data in enumerate(data_loader):
-            if total_steps==0:
-                with torch.no_grad():
-                    _ = test(total_steps, model, test_dataset, Visualizer(test_opt), test_opt, test_bg_info, test_steps=total_steps, lpips=True, bg_color=bg_color, z=z)
+            #if total_steps==0:
+            #    with torch.no_grad():
+            #        test(total_steps, model, test_dataset, Visualizer(test_opt), test_opt, test_bg_info, test_steps=total_steps, lpips=True, \
+            #            bg_color=bg_color, all_z=all_z, sequence_length_list=test_dataset.sequence_length_list, train_sequence_length_list=train_dataset.sequence_length_list)
             total_steps += 1
-            if opt.neural_render=='style':
-                data['style_code'] = z[data['id']]
+            data['style_code'] = all_z[data['id']]
             data['bg_color'] = bg_color
             model.set_input(data)
             model.optimize_parameters(total_steps=total_steps)
@@ -705,19 +660,20 @@ def main():
             except Exception as e:
                 visualizer.print_details(e)
 
-            if total_steps==10000 or (total_steps % opt.test_freq == 0 and total_steps < (opt.maximum_step - 1) and total_steps > 0):
+            if 1==2 and total_steps==10000 or (total_steps % opt.test_freq == 0 and total_steps < (opt.maximum_step - 1) and total_steps > 0):
                 torch.cuda.empty_cache()
                 model.opt.is_train = 0
                 model.opt.no_loss = 1
                 with torch.no_grad():
-                    test_psnr, train_psnr, test_psnr_half, train_psnr_half, \
-                    test_ssim_value, train_ssim_value, test_ssim_value_half, train_ssim_value_half, \
-                    test_lpips_value, train_lpips_value, test_lpips_value_half, train_lpips_value_half, \
-                    test_lpips_value_vgg, train_lpips_value_vgg, test_lpips_value_half_vgg, train_lpips_value_half_vgg = test(total_steps, model, test_dataset, Visualizer(test_opt), test_opt, \
-                            test_bg_info, test_steps=total_steps, lpips=True, bg_color=bg_color, z=z, best_PSNR_half=best_PSNR_half)
+                    test_psnr_half, train_psnr_half, \
+                    test_ssim_value_half, train_ssim_value_half, \
+                    test_lpips_value_half, train_lpips_value_half, \
+                    test_lpips_value_half_vgg, train_lpips_value_half_vgg = test(total_steps, model, test_dataset, Visualizer(test_opt), \
+                        test_opt, test_bg_info, test_steps=total_steps, lpips=True, bg_color=bg_color, all_z=all_z, best_PSNR_half=best_PSNR_half, \
+                        sequence_length_list=test_dataset.sequence_length_list)
                 model.opt.no_loss = 0
                 model.opt.is_train = 1
-                best_iter = total_steps if test_psnr > best_PSNR else best_iter
+                best_iter = total_steps if test_psnr_half > best_PSNR_half else best_iter
                 best_PSNR = max(train_psnr_half, best_PSNR)
                 best_PSNR_half = max(test_psnr_half, best_PSNR_half)
 
@@ -751,7 +707,6 @@ def main():
                 visualizer.print_details(f"HALF : train & test: {train_lpips_value_half_vgg}, {test_lpips_value_half_vgg}")
                 visualizer.print_details(f"BEST : {best_LPIPS_VGG}, {best_LPIPS_half_VGG} {best_iter}")
                 print (fmt.END)
-                torch.cuda.empty_cache()
             model.train()
 
         if opt.maximum_step is not None and total_steps >= opt.maximum_step:

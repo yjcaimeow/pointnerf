@@ -2,7 +2,7 @@
 #filename='/mnt/cache/caiyingjie/vox100/'
 filename='/home/yjcai/tmp/'
 scale_factor=10
-frames_length=10
+frames_length=20
 zoom_in_scale=4
 nrCheckpoint="../checkpoints"
 nrDataRoot="../data_src"

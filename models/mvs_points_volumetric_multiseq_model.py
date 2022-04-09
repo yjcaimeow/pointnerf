@@ -174,7 +174,6 @@ class MvsPointsVolumetricMultiseqModel(NeuralPointsVolumetricMultiseqModel):
             self.stylecode = stylecode
             self.setup_optimizer(self.opt)
 
-
     def prune_points(self, thresh):
         self.neural_points.prune(thresh)
 

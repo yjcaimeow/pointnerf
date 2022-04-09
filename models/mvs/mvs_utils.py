@@ -554,10 +554,8 @@ def construct_vox_points_closest(xyz_val, vox_res, partition_xyz=None, space_min
     xyz_centroid = scatter_mean(xyz_val, inv_idx, dim=0)
     xyz_centroid_prop = xyz_centroid[inv_idx,:]
     xyz_residual = torch.norm(xyz_val - xyz_centroid_prop, dim=-1)
-    print("xyz_residual", xyz_residual.shape)
 
     _, min_idx = scatter_min(xyz_residual, inv_idx, dim=0)
-    print("min_idx", min_idx.shape)
     return xyz_centroid, sparse_grid_idx, min_idx
 
 

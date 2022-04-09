@@ -547,54 +547,57 @@ class NeuralPoints(nn.Module):
                 points_embeding_middle.requires_grad = self.opt.feat_grad > 0
                 self.points_embeding_middle = points_embeding_middle
         elif parameter and fov:
-            self.points_dir_all, self.points_conf_all, self.points_color_all, self.points_embeding_all = [],[],[],[]
+            self.points_dir_all, self.points_conf_all, self.points_color_all, self.points_embeding_all, self.xyz_all = [],[],[],[],[]
             if type(points_xyz).__name__=='list':
                 for index in range(len(points_xyz)):
                     points_embeding_i = points_embeding[index]
-                    #xyz_all = nn.Parameter(points_xyz[index])
-                    #xyz_all.requires_grad = self.opt.xyz_grad > 0
-                    #self.xyz_all.append(xyz_all)
+                    xyz_all = nn.Parameter(points_xyz[index])
+                    xyz_all.requires_grad = self.opt.xyz_grad > 0
+                    self.xyz_all.append(xyz_all)
                     if points_conf is not None:
-                        points_conf_i = points_conf[index]
-                        #points_conf_i = nn.Parameter(points_conf[index])
-                        #points_conf_i.requires_grad = self.opt.conf_grad > 0
+                        points_conf_i = nn.Parameter(points_conf[index])
+                        points_conf_i.requires_grad = self.opt.conf_grad > 0
                         if "0" in list(self.opt.point_conf_mode):
                             points_embeding_i = torch.cat([points_conf_i, points_embeding_i], dim=-1)
                         if "1" in list(self.opt.point_conf_mode):
                             self.points_conf_all.append(points_conf_i)
                     if points_dir is not None:
-                        points_dir_i = points_dir[index]
-                        #points_dir_i = nn.Parameter(points_dir[index])
-                        #points_dir_i.requires_grad = self.opt.dir_grad > 0
+                        points_dir_i = nn.Parameter(points_dir[index])
+                        points_dir_i.requires_grad = self.opt.dir_grad > 0
                         if "0" in list(self.opt.point_dir_mode):
                             points_embeding_i = torch.cat([points_dir_i, points_embeding_i], dim=-1)
                         if "1" in list(self.opt.point_dir_mode):
                             self.points_dir_all.append(points_dir_i)
 
                     if points_color is not None:
-                        points_color_i = points_color[index]
-                        #points_color_i = nn.Parameter(points_color[index])
-                        #points_color_i.requires_grad = self.opt.color_grad > 0
+                        points_color_i = nn.Parameter(points_color[index])
+                        points_color_i.requires_grad = self.opt.color_grad > 0
                         if "0" in list(self.opt.point_color_mode):
                             points_embeding_i = torch.cat([points_color_i, points_embeding_i], dim=-1)
                         if "1" in list(self.opt.point_color_mode):
                             self.points_color_all.append(points_color_i)
 
-                    #points_embeding_i = nn.Parameter(points_embeding_i)
-                    #points_embeding_i.requires_grad = self.opt.feat_grad > 0
+                    points_embeding_i = nn.Parameter(points_embeding_i)
+                    points_embeding_i.requires_grad = self.opt.feat_grad > 0
                     self.points_embeding_all.append(points_embeding_i)
 
-                self.xyz_all = nn.Parameter(torch.stack(points_xyz))
-                self.points_conf_all = nn.Parameter(torch.stack(self.points_conf_all))
-                self.points_dir_all = nn.Parameter(torch.stack(self.points_dir_all))
-                self.points_color_all = nn.Parameter(torch.stack(self.points_color_all))
-                self.points_embeding_all = nn.Parameter(torch.stack(self.points_embeding_all))
+                #self.xyz_all = nn.Parameter(torch.stack(points_xyz))
+                #self.xyz_all = nn.Parameter(torch.stack(self.xyz_all))
+                #self.points_conf_all = nn.Parameter(torch.stack(self.points_conf_all))
+                #self.points_dir_all = nn.Parameter(torch.stack(self.points_dir_all))
+                #self.points_color_all = nn.Parameter(torch.stack(self.points_color_all))
+                #self.points_embeding_all = nn.Parameter(torch.stack(self.points_embeding_all))
+                self.xyz_all = nn.ParameterList(self.xyz_all)
+                self.points_conf_all = nn.ParameterList(self.points_conf_all)
+                self.points_dir_all = nn.ParameterList(self.points_dir_all)
+                self.points_color_all = nn.ParameterList(self.points_color_all)
+                self.points_embeding_all = nn.ParameterList(self.points_embeding_all)
 
-                self.xyz_all.requires_grad = self.opt.xyz_grad > 0
-                self.points_conf_all.requires_grad = self.opt.conf_grad > 0
-                self.points_dir_all.requires_grad = self.opt.dir_grad > 0
-                self.points_color_all.requires_grad = self.opt.color_grad > 0
-                self.points_embeding_all.requires_grad = self.opt.feat_grad > 0
+                #self.xyz_all.requires_grad = self.opt.xyz_grad > 0
+                #self.points_conf_all.requires_grad = self.opt.conf_grad > 0
+                #self.points_dir_all.requires_grad = self.opt.dir_grad > 0
+                #self.points_color_all.requires_grad = self.opt.color_grad > 0
+                #self.points_embeding_all.requires_grad = self.opt.feat_grad > 0
             else:
                 self.xyz_all = nn.Parameter(points_xyz)
                 self.xyz_all.requires_grad = self.opt.xyz_grad > 0
@@ -772,7 +775,6 @@ class NeuralPoints(nn.Module):
         plt.figure()
         plt.imshow(gtbackground)
         plt.show()
-
 
     def get_point_indices(self, inputs, cam_rot_tensor, cam_pos_tensor, pixel_idx_tensor, near_plane, far_plane, h, w, intrinsic, vox_query=False, use_middle=False):
         if use_middle:

@@ -107,14 +107,15 @@ class WaymoFtDataset(BaseDataset):
         import glob
         self.seq_id, self.images, self.poses, self.intrinsic, self.points_xyz_all, self.camposes, self.centerdirs = [],[],[],[],[],[],[]
         filenames = glob.glob(os.path.join(opt.filename, '*.npz'))
+        self.sequence_length_list = []
         print(filenames)
         for fidx, filename in enumerate(filenames):
             waymo_data = np.load(filename)
             frames_length = len(waymo_data['poses'])
             all_id_list = list(range(self.opt.frames_length)) #000000
             train_id_list = [all_id_list[i] for i in all_id_list if i%10!=0]
-            test_id_list = all_id_list[::self.step]
-            id_list = train_id_list if self.split=="train" else test_id_list
+            #test_id_list = all_id_list[::self.step]
+            id_list = train_id_list if self.split=="train" else all_id_list
             self.images.append(torch.from_numpy(waymo_data['images'])[id_list])
             self.poses.append(torch.from_numpy(waymo_data['poses'])[id_list])
             self.intrinsic.append(torch.from_numpy(waymo_data['intrinsic']))
@@ -122,6 +123,7 @@ class WaymoFtDataset(BaseDataset):
             self.camposes.append(torch.from_numpy(waymo_data['camposes'])[id_list])
             self.centerdirs.append(torch.from_numpy(waymo_data['centerdirs'])[id_list])
             self.seq_id.append((torch.ones(len(id_list)) * fidx).long())
+            self.sequence_length_list.append(len(id_list))
         self.images = torch.cat(self.images)
         self.poses = torch.cat(self.poses)
         self.intrinsic = torch.stack(self.intrinsic)
@@ -482,7 +484,7 @@ class WaymoFtDataset(BaseDataset):
 
 
     def __len__(self):
-        return len(self.images)
+        return self.total
 
 
     def name(self):
