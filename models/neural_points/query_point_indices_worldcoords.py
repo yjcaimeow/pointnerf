@@ -652,8 +652,8 @@ class lighting_fast_querier():
         # save_points(raypos_tensor.reshape(-1, 3), "./", "rawraypos_pnts")
         # raypos_masked = torch.masked_select(raypos_tensor, raypos_mask_tensor[..., None] > 0)
         # save_points(raypos_masked.reshape(-1, 3), "./", "raypos_pnts")
-
-        ray_mask_tensor = torch.max(raypos_mask_tensor, dim=-1)[0] > 0 # B, R
+        #import pdb; pdb.set_trace()
+        ray_mask_tensor = torch.max(raypos_mask_tensor, dim=-1)[0] >= 0 # B, R
         R = torch.max(torch.sum(ray_mask_tensor.to(torch.int32))).cpu().numpy()
         sample_loc_tensor = torch.zeros([B, R, SR, 3], dtype=torch.float32, device=device)
         sample_pidx_tensor = torch.full([B, R, SR, K], -1, dtype=torch.int32, device=device)
@@ -713,7 +713,8 @@ class lighting_fast_querier():
             # save_points(queried_masked.reshape(-1, 3), "./", "queried_pnts{}".format(self.count))
             # print("valid ray",  torch.sum(torch.sum(sample_loc_mask_tensor, dim=-1) > 0))
             #
-            masked_valid_ray = torch.sum(sample_pidx_tensor.view(B, R, -1) >= 0, dim=-1) > 0
+            #import pdb; pdb.set_trace()
+            masked_valid_ray = torch.sum(sample_pidx_tensor.view(B, R, -1) >= 0, dim=-1) >= 0
             R = torch.max(torch.sum(masked_valid_ray.to(torch.int32), dim=-1)).cpu().numpy()
             ray_mask_tensor.masked_scatter_(ray_mask_tensor, masked_valid_ray)
             sample_pidx_tensor = torch.masked_select(sample_pidx_tensor, masked_valid_ray[..., None, None].expand(-1, -1, SR, K)).reshape(B, R, SR, K)

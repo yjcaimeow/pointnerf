@@ -221,6 +221,7 @@ def render_vid(model, dataset, visualizer, opt, bg_info, steps=0, gen_vid=True):
 def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, gen_vid=False, lpips=True, max_test_psnr=0, \
          max_train_psnr=0, bg_color=None, all_z=None, best_PSNR_half=None, sequence_length_list=None, train_sequence_length_list=None):
     print('-----------------------------------Testing-----------------------------------')
+    inference_time = time.time()
     model.eval()
     total_num = dataset.total
     print("test set size {}, interval {}".format(total_num, opt.test_num_step)) # 1 if test_steps == 10000 else opt.test_num_step
@@ -245,23 +246,23 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
             train_idx=0
             for frame_index in range(sequence_length_list[seq_index]):
                 if frame_index%10==0:
-                    seq_codes_filltest.append(tmp.squeeze())
+                    seq_codes_filltest.append(tmp.squeeze().cpu())
                 else:
-                    seq_codes_filltest.append(seq_codes[train_idx])
+                    seq_codes_filltest.append(seq_codes[train_idx].cpu())
                     train_idx = train_idx+1
             seq_codes_filltest = torch.stack(seq_codes_filltest)
             all_z_new.append(seq_codes_filltest)
-    preds = []
+    preds, gts = [],[]
 
     seq_frame_index = 0
     seq_index = 0
     for i in range(total_num): # 1 if test_steps == 10000 else opt.test_num_step
-        if seq_frame_index%10 != 0:
-            seq_frame_index += 1
-            if seq_frame_index>=sequence_length_list[seq_index]:
-                seq_frame_index = 0
-                seq_index = seq_index + 1
-            continue
+        #if seq_frame_index%5 != 0:
+        #    seq_frame_index += 1
+        #    if seq_frame_index>=sequence_length_list[seq_index]:
+        #        seq_frame_index = 0
+        #        seq_index = seq_index + 1
+        #    continue
         data = dataset.get_item(i)
         pixel_idx = data['pixel_idx'].view(data['pixel_idx'].shape[0], -1, data['pixel_idx'].shape[3]).clone()
         edge_mask = torch.zeros([height, width], dtype=torch.bool)
@@ -272,19 +273,18 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
         tmpgts["gt_mask"] = data['gt_mask'].clone() if "gt_mask" in data else None
         data.pop('gt_mask', None)
 
-        if opt.neural_render=='style':
-            if seq_frame_index%10==0:
-                if seq_frame_index==0:
-                    data['style_code'] = all_z_new[seq_index][1].unsqueeze(0)
-                else:
-                    data['style_code'] = ((all_z_new[seq_index][seq_frame_index-1]+all_z_new[seq_index][seq_frame_index+1])/2).unsqueeze(0)
+        if seq_frame_index%10==0:
+            if seq_frame_index==0:
+                data['style_code'] = all_z_new[seq_index][1].unsqueeze(0).cuda()
             else:
-                data['style_code'] = all_z_new[seq_frame_index].unsqueeze(0)
+                data['style_code'] = ((all_z_new[seq_index][seq_frame_index-1]+all_z_new[seq_index][seq_frame_index+1])/2).unsqueeze(0).cuda()
+        else:
+            data['style_code'] = all_z_new[seq_index][seq_frame_index].unsqueeze(0).cuda()
         data['bg_color'] = bg_color
         model.set_input(data)
         model.test()
         curr_visuals = model.get_current_visuals(data=data)
-        pred = curr_visuals['final_coarse_raycolor']
+        pred = curr_visuals['final_coarse_raycolor_half']
         gt = tmpgts['gt_image']
 
         pred_half = pred.reshape(height, width, 3)[height//2:, ...]
@@ -311,13 +311,14 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
             lpips_train_half_vgg.append(lpips_value_half_vgg)
 
         preds.append(np.asarray(pred.detach().squeeze().cpu().reshape(height, width, 3)))
+        gts.append(np.asarray(gt.detach().squeeze().cpu().reshape(height, width,3)))
         rootdir = os.path.join(opt.checkpoints_dir, 'results')
 
-        if total_steps==0:
-            os.makedirs(rootdir, exist_ok=True)
-            filepath = os.path.join(rootdir, str(i).zfill(4)+'_gt.png')
-            gt = gt.detach().squeeze().cpu().reshape(height, width,3)
-            save_image(np.asarray(gt), filepath)
+        #if total_steps==0:
+            #os.makedirs(rootdir, exist_ok=True)
+            #filepath = os.path.join(rootdir, str(i).zfill(4)+'_gt.png')
+            #gt = gt.detach().squeeze().cpu().reshape(height, width,3)
+            #save_image(np.asarray(gt), filepath)
         seq_frame_index += 1
         if seq_frame_index>=sequence_length_list[seq_index]:
             seq_frame_index = 0
@@ -336,10 +337,17 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
     train_lpips_value_half_vgg =  (sum(lpips_train_half_vgg)/max(1,len(lpips_train_half_vgg)))
 
     if total_steps>0 and best_PSNR_half < test_psnr_value_half:
+        if os.path.exists(rootdir)==False:
+            os.makedirs(rootdir, exist_ok=True)
+            for img_index, img in enumerate(gts):
+                filepath = os.path.join(rootdir, str(img_index).zfill(4)+'_gt.png')
+                img[0:height//2]=0
+                save_image(np.asarray(img), filepath)
         for img_index, img in enumerate(preds):
             filepath = os.path.join(rootdir, str(img_index).zfill(4)+'_pred.png')
+            img[0:height//2]=0
             save_image(np.asarray(img), filepath)
-
+    print (time.time()-inference_time, '-------inference_time--------')
     return test_psnr_value_half, train_psnr_value_half, \
         test_ssim_value_half, train_ssim_value_half, \
         test_lpips_value_half, train_lpips_value_half, \
@@ -542,7 +550,7 @@ def main():
             print (fmt.RED+'========')
             print (points_xyz_all.shape, ':D ----- BEFORE VOXLIZED')
             print ('========'+fmt.END)
-            
+
             points_xyz_all = [points_xyz_all] if not isinstance(points_xyz_all, list) else points_xyz_all
             points_xyz_holder = torch.zeros([0,3], dtype=torch.float32).cpu()
             for i in range(len(points_xyz_all)):
@@ -555,7 +563,7 @@ def main():
             print (fmt.RED+'========')
             print (points_xyz_holder.shape, ':D ----- AFTER VOXLIZED')
             print ('========'+fmt.END)
-            
+
             points_xyz_all_list.append(points_xyz_holder.cuda())
             points_embedding_all.append(torch.randn((1, len(points_xyz_holder), 32)).cuda())
             points_color_all.append(torch.randn((1, len(points_xyz_holder), 3)).cuda())
@@ -570,15 +578,17 @@ def main():
         opt.mode = 2
         model = create_model(opt)
 
-        bg_color = nn.Parameter(torch.rand((1, opt.shading_color_channel_num))).cuda()
-        bg_color.requires_grad_()
+        bg_color = None
+        if opt.unified==False:
+            bg_color = nn.Parameter(torch.rand((1, opt.shading_color_channel_num))).cuda()
+            bg_color.requires_grad_()
         model.set_points(points_xyz_all_list, points_embedding_all, points_color=points_color_all, points_dir=points_dir_all, points_conf=points_conf_all,
                              Rw2c=None, bg_color=bg_color, stylecode=all_z)
         epoch_count = 1
         total_steps = 0
         del points_xyz_all_list, points_embedding_all, points_color_all, points_dir_all, points_conf_all
 
-    model.setup(opt, train_len=opt.frames_length)
+    model.setup(opt, train_len=train_dataset.total)
     model.train()
 
     if opt.resume_dir:
@@ -618,14 +628,9 @@ def main():
         model.save_networks(total_steps, other_states)
         visualizer.print_details('saving model ({}, epoch {}, total_steps {})'.format(opt.name, 0, total_steps))
 
-    bg_color = nn.Parameter(torch.rand((1, opt.shading_color_channel_num))).cuda()
     for epoch in range(epoch_count, opt.niter + opt.niter_decay + 1):
         epoch_start_time = time.time()
         for i, data in enumerate(data_loader):
-            #if total_steps==0:
-            #    with torch.no_grad():
-            #        test(total_steps, model, test_dataset, Visualizer(test_opt), test_opt, test_bg_info, test_steps=total_steps, lpips=True, \
-            #            bg_color=bg_color, all_z=all_z, sequence_length_list=test_dataset.sequence_length_list, train_sequence_length_list=train_dataset.sequence_length_list)
             total_steps += 1
             data['style_code'] = all_z[data['id']]
             data['bg_color'] = bg_color
@@ -660,8 +665,7 @@ def main():
             except Exception as e:
                 visualizer.print_details(e)
 
-            if 1==2 and total_steps==10000 or (total_steps % opt.test_freq == 0 and total_steps < (opt.maximum_step - 1) and total_steps > 0):
-                torch.cuda.empty_cache()
+            if total_steps==10000 or (total_steps % opt.test_freq == 0 and total_steps < (opt.maximum_step - 1) and total_steps > 0):
                 model.opt.is_train = 0
                 model.opt.no_loss = 1
                 with torch.no_grad():
@@ -670,7 +674,7 @@ def main():
                     test_lpips_value_half, train_lpips_value_half, \
                     test_lpips_value_half_vgg, train_lpips_value_half_vgg = test(total_steps, model, test_dataset, Visualizer(test_opt), \
                         test_opt, test_bg_info, test_steps=total_steps, lpips=True, bg_color=bg_color, all_z=all_z, best_PSNR_half=best_PSNR_half, \
-                        sequence_length_list=test_dataset.sequence_length_list)
+                        sequence_length_list=test_dataset.sequence_length_list, train_sequence_length_list=train_dataset.sequence_length_list)
                 model.opt.no_loss = 0
                 model.opt.is_train = 1
                 best_iter = total_steps if test_psnr_half > best_PSNR_half else best_iter

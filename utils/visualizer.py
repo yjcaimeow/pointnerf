@@ -142,6 +142,8 @@ class Visualizer:
     def accumulate_losses(self, losses):
         self.acc_iterations += 1
         for k, v in losses.items():
+            if k == 'conf_coefficient':
+                continue
             if k not in self.acc_losses:
                 self.acc_losses[k] = 0
             self.acc_losses[k] += v

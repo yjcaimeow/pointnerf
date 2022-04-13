@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
-from ..helpers.networks import init_seq, positional_encoding
+from ..helpers.networks import init_seq, positional_encoding, effective_range
 from utils.spherical import SphericalHarm_table as SphericalHarm
 from ..helpers.geometrics import compute_world2local_dist
 
@@ -235,7 +235,7 @@ class PointAggregator(torch.nn.Module):
             block_init_lst.append(self.feat_weight_mlp)
         elif opt.agg_distance_kernel == "sh_intrp":
             self.shcomp = SphericalHarm(opt.sh_degree)
-
+        self.l2loss = torch.nn.MSELoss().cuda()
         self.opt = opt
         self.dist_dim = (4 if self.opt.agg_dist_pers == 30 else 6) if self.opt.agg_dist_pers > 9 else 3
         self.dist_func = getattr(self, opt.agg_distance_kernel, None)
@@ -321,6 +321,10 @@ class PointAggregator(torch.nn.Module):
             block_init_lst.append(self.block3)
         else:
             self.block3 = self.passfunc
+
+        if opt.nerf_distill or opt.nerf_distill_allsampleloc:
+            from models.run_nerf_helpers import NeRF
+            self.nerf_block = NeRF()
 
         alpha_block = []
         in_channels = opt.shading_feature_num + (0 if opt.agg_alpha_xyz_mode == "None" else self.pnt_channels)
@@ -487,9 +491,8 @@ class PointAggregator(torch.nn.Module):
         return weights, embedding[..., 7:]
 
 
-    def viewmlp(self, sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, vsize, weight, pnt_mask_flat, pts, viewdirs, local_viewdirs, total_len, ray_valid, in_shape, dists):
-        # print("sampled_Rw2c", sampled_Rw2c.shape, sampled_xyz.shape)
-        # assert sampled_Rw2c.dim() == 2
+    def viewmlp(self, sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, vsize, weight, pnt_mask_flat, \
+                pts, viewdirs, local_viewdirs, total_len, ray_valid, in_shape, dists):
         B, R, SR, K, _ = dists.shape
         sampled_Rw2c = sampled_Rw2c.transpose(-1, -2)
         uni_w2c = sampled_Rw2c.dim() == 2
@@ -497,10 +500,13 @@ class PointAggregator(torch.nn.Module):
             sampled_Rw2c_ray = sampled_Rw2c[:,:,:,0,:,:].view(-1, 3, 3)
             sampled_Rw2c = sampled_Rw2c.reshape(-1, 3, 3)[pnt_mask_flat, :, :]
         pts_ray, pts_pnt = None, None
-        if self.opt.agg_feat_xyz_mode != "None" or self.opt.agg_alpha_xyz_mode != "None" or self.opt.agg_color_xyz_mode != "None":
+        if self.opt.agg_feat_xyz_mode != "None" or self.opt.agg_alpha_xyz_mode != "None" or self.opt.agg_color_xyz_mode != "None" or self.opt.nerf_distill or self.opt.nerf_distill_allsampleloc:
             if self.num_freqs > 0:
-                pts = positional_encoding(pts, self.num_freqs)
-            pts_ray = pts[ray_valid, :]
+                pts = effective_range(pts, min_range = torch.tensor([-6311.6396,     0.0000,     0.0000])[None, ].cuda(), \
+                                      max_range = torch.tensor([0.0000, 12115.1953,   133.5073])[None,].cuda())
+                pts_ray = positional_encoding(pts, self.num_freqs)
+                if self.opt.nerf_distill:
+                    pts_ray = pts_ray[ray_valid, :]
             if self.opt.agg_feat_xyz_mode != "None" and self.opt.agg_intrp_order > 0:
                 pts_pnt = pts[..., None, :].repeat(1, K, 1).view(-1, pts.shape[-1])
                 if self.opt.apply_pnt_mask > 0:
@@ -509,11 +515,12 @@ class PointAggregator(torch.nn.Module):
         if self.num_viewdir_freqs > 0:
             viewdirs = positional_encoding(viewdirs, self.num_viewdir_freqs, ori=True)
             ori_viewdirs, viewdirs = viewdirs[..., :3], viewdirs[..., 3:]
-
             local_viewdirs = positional_encoding(local_viewdirs, self.num_viewdir_freqs, ori=True)[..., 3:]
 
-        viewdirs = viewdirs[ray_valid, :]
-        local_viewdirs = local_viewdirs[ray_valid, :]
+        if self.opt.catWithLocaldir:
+            viewdirs=local_viewdirs
+        viewdirs_part = viewdirs[ray_valid, :]
+
         if self.opt.agg_intrp_order == 0:
             feat = torch.sum(sampled_embedding * weight[..., None], dim=-2)
             feat = feat.view([-1, feat.shape[-1]])[ray_valid, :]
@@ -530,7 +537,7 @@ class PointAggregator(torch.nn.Module):
             if self.opt.dist_xyz_freq != 0:
                 # print(dists.dtype, (self.opt.dist_xyz_deno * np.linalg.norm(vsize)).dtype, dists_flat.dtype)
                 dists_flat = positional_encoding(dists_flat, self.opt.dist_xyz_freq)
-            feat= sampled_embedding.view(-1, sampled_embedding.shape[-1])
+            feat = sampled_embedding.view(-1, sampled_embedding.shape[-1])
             # print("feat", feat.shape)
 
             if self.opt.apply_pnt_mask > 0:
@@ -542,11 +549,8 @@ class PointAggregator(torch.nn.Module):
             weight = weight.view(B * R * SR, K, 1)
             pts = pts_pnt
 
-        # used_point_embedding = feat[..., : self.opt.point_features_dim]
-
         if self.opt.agg_feat_xyz_mode != "None":
             feat = torch.cat([feat, pts], dim=-1)
-        # print("feat",feat.shape) # 501
         feat = self.block1(feat)
 
         if self.opt.shading_feature_mlp_layer2>0:
@@ -600,11 +604,15 @@ class PointAggregator(torch.nn.Module):
             color_in = torch.cat([color_in, viewdirs], dim=-1)
             color_output = self.raw2out_color(self.color_branch(color_in))
 
-            # print("color_output", torch.sum(color_output), color_output.grad)
-
             output = torch.cat([alpha, color_output], dim=-1)
 
         elif self.opt.agg_intrp_order == 2:
+            if self.opt.nerf_distill_allsampleloc:
+                pts_feature, pts_density, pts_weight, pts_rgb = self.nerf_block(pts_ray, viewdirs)
+                if self.opt.only_nerf:
+                    return pts_rgb, pts_density
+            elif self.opt.nerf_distill:
+                pts_feature, pts_density, pts_weight, pts_rgb = self.nerf_block(pts_ray, viewdirs_part)
             alpha_in = feat
             if self.opt.agg_alpha_xyz_mode != "None":
                 alpha_in = torch.cat([alpha_in, pts], dim=-1)
@@ -636,7 +644,14 @@ class PointAggregator(torch.nn.Module):
             if self.opt.context_weight:
                 alpha = torch.sum(alpha * weight_context, dim=-2).view([-1, alpha.shape[-1]])[ray_valid, :] # alpha
             else:
-                alpha = torch.sum(alpha * weight, dim=-2).view([-1, alpha.shape[-1]])[ray_valid, :] # alpha:
+                if self.opt.nerf_distill_allsampleloc:
+                    extended_weight = torch.cat((weight, pts_weight[..., None]), dim=1)
+                    if self.opt.weight_norm:
+                        extended_weight = extended_weight / torch.clamp(torch.sum(extended_weight, dim=-2, keepdim=True), min=1e-8)
+                    alpha = torch.cat((alpha, pts_density[..., None]), dim=1)
+                    alpha = torch.sum(alpha * extended_weight, dim=-2).view([-1, alpha.shape[-1]])
+                else:
+                    alpha = torch.sum(alpha * weight, dim=-2).view([-1, alpha.shape[-1]])[ray_valid, :] # alpha:
 
             # print("alpha", alpha.shape)
             # alpha_placeholder = torch.zeros([total_len, 1], dtype=torch.float32,
@@ -653,16 +668,24 @@ class PointAggregator(torch.nn.Module):
             if self.opt.context_weight:
                 feat = torch.sum(feat * weight_context, dim=-2).view([-1, feat.shape[-1]])[ray_valid, :]
             else:
-                feat = torch.sum(feat * weight, dim=-2).view([-1, feat.shape[-1]])[ray_valid, :]
+                if self.opt.nerf_distill_allsampleloc:
+                    feat = torch.cat((feat, pts_feature[:,None, ...]), dim=1)
+                    feat = torch.sum(feat * extended_weight, dim=-2).view([-1, feat.shape[-1]])
+                else:
+                    feat = torch.sum(feat * weight, dim=-2).view([-1, feat.shape[-1]])[ray_valid, :]
+
+            if self.opt.nerf_distill:
+                feat = (1-pts_weight) * feat + pts_weight * pts_feature
+                alpha = (1-pts_weight) * alpha + pts_weight * pts_density
 
             color_in = feat
             if self.opt.agg_color_xyz_mode != "None":
                 color_in = torch.cat([color_in, pts], dim=-1)
 
-            if self.opt.catWithLocaldir:
-                color_in = torch.cat([color_in, local_viewdirs], dim=-1)
-            else:
+            if self.opt.nerf_distill_allsampleloc:
                 color_in = torch.cat([color_in, viewdirs], dim=-1)
+            else:
+                color_in = torch.cat([color_in, viewdirs_part], dim=-1)
             color_output = self.color_branch(color_in)
             #color_output = self.raw2out_color(self.color_branch(color_in))
             # color_output = torch.sigmoid(color_output)
@@ -671,9 +694,15 @@ class PointAggregator(torch.nn.Module):
             output = torch.cat([alpha, color_output], dim=-1)
 
             # print("output_placeholder", output_placeholder.shape)
-        output_placeholder = torch.zeros([total_len, self.opt.shading_color_channel_num + 1], dtype=torch.float32, device=output.device)
-        output_placeholder[ray_valid] = output
-        return output_placeholder, None
+        if self.opt.nerf_distill_allsampleloc==False:
+            output_placeholder = torch.zeros([total_len, self.opt.shading_color_channel_num + 1], dtype=torch.float32, device=output.device)
+            output_placeholder[ray_valid] = output
+            return output_placeholder, None
+        else:
+            if self.opt.nerf_raycolor:
+                return output, pts_weight, pts_rgb, pts_density
+            else:
+                return output, pts_weight
 
     def print_point(self, dists, sample_loc_w, sampled_xyz, sample_loc, sampled_xyz_pers, sample_pnt_mask):
 
@@ -770,6 +799,7 @@ class PointAggregator(torch.nn.Module):
         :param vsize:
         :return:
         '''
+        B, valid_R, SR, K, _ = sampled_conf.shape
         ray_valid = torch.any(sample_pnt_mask, dim=-1).view(-1)
         total_len = len(ray_valid)
         in_shape = sample_loc_w.shape
@@ -826,7 +856,6 @@ class PointAggregator(torch.nn.Module):
         else:
             print("illegal agg_dist_pers code: ", agg_dist_pers)
             exit()
-        # self.print_point(dists, sample_loc_w, sampled_xyz, sample_loc, sampled_xyz_pers, sample_pnt_mask)
 
         weight, sampled_embedding = self.dist_func(sampled_embedding, dists, sample_pnt_mask, vsize, grid_vox_sz, axis_weight=self.axis_weight)
 
@@ -839,9 +868,24 @@ class PointAggregator(torch.nn.Module):
         conf_coefficient = 1
         if sampled_conf is not None:
             conf_coefficient = self.gradiant_clamp(sampled_conf[..., 0], min=0.0001, max=1)
-
-        output, _ = getattr(self, self.which_agg_model, None)(sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, vsize, weight * conf_coefficient, pnt_mask_flat, pts, viewdirs, sample_local_ray_dirs.view(-1, sample_local_ray_dirs.shape[-1]), total_len, ray_valid, in_shape, dists)
+        if self.opt.only_nerf:
+            pts_rgb, pts_density = getattr(self, self.which_agg_model, None)(sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, vsize, weight * conf_coefficient, pnt_mask_flat, \
+                                                              pts, viewdirs, sample_local_ray_dirs.view(-1, sample_local_ray_dirs.shape[-1]), total_len, ray_valid, in_shape, dists)
+            return pts_rgb.view(1, -1, SR, pts_rgb.shape[-1]), pts_density.view(1, -1, SR, 1)
+        elif self.opt.nerf_raycolor:
+            output, pts_weight, pts_rgb, pts_density = getattr(self, self.which_agg_model, None)(sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, vsize, weight * conf_coefficient, pnt_mask_flat, \
+                                                              pts, viewdirs, sample_local_ray_dirs.view(-1, sample_local_ray_dirs.shape[-1]), total_len, ray_valid, in_shape, dists)
+        else:
+            output, pts_weight = getattr(self, self.which_agg_model, None)(sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, vsize, weight * conf_coefficient, pnt_mask_flat, \
+                                                              pts, viewdirs, sample_local_ray_dirs.view(-1, sample_local_ray_dirs.shape[-1]), total_len, ray_valid, in_shape, dists)
         if (self.opt.sparse_loss_weight <=0) and ("conf_coefficient" not in self.opt.zero_one_loss_items) and self.opt.prob == 0:
             weight, conf_coefficient = None, None
+
+        if self.opt.nerf_distill_allsampleloc:
+            loss_pts_weight = self.l2loss(pts_weight, torch.zeros_like(pts_weight))
+            if self.opt.nerf_raycolor:
+                return output.view(in_shape[:-1] + (self.opt.shading_color_channel_num + 1,)), loss_pts_weight, conf_coefficient, pts_rgb.view(1, -1, SR, 3), pts_density.view(1, -1, SR, 1)
+            else:
+                return output.view(in_shape[:-1] + (self.opt.shading_color_channel_num + 1,)), loss_pts_weight, conf_coefficient
         return output.view(in_shape[:-1] + (self.opt.shading_color_channel_num + 1,)), ray_valid.view(in_shape[:-1]), weight, conf_coefficient
 

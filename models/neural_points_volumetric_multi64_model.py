@@ -347,7 +347,7 @@ class NeuralPointsRayMarching(nn.Module):
             sampled_color_m, sampled_Rw2c_m, sampled_dir_m, sampled_conf_m, sampled_embedding_m, sampled_xyz_pers_m, sampled_xyz_m, sample_pnt_mask_m, \
                 sample_loc_m, sample_loc_w_m, sample_ray_dirs_m, sample_local_ray_dirs_m, ray_mask_tensor_m, vsize_m, grid_vox_sz_m = \
                 self.neural_points({"pixel_idx": pixel_idx_m, "camrotc2w": camrotc2w, "campos": campos, "near": near, "far": far,"focal": focal_m, "c2w":c2w, \
-                                    "h": h_m, "w": w_m, "intrinsic": intrinsic_m, "gt_image":gt_image, "raydir":raydir_m, "local_raydir": local_raydir_m, 'vsize':(np.array(self.opt.vsize)/2.0).tolist()}, use_middle=True)
+                                    "h": h_m, "w": w_m, "intrinsic": intrinsic_m, "gt_image":gt_image, "raydir":raydir_m, "local_raydir": local_raydir_m, 'vsize':(np.array(self.opt.vsize)/1.0).tolist()}, use_middle=True)
 
             decoded_features_m, ray_valid_m, weight_m, conf_coefficient_m = self.aggregator_middle(sampled_color_m, sampled_Rw2c_m, sampled_dir_m, sampled_conf_m, \
                 sampled_embedding_m, sampled_xyz_pers_m, sampled_xyz_m, sample_pnt_mask_m, sample_loc_m, sample_loc_w_m, sample_ray_dirs_m, sample_local_ray_dirs_m, vsize_m, grid_vox_sz_m)

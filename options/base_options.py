@@ -163,9 +163,34 @@ class BaseOptions:
                             type=int,
                             default=0,
                             help='plot loss curves with tensorboard')
+        parser.add_argument('--weight_norm',
+                            action='store_true',
+                            help='indicate a debug run')
+        parser.add_argument('--unified',
+                            action='store_true',
+                            help='indicate a debug run')
+        parser.add_argument('--nerf_distill_allsampleloc',
+                            action='store_true',
+                            help='indicate a debug run')
+        parser.add_argument('--nerf_raycolor',
+                            action='store_true',
+                            help='indicate a debug run')
+        parser.add_argument('--only_nerf',
+                            action='store_true',
+                            help='indicate a debug run')
+        parser.add_argument('--nerf_act_fn',
+                            action='store_true',
+                            help='indicate a debug run')
+        parser.add_argument('--nerf_distill',
+                            action='store_true',
+                            help='indicate a debug run')
         parser.add_argument('--debug',
                             action='store_true',
                             help='indicate a debug run')
+        parser.add_argument('--seq_num',
+                            type=int,
+                            default=5,
+                            help='feed batches in order without shuffling')
         parser.add_argument('--vid',
                             type=int,
                             default=0,

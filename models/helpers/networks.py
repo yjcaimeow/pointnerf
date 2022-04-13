@@ -171,6 +171,10 @@ def init_seq(s, init_type='xavier_uniform'):
             init_weights(a, init_type)
     init_weights(s[-1])
 
+def effective_range(pts, min_range, max_range):
+    # shape: N *3
+    pts = 3 * (pts - min_range) / (max_range - min_range) - 1.5
+    return pts
 
 def positional_encoding(positions, freqs, ori=False):
     '''encode positions with positional encoding

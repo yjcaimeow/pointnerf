@@ -937,7 +937,8 @@ class NeuralPoints(nn.Module):
         # fov filter @yingjie
         img_fea, img_fea_2h = None, None
         if self.opt.fov and use_middle==False:
-            if inputs["seq_id"] is not None:
+            #if inputs["seq_id"] is not None:
+            if "seq_id" in inputs:
                 self.xyz, _, fov_ids, pts_2d = get_lidar_in_image_fov(self.xyz_all[inputs["seq_id"]].squeeze(), c2w.squeeze(), intrinsic.squeeze(), xmin=0, ymin=0, xmax=int(w), ymax=int(h), return_more=True)
                 self.points_color = self.points_color_all[inputs["seq_id"]].squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
                 self.points_dir = self.points_dir_all[inputs["seq_id"]].squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
@@ -952,8 +953,6 @@ class NeuralPoints(nn.Module):
 
         elif self.opt.fov and use_middle:
             self.xyz_middle, _, fov_ids, _  = get_lidar_in_image_fov(self.xyz_middle_all, c2w.squeeze(), intrinsic.squeeze(), xmin=0, ymin=0, xmax=int(w), ymax=int(h), return_more=True)
-            #fov_ids = inputs['fov_ids'].squeeze()
-            #self.xyz_middle = self.xyz_middle_all[fov_ids]
             self.points_color_middle = self.points_color_middle_all.squeeze(0)[fov_ids].unsqueeze(0)
             self.points_dir_middle = self.points_dir_middle_all.squeeze(0)[fov_ids].unsqueeze(0)
             self.points_conf_middle = self.points_conf_middle_all.squeeze(0)[fov_ids].unsqueeze(0)

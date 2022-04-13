@@ -307,13 +307,24 @@ class NeuralPointsRayMarching(nn.Module):
                 intrinsic=None,
                 **kargs):
         output = {}
-        # B, channel, 292, 24, 32;      B, 3, 294, 24, 32;     B, 294, 24;     B, 291, 2
         sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, sample_local_ray_dirs, ray_mask_tensor, vsize, \
             grid_vox_sz = self.neural_points({"pixel_idx": pixel_idx, "camrotc2w": camrotc2w, "campos": campos, "near": near, "far": far,"focal": focal, "h": h, "w": w, \
                                               "c2w":c2w, "intrinsic": intrinsic,"gt_image":gt_image, "raydir":raydir, "id":id, 'vsize':self.opt.vsize, "local_raydir":local_raydir, "seq_id":seq_id})
-
-        decoded_features, ray_valid, weight, conf_coefficient = self.aggregator(sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, \
-            sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, sample_local_ray_dirs, vsize, grid_vox_sz)
+        if self.opt.nerf_distill_allsampleloc:
+            if self.opt.only_nerf:
+                pts_rgb, pts_density = self.aggregator(sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, \
+                    sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, sample_local_ray_dirs, vsize, grid_vox_sz)
+            elif self.opt.nerf_raycolor:
+                decoded_features, pts_weight, conf_coefficient, pts_rgb, pts_density = self.aggregator(sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, \
+                    sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, sample_local_ray_dirs, vsize, grid_vox_sz)
+            else:
+                decoded_features, pts_weight, conf_coefficient, max_value, min_value = self.aggregator(sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, \
+                    sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, sample_local_ray_dirs, vsize, grid_vox_sz)
+                print (id, max_value[0], max_value[1], max_value[2], min_value[0], min_value[1], min_value[2])
+            ray_valid = None
+        else:
+            decoded_features, ray_valid, weight, conf_coefficient = self.aggregator(sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, \
+                sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, sample_local_ray_dirs, vsize, grid_vox_sz)
         ray_dist = torch.cummax(sample_loc[..., 2], dim=-1)[0]
         ray_dist = torch.cat([ray_dist[..., 1:] - ray_dist[..., :-1], torch.full((ray_dist.shape[0], ray_dist.shape[1], 1), vsize[2], device=ray_dist.device)], dim=-1)
 
@@ -322,24 +333,28 @@ class NeuralPointsRayMarching(nn.Module):
             mask = torch.logical_or(mask, ray_dist > 2 * vsize[2])
         mask = mask.to(torch.float32)
         ray_dist = ray_dist * (1.0 - mask) + mask * vsize[2]
-        ray_dist *= ray_valid.float()
-        output["queried_shading"] = torch.logical_not(torch.any(ray_valid, dim=-1, keepdims=True)).repeat(1, 1, 3).to(torch.float32)
+        if self.opt.nerf_distill_allsampleloc==False:
+            ray_dist *= ray_valid.float()
+            output["queried_shading"] = torch.logical_not(torch.any(ray_valid, dim=-1, keepdims=True)).repeat(1, 1, 3).to(torch.float32)
         if self.return_color:
-            if "bg_ray" in kargs:
-                bg_color = None
-            (
-                ray_color,
-                point_color,
-                opacity,
-                acc_transmission,
-                blend_weight,
-                background_transmission,
-                _,
-            ) = ray_march(ray_dist, ray_valid, decoded_features, self.render_func, self.blend_func, bg_color, self.opt.shading_color_channel_num)
-            ray_color = self.tone_map(ray_color)
+            #if "bg_ray" in kargs:
+            #    bg_color = None
+            #(
+            #    ray_color,
+            #    point_color,
+            #    opacity,
+            #    acc_transmission,
+            #    blend_weight,
+            #    background_transmission,
+            #    _,
+            #) = ray_march(ray_dist, ray_valid, decoded_features, self.render_func, self.blend_func, bg_color, self.opt.shading_color_channel_num, self.opt.nerf_distill_allsampleloc, self.opt.nerf_act_fn, self.opt.unified)
+            #ray_color = self.tone_map(ray_color)
 
-            output["coarse_raycolor"] = ray_color
-            output["coarse_point_opacity"] = opacity
+            #output["coarse_raycolor"] = ray_color
+            #output["coarse_point_opacity"] = opacity
+            if self.opt.nerf_distill_allsampleloc and (self.opt.nerf_raycolor or self.opt.only_nerf):
+                nerf_raycolor = ray_march(ray_dist, ray_valid, torch.cat((pts_density, pts_rgb), dim=-1), self.render_func, self.blend_func, None, pts_rgb.shape[-1], self.opt.nerf_distill_allsampleloc, self.opt.nerf_act_fn)
+                output['coarse_raycolor'] = nerf_raycolor
         else:
             (
                 opacity,
@@ -354,46 +369,36 @@ class NeuralPointsRayMarching(nn.Module):
             weight = alpha_blend_weight.view(alpha_blend_weight.shape[:3])
             avg_depth = (weight * ray_ts).sum(-1) / (weight.sum(-1) + 1e-6)
             output["coarse_depth"] = avg_depth
-        output["coarse_is_background"] = background_transmission
-        output["ray_mask"] = ray_mask_tensor
-        if weight is not None:
-            output["weight"] = weight.detach()
-            output["blend_weight"] = blend_weight.detach()
-            output["conf_coefficient"] = conf_coefficient
 
-        res = self.fill_invalid(output, bg_color)
+        if self.opt.only_nerf==False:
+            output["coarse_is_background"] = background_transmission
+            output["ray_mask"] = ray_mask_tensor
+
+        #if self.opt.nerf_distill_allsampleloc and self.opt.only_nerf==False:
+        #    output["pts_weight"] = pts_weight
+        #    output["conf_coefficient"] = conf_coefficient
+        #else:
+        #    if weight is not None:
+        #        output["weight"] = weight.detach()
+        #        output["blend_weight"] = blend_weight.detach()
+        #        output["conf_coefficient"] = conf_coefficient
+
+        #if self.opt.unified==False:
+        #    output = self.fill_invalid(output, bg_color)
         img_h, img_w = h.item(), w.item()
-        if self.opt.neural_render=='cnn':
-            res['final_coarse_raycolor'] = self.neural_render_2d(res['coarse_raycolor'].reshape(1, img_h, img_w, self.opt.shading_color_channel_num)).reshape(1, -1, 3)
-        elif self.opt.neural_render=='style':
-            w_space = self.latent_to_w(self.S, style_code.reshape(1, 256))
-            w_styles = self.styles_def_to_tensor(w_space)
-            res['final_coarse_raycolor'] = self.G(w_styles, initial=res['coarse_raycolor'].reshape(1, img_h, img_w, self.opt.shading_color_channel_num).permute(0,3,1,2)).reshape(1, -1, 3)
-            #res['final_coarse_raycolor'] = self.G(w_styles, initial=res['coarse_raycolor'].reshape(1, img_h, img_w, self.opt.shading_color_channel_num).permute(0,3,1,2), \
-            #    depth_guide=(img_fea_h, img_fea_2h)).reshape(1, -1, 3)
-            #styles = self.mixing_noise(batch=1, latent_dim=256, prob=0.9)
-            #res['final_coarse_raycolor'] = self.G(res['coarse_raycolor'].reshape(1, img_h, img_w, self.opt.shading_color_channel_num).permute(0,3,1,2), styles).reshape(1, -1, 3)
-        return res
+        w_space = self.latent_to_w(self.S, style_code.reshape(1, 256))
+        w_styles = self.styles_def_to_tensor(w_space)
+        output['final_coarse_raycolor_half'] = self.G(w_styles, initial=output['coarse_raycolor'].reshape(1, img_h, img_w, self.opt.shading_color_channel_num).permute(0,3,1,2)).reshape(1, -1, 3)
+        return output
 
     def fill_invalid(self, output, bg_color):
-        #print (fmt.RED+'========')
-        #print (bg_color, bg_color.requires_grad)
-        #print ('========'+fmt.END)
-        # ray_mask:             torch.Size([1, 1024])
-        # coarse_is_background: torch.Size([1, 336, 1])  -> 1, 1024, 1
-        # coarse_raycolor:      torch.Size([1, 336, 3])  -> 1, 1024, 3
-        # coarse_point_opacity: torch.Size([1, 336, 24]) -> 1, 1024, 24
         ray_mask = output["ray_mask"]
         B, OR = ray_mask.shape
         ray_inds = torch.nonzero(ray_mask) # 336, 2
         coarse_is_background_tensor = torch.ones([B, OR, 1], dtype=output["coarse_is_background"].dtype, device=output["coarse_is_background"].device)
-        # print("coarse_is_background", output["coarse_is_background"].shape)
-        # print("coarse_is_background_tensor", coarse_is_background_tensor.shape)
-        # print("ray_inds", ray_inds.shape, ray_mask.shape)
         coarse_is_background_tensor[ray_inds[..., 0], ray_inds[..., 1], :] = output["coarse_is_background"]
         output["coarse_is_background"] = coarse_is_background_tensor
         output['coarse_mask'] = 1 - coarse_is_background_tensor
-        # coarse_raycolor_tensor = self.tonemap_func(
         coarse_raycolor_tensor = self.tone_map(
                 torch.ones([B, OR, self.opt.shading_color_channel_num], dtype=output["coarse_raycolor"].dtype, device=output["coarse_raycolor"].device) * bg_color[None, ...])
         coarse_raycolor_tensor[ray_inds[..., 0], ray_inds[..., 1], :] = output["coarse_raycolor"]
@@ -402,12 +407,4 @@ class NeuralPointsRayMarching(nn.Module):
         coarse_point_opacity_tensor = torch.zeros([B, OR, output["coarse_point_opacity"].shape[2]], dtype=output["coarse_point_opacity"].dtype, device=output["coarse_point_opacity"].device)
         coarse_point_opacity_tensor[ray_inds[..., 0], ray_inds[..., 1], :] = output["coarse_point_opacity"]
         output["coarse_point_opacity"] = coarse_point_opacity_tensor
-
-        queried_shading_tensor = torch.ones([B, OR, output["queried_shading"].shape[2]], dtype=output["queried_shading"].dtype, device=output["queried_shading"].device)
-        queried_shading_tensor[ray_inds[..., 0], ray_inds[..., 1], :] = output["queried_shading"]
-        output["queried_shading"] = queried_shading_tensor
-
-        # if self.opt.prob == 1 and "ray_max_shading_opacity" in output:
-        #     # print("ray_inds", ray_inds.shape, torch.sum(output["ray_mask"]))
-        #     output = self.unmask(ray_inds, output, ["ray_max_sample_loc_w", "ray_max_shading_opacity", "shading_avg_color", "shading_avg_dir", "shading_avg_conf", "shading_avg_embedding", "ray_max_far_dist"], B, OR)
         return output

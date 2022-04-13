@@ -383,7 +383,6 @@ def near_far_linear_ray_generation(campos,
     end_point_ts = near + end_point_ts
 
     middle_point_ts = (end_point_ts[:, :, :-1] + end_point_ts[:, :, 1:]) / 2
-    #import pdb; pdb.set_trace()
     raypos = campos[:, None, None, :] + raydir[:, :, None, :] * middle_point_ts[:, :, :, None]
     valid = torch.ones_like(middle_point_ts,
                             dtype=middle_point_ts.dtype,
@@ -512,7 +511,10 @@ def ray_march(ray_dist,
               render_func,
               blend_func,
               bg_color=None,
-              shading_color_channel_num=32):
+              shading_color_channel_num=32,
+              nerf_distill_allsampleloc=True,
+              nerf_acf_fn=False,
+              unified=False):
     # ray_dist: N x Rays x Samples
     # ray_valid: N x Rays x Samples
     # ray_features: N x Rays x Samples x Features
@@ -523,12 +525,16 @@ def ray_march(ray_dist,
     # acc_transmission: N x Rays x Samples
     # blend_weight: N x Rays x Samples x 1
     # background_transmission: N x Rays x 1
-    #import pdb; pdb.set_trace()
 
     point_color = render_func(ray_features)
 
     # we are essentially predicting predict 1 - e^-sigma
-    sigma = ray_features[..., 0] * ray_valid.float()
+    if nerf_distill_allsampleloc:
+        sigma = ray_features[..., 0]
+    else:
+        sigma = ray_features[..., 0] * ray_valid.float()
+    if nerf_acf_fn:
+        sigma = F.relu(sigma)
     opacity = 1 - torch.exp(-sigma * ray_dist)
 
     # cumprod exclusive
@@ -552,6 +558,8 @@ def ray_march(ray_dist,
         # print("background_transmission", torch.min(background_transmission), torch.max(background_transmission))
     background_blend_weight = blend_func(1, background_transmission)
     # print("ray_color", torch.max(torch.abs(ray_color)), torch.max(torch.abs(sigma)), torch.max(torch.abs(opacity)),torch.max(torch.abs(acc_transmission)), torch.max(torch.abs(background_transmission)), torch.max(torch.abs(acc_transmission)), torch.max(torch.abs(background_blend_weight)))
+    if bg_color is None and unified==False:
+        return ray_color
     return ray_color, point_color, opacity, acc_transmission, blend_weight, \
         background_transmission, background_blend_weight
 

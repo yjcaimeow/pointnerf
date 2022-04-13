@@ -105,14 +105,15 @@ class WaymoFtDataset(BaseDataset):
         self.define_transforms()
 
         import glob
-        self.seq_id, self.images, self.poses, self.intrinsic, self.points_xyz_all, self.camposes, self.centerdirs = [],[],[],[],[],[],[]
-        filenames = glob.glob(os.path.join(opt.filename, '*.npz'))
+        self.seq_id, self.images, self.images_4, self.poses, self.intrinsic, self.points_xyz_all, self.camposes, self.centerdirs = [],[],[],[],[],[],[],[]
+        filenames = glob.glob(os.path.join(opt.filename, '*.npz'))[0:opt.seq_num]
         self.sequence_length_list = []
         print(filenames)
         for fidx, filename in enumerate(filenames):
             waymo_data = np.load(filename)
             frames_length = len(waymo_data['poses'])
-            all_id_list = list(range(self.opt.frames_length)) #000000
+            all_id_list = list(range(frames_length)) #000000
+            #all_id_list = list(range(self.opt.frames_length)) #000000
             train_id_list = [all_id_list[i] for i in all_id_list if i%10!=0]
             #test_id_list = all_id_list[::self.step]
             id_list = train_id_list if self.split=="train" else all_id_list
@@ -124,7 +125,9 @@ class WaymoFtDataset(BaseDataset):
             self.centerdirs.append(torch.from_numpy(waymo_data['centerdirs'])[id_list])
             self.seq_id.append((torch.ones(len(id_list)) * fidx).long())
             self.sequence_length_list.append(len(id_list))
+            self.images_4.append(torch.from_numpy(self.resize(waymo_data['images']))[id_list])
         self.images = torch.cat(self.images)
+        self.images_4 = torch.cat(self.images_4)
         self.poses = torch.cat(self.poses)
         self.intrinsic = torch.stack(self.intrinsic)
         self.camposes = torch.cat(self.camposes)
@@ -133,7 +136,13 @@ class WaymoFtDataset(BaseDataset):
 
         self.norm_w2c, self.norm_c2w = torch.eye(4, device="cuda", dtype=torch.float32), torch.eye(4, device="cuda", dtype=torch.float32)
         self.total = len(self.images)
-        print("dataset total: including (images, poses, camposes, centerdirs) \n", self.split, self.images.shape, self.poses.shape, self.camposes.shape, self.centerdirs.shape)
+        print("dataset total: including (images, poses, camposes, centerdirs) \n", self.split, self.images.shape, self.poses.shape, self.camposes.shape, self.centerdirs.shape, self.images_4.shape)
+
+    def resize(self, imgs, img_H=128, img_W=192):
+        imgs_half_res = np.zeros((imgs.shape[0], img_H, img_W, 3))
+        for i,img in enumerate(imgs):
+            imgs_half_res[i] = cv2.resize(img,  (img_W, img_H), interpolation=cv2.INTER_AREA)
+        return imgs_half_res
 
     def __getitem__(self, id, crop=False, full_img=False):
         item = {}
@@ -181,6 +190,7 @@ class WaymoFtDataset(BaseDataset):
         item['raydir'] = torch.from_numpy(raydir).float()
         item['local_raydir'] = torch.from_numpy(local_dirs).float().reshape(-1,3)
         item['gt_image'] = np.reshape(img, (-1, 3))
+        item['gt_image_4'] = np.reshape(self.images_4[id], (-1, 3))
         return item
 
     @staticmethod

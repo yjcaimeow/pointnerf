@@ -394,6 +394,8 @@ class BaseRenderingModel(BaseModel):
                 self.input[key] = item.to(self.device)
 
         # gt required in loss compute
+        self.gt_image_4 = self.input['gt_image_4'].to(
+            self.device) if 'gt_image_4' in input else None
         self.gt_image = self.input['gt_image'].to(
             self.device) if 'gt_image' in input else None
 
@@ -542,12 +544,14 @@ class BaseRenderingModel(BaseModel):
         for i, name in enumerate(opt.color_loss_items):
             if name.startswith("ray_masked"):
                 unmasked_name = name[len("ray_masked")+1:]
-                masked_output = torch.masked_select(self.output[unmasked_name], (self.output["ray_mask"] > 0)[..., None].expand(-1, -1, 3)).reshape(1, -1, 3)
-                masked_gt = torch.masked_select(self.gt_image, (self.output["ray_mask"] > 0)[..., None].expand(-1, -1, 3)).reshape(1, -1, 3)
-                if masked_output.shape[1] > 0:
-                    loss = self.l2loss(masked_output, masked_gt)
-                else:
-                    loss = torch.tensor(0.0, dtype=torch.float32, device=masked_output.device)
+                #masked_output = torch.masked_select(self.output[unmasked_name], (self.output["ray_mask"] > 0)[..., None].expand(-1, -1, 3)).reshape(1, -1, 3)
+                masked_gt = torch.masked_select(self.gt_image_4, (self.output["ray_mask"] > 0)[..., None].expand(-1, -1, 3)).reshape(1, -1, 3).float()
+                loss = self.l2loss(self.output[unmasked_name], masked_gt)
+                #if masked_output.shape[1] > 0:
+                #    loss = self.l2loss(self.output[unmasked_name], masked_gt)
+                    #loss = self.l2loss(masked_output, masked_gt)
+                #else:
+                #    loss = torch.tensor(0.0, dtype=torch.float32, device=masked_output.device)
                 # print("loss", name, torch.max(torch.abs(loss)))
             elif name.startswith("ray_miss"):
                 unmasked_name = name[len("ray_miss") + 1:]
@@ -593,13 +597,17 @@ class BaseRenderingModel(BaseModel):
                 # img = csave.view(512, 640, 3).detach().numpy()
                 # self.save_image(img, filepath)
                 # print("psnrkey recal:",mse2psnr(torch.nn.MSELoss().to("cuda")(masked_output, masked_gt)) )
+            elif name.startswith("pts_weight"):
+                #loss = self.l2loss(self.output[name], torch.zeros_like(self.output[name]))
+                loss = self.output[name]
             else:
                 #if name not in self.output:
                 #    print(fmt.YELLOW + "No required color loss item: " + name +
                 #          fmt.END)
                 if name.split('_')[-1]=="half":
                     height, width = 512,768
-                    loss = self.l2loss(self.output[name[:-5]].reshape(height, width, 3)[height//2:,...], self.gt_image.reshape(height, width, 3)[height//2:,...])
+                    loss = self.l2loss(self.output[name].reshape(height, width, 3)[height//2:,...], self.gt_image.reshape(height, width, 3)[height//2:,...])
+                    #loss = self.l2loss(self.output[name[:-5]].reshape(height, width, 3)[height//2:,...], self.gt_image.reshape(height, width, 3)[height//2:,...])
                 else:
                     loss = self.l2loss(self.output[name], self.gt_image)
                 # print("loss", name, torch.max(torch.abs(loss)))
@@ -630,18 +638,18 @@ class BaseRenderingModel(BaseModel):
             setattr(self, "loss_" + name, loss)
 
         #zero_one regularization losses
-        for i, name in enumerate(opt.zero_one_loss_items):
-            if name not in self.output:
-                print(fmt.YELLOW + "No required zero_one loss item: " + name +
-                      fmt.END)
-                # setattr(self, "loss_" + name, torch.zeros([1], device="cuda", dtype=torch.float32))
-            else:
-                val = torch.clamp(self.output[name], self.opt.zero_epsilon,
-                                  1 - self.opt.zero_epsilon)
-                # print("self.output[name]",torch.min(self.output[name]), torch.max(self.output[name]))
-                loss = torch.mean(torch.log(val) + torch.log(1 - val))
-                self.loss_total += loss * opt.zero_one_loss_weights[i]
-                setattr(self, "loss_" + name, loss)
+        #for i, name in enumerate(opt.zero_one_loss_items):
+        #    if name not in self.output:
+        #        print(fmt.YELLOW + "No required zero_one loss item: " + name +
+        #              fmt.END)
+        #        # setattr(self, "loss_" + name, torch.zeros([1], device="cuda", dtype=torch.float32))
+        #    else:
+        #        val = torch.clamp(self.output[name], self.opt.zero_epsilon,
+        #                          1 - self.opt.zero_epsilon)
+        #        # print("self.output[name]",torch.min(self.output[name]), torch.max(self.output[name]))
+        #        loss = torch.mean(torch.log(val) + torch.log(1 - val))
+        #        self.loss_total += loss * opt.zero_one_loss_weights[i]
+        #        setattr(self, "loss_" + name, loss)
 
         # l2 square regularization losses
         for i, name in enumerate(opt.l2_size_loss_items):

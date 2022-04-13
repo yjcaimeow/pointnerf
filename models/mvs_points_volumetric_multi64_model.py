@@ -88,10 +88,7 @@ class MvsPointsVolumetricMulti64Model(NeuralPointsVolumetricMulti64Model):
             print("net_params", [(par[0], par[1].shape, par[1].requires_grad)  for par in param_lst if not par[0].startswith("module.neural_points")])
 
         if len(neural_params) > 0:
-            if self.stylecode!=None:
-                self.neural_point_optimizer = torch.optim.Adam(neural_params + [self.bg_color] + [self.stylecode], lr=opt.plr, betas=(0.9, 0.999))
-            else:
-                self.neural_point_optimizer = torch.optim.Adam(neural_params + [self.bg_color], lr=opt.plr, betas=(0.9, 0.999))
+            self.neural_point_optimizer = torch.optim.Adam(neural_params + [self.bg_color] + [self.stylecode], lr=opt.plr, betas=(0.9, 0.999))
             self.optimizers.append(self.neural_point_optimizer)
             print("neural_params", [(par[0], par[1].shape, par[1].requires_grad)  for par in param_lst if par[0].startswith("module.neural_points")])
         else:
