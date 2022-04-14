@@ -1,6 +1,6 @@
 #!/bin/bash
-filename='/mnt/cache/caiyingjie/vox_res'
-#filename='/home/yjcai/tmp/'
+#filename='/mnt/cache/caiyingjie/vox_res/'
+filename='/home/yjcai/tmp/'
 scale_factor=10
 frames_length=20
 zoom_in_scale=4
@@ -19,7 +19,7 @@ feat_grad=1
 conf_grad=1
 dir_grad=1
 color_grad=1
-vox_res=400
+vox_res=100
 vox_res_middle=100
 normview=0
 prune_thresh=-1
@@ -58,7 +58,7 @@ kernel_size=" 3 3 3 "
 query_size=" 3 3 3 "
 vsize=" 0.08 0.08 0.08 " 
 wcoord_query=1
-z_depth_dim=400
+z_depth_dim=50
 max_o=610000
 ranges=" 20.0 -10.0 -10.0 10.0 10.0 10.0 "
 SR=24
@@ -88,6 +88,7 @@ dist_xyz_freq=5
 num_feat_freqs=3
 dist_xyz_deno=0
 
+
 raydist_mode_unit=1
 dataset_name='scannet_ft'
 pin_data_in_memory=1
@@ -107,6 +108,7 @@ num_pos_freqs=10
 num_viewdir_freqs=4 #6
 
 random_sample='full_image'
+#random_sample='random'
 random_sample_size=56 # 32 * 32 = 1024
 
 batch_size=1
@@ -118,8 +120,9 @@ lr_decay_iters=1000000
 lr_decay_exp=0.1
 
 gpu_ids='0'
-checkpoints_dir='/mnt/lustre/caiyingjie/pointnerf/waymo_onlynerf_1.5bound_vsize0.08'
-#checkpoints_dir='debug'
+
+#checkpoints_dir='/mnt/lustre/caiyingjie/pointnerf/waymo_fall_vox100_v300.400_r0.08_res64-512_feach128_SR24_half_multires128._2.0_.newpcd_fov100_localdir.add'
+checkpoints_dir='debug'
 resume_dir="${checkpoints_dir}/waymo"
 
 save_iter_freq=10000
@@ -146,32 +149,33 @@ prob_mul=0.4
 
 zero_epsilon=1e-3
 
-visual_items='ray_masked_coarse_raycolor gt_image_ray_masked final_coarse_raycolor_half'
+visual_items='ray_masked_coarse_raycolor gt_image_ray_masked final_coarse_raycolor'
 zero_one_loss_items='conf_coefficient' #regularize background to be either 0 or 1
-zero_one_loss_weights="1.0 "
+zero_one_loss_weights=" 0.0001 "
 sparse_loss_weight=0
 
 color_loss_weights=" 1.0 "
 color_loss_items='final_coarse_raycolor_half '
-test_color_loss_items='coarse_raycolor ray_miss_coarse_raycolor ray_masked_coarse_raycolor final_coarse_raycolor_half'
+test_color_loss_items='coarse_raycolor ray_miss_coarse_raycolor ray_masked_coarse_raycolor final_coarse_raycolor'
+
+#color_loss_weights=" 1.0 0.0 0.0 1.0 "
+#color_loss_items='ray_masked_coarse_raycolor ray_miss_coarse_raycolor coarse_raycolor final_coarse_raycolor'
+#test_color_loss_items='coarse_raycolor ray_miss_coarse_raycolor ray_masked_coarse_raycolor final_coarse_raycolor'
 
 bg_color="white" #"0.0,0.0,0.0,1.0,1.0,1.0"
 split="train"
-seq_num=1
 
 GPUNUM=1
 NODENUM=1
 JOBNAME=pointnerf
 PART=pat_taurus
-#CUDA_LAUNCH_BLOCKING=1 python ./train.py \
-#--catWithLocaldir \
-CUDA_LAUNCH_BLOCKING=1 srun --partition=${PART} --gres=gpu:1 -N${NODENUM} --ntasks-per-node ${GPUNUM} --job-name=${JOBNAME} --kill-on-bad-exit=1 python ./train.py \
+
+#--multi_res \
+#CUDA_LAUNCH_BLOCKING=1 srun --partition=${PART} --gres=gpu:1 -N${NODENUM} --ntasks-per-node ${GPUNUM} --job-name=${JOBNAME} --kill-on-bad-exit=1 python ./train.py \
+CUDA_LAUNCH_BLOCKING=1 python ./train.py \
     --zoom_in_scale $zoom_in_scale \
-    --seq_num $seq_num \
     --catWithLocaldir \
     --nerf_distill_allsampleloc \
-    --only_nerf \
-    --unified \
     --fov \
     --filename $filename \
     --frames_length $frames_length \

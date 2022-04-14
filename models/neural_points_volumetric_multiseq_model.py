@@ -308,7 +308,7 @@ class NeuralPointsRayMarching(nn.Module):
                 **kargs):
         output = {}
         sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, sample_local_ray_dirs, ray_mask_tensor, vsize, \
-            grid_vox_sz = self.neural_points({"pixel_idx": pixel_idx, "camrotc2w": camrotc2w, "campos": campos, "near": near, "far": far,"focal": focal, "h": h, "w": w, \
+            grid_vox_sz, raypos_tensor, index_tensor = self.neural_points({"pixel_idx": pixel_idx, "camrotc2w": camrotc2w, "campos": campos, "near": near, "far": far,"focal": focal, "h": h, "w": w, \
                                               "c2w":c2w, "intrinsic": intrinsic,"gt_image":gt_image, "raydir":raydir, "id":id, 'vsize':self.opt.vsize, "local_raydir":local_raydir, "seq_id":seq_id})
         if self.opt.nerf_distill_allsampleloc:
             if self.opt.only_nerf:
@@ -319,8 +319,7 @@ class NeuralPointsRayMarching(nn.Module):
                     sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, sample_local_ray_dirs, vsize, grid_vox_sz)
             else:
                 decoded_features, pts_weight, conf_coefficient, max_value, min_value = self.aggregator(sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, \
-                    sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, sample_local_ray_dirs, vsize, grid_vox_sz)
-                print (id, max_value[0], max_value[1], max_value[2], min_value[0], min_value[1], min_value[2])
+                    sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, sample_local_ray_dirs, vsize, grid_vox_sz, raypos_tensor, index_tensor)
             ray_valid = None
         else:
             decoded_features, ray_valid, weight, conf_coefficient = self.aggregator(sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, \

@@ -492,25 +492,15 @@ class PointAggregator(torch.nn.Module):
 
 
     def viewmlp(self, sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, vsize, weight, pnt_mask_flat, \
-                pts, viewdirs, local_viewdirs, total_len, ray_valid, in_shape, dists):
+                pts, viewdirs, local_viewdirs, total_len, ray_valid, in_shape, dists, raypos_tensor, index_tensor):
         B, R, SR, K, _ = dists.shape
+        D = 50
         sampled_Rw2c = sampled_Rw2c.transpose(-1, -2)
         uni_w2c = sampled_Rw2c.dim() == 2
         if not uni_w2c:
             sampled_Rw2c_ray = sampled_Rw2c[:,:,:,0,:,:].view(-1, 3, 3)
             sampled_Rw2c = sampled_Rw2c.reshape(-1, 3, 3)[pnt_mask_flat, :, :]
         pts_ray, pts_pnt = None, None
-        if self.opt.agg_feat_xyz_mode != "None" or self.opt.agg_alpha_xyz_mode != "None" or self.opt.agg_color_xyz_mode != "None" or self.opt.nerf_distill or self.opt.nerf_distill_allsampleloc:
-            if self.num_freqs > 0:
-                pts = effective_range(pts, min_range = torch.tensor([-6311.6396,     0.0000,     0.0000])[None, ].cuda(), \
-                                      max_range = torch.tensor([0.0000, 12115.1953,   133.5073])[None,].cuda())
-                pts_ray = positional_encoding(pts, self.num_freqs)
-                if self.opt.nerf_distill:
-                    pts_ray = pts_ray[ray_valid, :]
-            if self.opt.agg_feat_xyz_mode != "None" and self.opt.agg_intrp_order > 0:
-                pts_pnt = pts[..., None, :].repeat(1, K, 1).view(-1, pts.shape[-1])
-                if self.opt.apply_pnt_mask > 0:
-                    pts_pnt=pts_pnt[pnt_mask_flat, :]
         viewdirs = viewdirs @ sampled_Rw2c if uni_w2c else (viewdirs[..., None, :] @ sampled_Rw2c_ray).squeeze(-2)
         if self.num_viewdir_freqs > 0:
             viewdirs = positional_encoding(viewdirs, self.num_viewdir_freqs, ori=True)
@@ -607,12 +597,6 @@ class PointAggregator(torch.nn.Module):
             output = torch.cat([alpha, color_output], dim=-1)
 
         elif self.opt.agg_intrp_order == 2:
-            if self.opt.nerf_distill_allsampleloc:
-                pts_feature, pts_density, pts_weight, pts_rgb = self.nerf_block(pts_ray, viewdirs)
-                if self.opt.only_nerf:
-                    return pts_rgb, pts_density
-            elif self.opt.nerf_distill:
-                pts_feature, pts_density, pts_weight, pts_rgb = self.nerf_block(pts_ray, viewdirs_part)
             alpha_in = feat
             if self.opt.agg_alpha_xyz_mode != "None":
                 alpha_in = torch.cat([alpha_in, pts], dim=-1)
@@ -639,8 +623,28 @@ class PointAggregator(torch.nn.Module):
                 alpha_holder[pnt_mask_flat, :] = alpha
             else:
                 alpha_holder = alpha
-            alpha = alpha_holder.view(B * R * SR, K, alpha_holder.shape[-1])
+            alpha = alpha_holder.view(B * R, SR, K, alpha_holder.shape[-1])
 
+            if self.opt.apply_pnt_mask > 0:
+                feat_holder = torch.zeros([B * R * SR * K, feat.shape[-1]], dtype=torch.float32, device=feat.device)
+                feat_holder[pnt_mask_flat, :] = feat
+            else:
+                feat_holder = feat
+            feat = feat_holder.view(B * R, SR, K, feat_holder.shape[-1])
+
+            import pdb; pdb.set_trace()
+            ###### combine nerf
+            index_tensor = index_tensor.squeeze().long()[...,None, None]
+            alpha_all = torch.zeros((B * R, D, K, alpha.shape[-1])).cuda()
+            alpha_all.scatter_(1, index_tensor.repeat(1,1,K,1), alpha)
+            feat_all = torch.zeros((B * R, D, K, feat.shape[-1])).cuda()
+            feat_all.scatter_(1, index_tensor.repeat(1,1,K,feat.shape[-1]), feat)
+
+            if self.opt.nerf_distill_allsampleloc:
+                pts_ray = positional_encoding(raypos_tensor.view(-1,3), self.num_freqs)
+                pts_feature, pts_density, pts_weight, pts_rgb = self.nerf_block(pts_ray, viewdirs)
+                if self.opt.only_nerf:
+                    return pts_rgb, pts_density
             if self.opt.context_weight:
                 alpha = torch.sum(alpha * weight_context, dim=-2).view([-1, alpha.shape[-1]])[ray_valid, :] # alpha
             else:
@@ -658,13 +662,6 @@ class PointAggregator(torch.nn.Module):
             #                                 device=alpha.device)
             # alpha_placeholder[ray_valid] = alpha
 
-            if self.opt.apply_pnt_mask > 0:
-                feat_holder = torch.zeros([B * R * SR * K, feat.shape[-1]], dtype=torch.float32, device=feat.device)
-                feat_holder[pnt_mask_flat, :] = feat
-            else:
-                feat_holder = feat
-            feat = feat_holder.view(B * R * SR, K, feat_holder.shape[-1])
-
             if self.opt.context_weight:
                 feat = torch.sum(feat * weight_context, dim=-2).view([-1, feat.shape[-1]])[ray_valid, :]
             else:
@@ -673,10 +670,6 @@ class PointAggregator(torch.nn.Module):
                     feat = torch.sum(feat * extended_weight, dim=-2).view([-1, feat.shape[-1]])
                 else:
                     feat = torch.sum(feat * weight, dim=-2).view([-1, feat.shape[-1]])[ray_valid, :]
-
-            if self.opt.nerf_distill:
-                feat = (1-pts_weight) * feat + pts_weight * pts_feature
-                alpha = (1-pts_weight) * alpha + pts_weight * pts_density
 
             color_in = feat
             if self.opt.agg_color_xyz_mode != "None":
@@ -785,7 +778,8 @@ class PointAggregator(torch.nn.Module):
         return sampled_conf - diff.detach()
 
 
-    def forward(self, sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, sample_local_ray_dirs, vsize, grid_vox_sz):
+    def forward(self, sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, \
+                sample_local_ray_dirs, vsize, grid_vox_sz, raypos_tensor, index_tensor):
         # return B * R * SR * channel
         '''
         :param sampled_conf: B x valid R x SR x K x 1
@@ -833,7 +827,7 @@ class PointAggregator(torch.nn.Module):
                 dists = torch.zeros([B, R, SR, K, 6], device=sampled_xyz_pers.device, dtype=sampled_xyz_pers.dtype)
 
         elif self.opt.agg_dist_pers == 20:
-
+            import pdb; pdb.set_trace()
             if sampled_xyz_pers.shape[1] > 0:
                 xdist = sampled_xyz_pers[..., 0] * sampled_xyz_pers[..., 2] - sample_loc[:, :, :, None, 0] * sample_loc[:, :, :, None, 2]
                 ydist = sampled_xyz_pers[..., 1] * sampled_xyz_pers[..., 2] - sample_loc[:, :, :, None, 1] * sample_loc[:, :, :, None, 2]
@@ -877,7 +871,7 @@ class PointAggregator(torch.nn.Module):
                                                               pts, viewdirs, sample_local_ray_dirs.view(-1, sample_local_ray_dirs.shape[-1]), total_len, ray_valid, in_shape, dists)
         else:
             output, pts_weight = getattr(self, self.which_agg_model, None)(sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, vsize, weight * conf_coefficient, pnt_mask_flat, \
-                                                              pts, viewdirs, sample_local_ray_dirs.view(-1, sample_local_ray_dirs.shape[-1]), total_len, ray_valid, in_shape, dists)
+                                                              pts, viewdirs, sample_local_ray_dirs.view(-1, sample_local_ray_dirs.shape[-1]), total_len, ray_valid, in_shape, dists, raypos_tensor, index_tensor)
         if (self.opt.sparse_loss_weight <=0) and ("conf_coefficient" not in self.opt.zero_one_loss_items) and self.opt.prob == 0:
             weight, conf_coefficient = None, None
 
