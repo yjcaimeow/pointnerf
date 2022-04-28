@@ -262,7 +262,8 @@ class NeuralPointsRayMarching(nn.Module):
         elif self.opt.neural_render=='style':
             #from models.model import Generator
             #self.G = Generator()
-            from models.neural_render.stylegan2_pytorch import StyleVectorizer, Generator
+            #from models.neural_render.stylegan2_pytorch import StyleVectorizer, Generator
+            from models.neural_render.stylegan2_pytorch_8x import StyleVectorizer, Generator
             self.S = StyleVectorizer(emb=self.opt.z_dim, depth=8)
             self.G = Generator(image_size=512, latent_dim=self.opt.z_dim, network_capacity=self.opt.network_capacity, input_dim=self.opt.shading_color_channel_num)
 
@@ -286,12 +287,13 @@ class NeuralPointsRayMarching(nn.Module):
         else:
             return [self.make_noise(batch, latent_dim, 1, device)]
 
-
     def forward(self,
                 campos,
                 raydir,
                 local_raydir=None,
+                raydir_wonorm=None,
                 gt_image=None,
+                gt_image_1over8=None,
                 bg_color=None,
                 camrotc2w=None,
                 pixel_idx=None,
@@ -307,53 +309,110 @@ class NeuralPointsRayMarching(nn.Module):
                 intrinsic=None,
                 **kargs):
         output = {}
-        sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, sample_local_ray_dirs, ray_mask_tensor, vsize, \
-            grid_vox_sz, raypos_tensor, index_tensor = self.neural_points({"pixel_idx": pixel_idx, "camrotc2w": camrotc2w, "campos": campos, "near": near, "far": far,"focal": focal, "h": h, "w": w, \
-                                              "c2w":c2w, "intrinsic": intrinsic,"gt_image":gt_image, "raydir":raydir, "id":id, 'vsize':self.opt.vsize, "local_raydir":local_raydir, "seq_id":seq_id})
-        if self.opt.nerf_distill_allsampleloc:
+        sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, \
+            sample_ray_dirs, sample_local_ray_dirs, ray_mask_tensor, vsize, grid_vox_sz, raypos_tensor, index_tensor = self.neural_points({"pixel_idx": pixel_idx, \
+            "camrotc2w": camrotc2w, "campos": campos, "near": near, "far": far, \
+            "focal": focal, "h": h, "w": w, "c2w":c2w, "intrinsic": intrinsic,"gt_image":gt_image, \
+            "raydir":raydir, "id":id, 'vsize':self.opt.vsize, "local_raydir":local_raydir, "seq_id":seq_id})
+        ray_valid = None
+        img_h, img_w = h.item(), w.item()
+        if self.opt.unified:
             if self.opt.only_nerf:
                 pts_rgb, pts_density = self.aggregator(sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, \
-                    sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, sample_local_ray_dirs, vsize, grid_vox_sz)
-            elif self.opt.nerf_raycolor:
-                decoded_features, pts_weight, conf_coefficient, pts_rgb, pts_density = self.aggregator(sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, \
-                    sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, sample_local_ray_dirs, vsize, grid_vox_sz)
+                    sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, sample_local_ray_dirs, vsize, grid_vox_sz, \
+                    raypos_tensor, index_tensor, raydir, local_raydir)
             else:
-                decoded_features, pts_weight, conf_coefficient, max_value, min_value = self.aggregator(sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, \
-                    sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, sample_local_ray_dirs, vsize, grid_vox_sz, raypos_tensor, index_tensor)
-            ray_valid = None
+                decoded_features, pts_weight, conf_coefficient = self.aggregator(sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, \
+                    sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, sample_local_ray_dirs, vsize, grid_vox_sz, \
+                    raypos_tensor, index_tensor, raydir, local_raydir)
+        elif self.opt.proposal_nerf:
+            decoded_features, extra_decoded_feature, extra_sample_loc, coarse_rgb, extra_nerf_feature, extra_nerf_weight, pts_weight = self.aggregator(sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, \
+                    sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, sample_local_ray_dirs, vsize, grid_vox_sz, \
+                    raypos_tensor, index_tensor, raydir, local_raydir, campos, raydir_wonorm, self.render_func, self.blend_func, seq_id)
+            output["pts_weight"] = pts_weight
+            output['nerf_coarse_raycolor'] = coarse_rgb
         else:
             decoded_features, ray_valid, weight, conf_coefficient = self.aggregator(sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, \
                 sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, sample_local_ray_dirs, vsize, grid_vox_sz)
-        ray_dist = torch.cummax(sample_loc[..., 2], dim=-1)[0]
+        ''' ray_dist from sample_loc to raypos_tensor'''
+        #output["range_min"] = torch.min(raypos_tensor.view(-1,3), -2)
+        #output["range_max"] = torch.max(raypos_tensor.view(-1,3), -2)
+        if self.opt.unified:
+            ray_dist = torch.cummax(raypos_tensor[..., 1], dim=-1)[0]
+        elif self.opt.proposal_nerf and (self.opt.is_train or self.opt.inference_use_nerf):
+            sample_z, sorted_indexs = torch.sort(torch.cat([sample_loc_w.squeeze()[...,1], extra_sample_loc[...,1]], -1), -1)
+
+            decoded_features = decoded_features.view(-1, self.opt.SR, self.opt.shading_color_channel_num+1)
+            extra_decoded_feature = extra_decoded_feature.view(-1, self.opt.N_importance, self.opt.shading_color_channel_num+1)
+
+            concated_decoded_features = torch.cat([decoded_features, extra_decoded_feature], dim=-2)
+
+            #decoded_features = torch.zeros(concated_decoded_features.shape).cuda()
+            #decoded_features.scatter_(1, sorted_indexs[...,None].repeat(1,1,concated_decoded_features.shape[-1]), concated_decoded_features)
+            decoded_features = torch.gather(concated_decoded_features, 1, sorted_indexs[...,None].repeat(1,1,concated_decoded_features.shape[-1]))
+
+            ray_dist = torch.cummax(sample_z, dim=-1)[0][None,...]
+            weight=None
+
+        elif self.opt.proposal_nerf:
+            sample_z, sorted_indexs = torch.sort(sample_loc_w.squeeze()[...,1], -1)
+
+            concated_decoded_features = decoded_features.view(-1, self.opt.SR, self.opt.shading_color_channel_num+1)
+
+            decoded_features = torch.gather(concated_decoded_features, 1, sorted_indexs[...,None].repeat(1,1,concated_decoded_features.shape[-1]))
+
+            ray_dist = torch.cummax(sample_z, dim=-1)[0][None,...]
+            weight=None
+
+        else:
+            ray_dist = torch.cummax(sample_loc[..., 2], dim=-1)[0]
+
         ray_dist = torch.cat([ray_dist[..., 1:] - ray_dist[..., :-1], torch.full((ray_dist.shape[0], ray_dist.shape[1], 1), vsize[2], device=ray_dist.device)], dim=-1)
 
-        mask = ray_dist < 1e-8
-        if self.opt.raydist_mode_unit > 0:
-            mask = torch.logical_or(mask, ray_dist > 2 * vsize[2])
-        mask = mask.to(torch.float32)
-        ray_dist = ray_dist * (1.0 - mask) + mask * vsize[2]
-        if self.opt.nerf_distill_allsampleloc==False:
+        if self.opt.proposal_nerf:
+            ray_dist[ray_dist>100]=vsize[2]
+        else:
+            mask = ray_dist < 1e-8
+            if self.opt.raydist_mode_unit > 0:
+                mask = torch.logical_or(mask, ray_dist > 2 * vsize[2])
+            mask = mask.to(torch.float32)
+            ray_dist = ray_dist * (1.0 - mask) + mask * vsize[2]
+
+        if self.opt.unified==False and self.opt.proposal_nerf==False:
             ray_dist *= ray_valid.float()
             output["queried_shading"] = torch.logical_not(torch.any(ray_valid, dim=-1, keepdims=True)).repeat(1, 1, 3).to(torch.float32)
         if self.return_color:
-            #if "bg_ray" in kargs:
-            #    bg_color = None
-            #(
-            #    ray_color,
-            #    point_color,
-            #    opacity,
-            #    acc_transmission,
-            #    blend_weight,
-            #    background_transmission,
-            #    _,
-            #) = ray_march(ray_dist, ray_valid, decoded_features, self.render_func, self.blend_func, bg_color, self.opt.shading_color_channel_num, self.opt.nerf_distill_allsampleloc, self.opt.nerf_act_fn, self.opt.unified)
-            #ray_color = self.tone_map(ray_color)
+            if "bg_ray" in kargs:
+                bg_color = None
+            if self.opt.only_nerf==False:
+                (
+                    ray_color,
+                    point_color,
+                    opacity,
+                    acc_transmission,
+                    blend_weight,
+                    background_transmission,
+                    sigma,
+                ) = ray_march(ray_dist, ray_valid, decoded_features, self.render_func, self.blend_func, bg_color, self.opt.shading_color_channel_num, self.opt.unified)
+                ray_color = self.tone_map(ray_color)
 
-            #output["coarse_raycolor"] = ray_color
-            #output["coarse_point_opacity"] = opacity
-            if self.opt.nerf_distill_allsampleloc and (self.opt.nerf_raycolor or self.opt.only_nerf):
-                nerf_raycolor = ray_march(ray_dist, ray_valid, torch.cat((pts_density, pts_rgb), dim=-1), self.render_func, self.blend_func, None, pts_rgb.shape[-1], self.opt.nerf_distill_allsampleloc, self.opt.nerf_act_fn)
+                output["coarse_raycolor"] = ray_color
+                output["coarse_point_opacity"] = opacity
+
+                if self.opt.proposal_nerf:
+                    output["sigma"] = extra_decoded_feature[...,0]
+                    nerf_opacity = torch.zeros(opacity.squeeze().shape).cuda()
+                    nerf_opacity.scatter_(1, sorted_indexs, opacity.squeeze())
+                    output["nerf_opacity"] = nerf_opacity[...,self.opt.SR:]
+                    output["nerf_xyz"] = extra_sample_loc
+                    if self.opt.nerf_create_points:
+                        # xyz and feature from nerf
+                        output["nerf_feature"] = extra_nerf_feature.view(img_h*img_w, self.opt.N_importance, extra_nerf_feature.shape[-1])
+                        output["nerf_confidance"] = extra_nerf_weight.view(img_h*img_w, self.opt.N_importance, extra_nerf_weight.shape[-1])
+            else:
+                nerf_raycolor, _, _,_,_,_,_ = ray_march(ray_dist, ray_valid, torch.cat((pts_density, pts_rgb), dim=-1), self.render_func, self.blend_func, None, pts_rgb.shape[-1], self.opt.unified)
                 output['coarse_raycolor'] = nerf_raycolor
+                weight=None
         else:
             (
                 opacity,
@@ -362,7 +421,6 @@ class NeuralPointsRayMarching(nn.Module):
                 background_transmission,
                 _,
             ) = alpha_ray_march(ray_dist, ray_valid, decoded_features, self.blend_func)
-
         if self.return_depth:
             alpha_blend_weight = opacity * acc_transmission
             weight = alpha_blend_weight.view(alpha_blend_weight.shape[:3])
@@ -373,21 +431,19 @@ class NeuralPointsRayMarching(nn.Module):
             output["coarse_is_background"] = background_transmission
             output["ray_mask"] = ray_mask_tensor
 
-        #if self.opt.nerf_distill_allsampleloc and self.opt.only_nerf==False:
-        #    output["pts_weight"] = pts_weight
-        #    output["conf_coefficient"] = conf_coefficient
-        #else:
-        #    if weight is not None:
-        #        output["weight"] = weight.detach()
-        #        output["blend_weight"] = blend_weight.detach()
-        #        output["conf_coefficient"] = conf_coefficient
-
-        #if self.opt.unified==False:
-        #    output = self.fill_invalid(output, bg_color)
-        img_h, img_w = h.item(), w.item()
+        if self.opt.unified and self.opt.only_nerf==False:
+            output["pts_weight"] = pts_weight
+            output["conf_coefficient"] = conf_coefficient
+        else:
+            if weight is not None:
+                output["weight"] = weight.detach()
+                output["blend_weight"] = blend_weight.detach()
+                output["conf_coefficient"] = conf_coefficient
+        if self.opt.proposal_nerf==False and (self.opt.unified==False or self.opt.only_nerf==False):
+            output = self.fill_invalid(output, bg_color)
         w_space = self.latent_to_w(self.S, style_code.reshape(1, 256))
         w_styles = self.styles_def_to_tensor(w_space)
-        output['final_coarse_raycolor_half'] = self.G(w_styles, initial=output['coarse_raycolor'].reshape(1, img_h, img_w, self.opt.shading_color_channel_num).permute(0,3,1,2)).reshape(1, -1, 3)
+        output['final_coarse_raycolor'] = self.G(w_styles, initial=output['coarse_raycolor'].reshape(1, img_h, img_w, self.opt.shading_color_channel_num).permute(0,3,1,2)).reshape(1, -1, 3)
         return output
 
     def fill_invalid(self, output, bg_color):

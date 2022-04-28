@@ -78,19 +78,19 @@ class MvsPointsVolumetricMultiseqModel(NeuralPointsVolumetricMultiseqModel):
                                           lr=opt.lr,
                                           betas=(0.9, 0.999))
             self.optimizers.append(self.optimizer)
-            print("net_params", [(par[0], par[1].shape, par[1].requires_grad)  for par in param_lst if not par[0].startswith("module.neural_points")])
+            #print("net_params", [(par[0], par[1].shape, par[1].requires_grad)  for par in param_lst if not par[0].startswith("module.neural_points")])
 
         if len(neural_params) > 0:
             #if self.stylecode!=None:
             #    self.neural_point_optimizer = torch.optim.Adam(neural_params + [self.bg_color] + [self.stylecode], lr=opt.plr, betas=(0.9, 0.999))
             #else:
             #    self.neural_point_optimizer = torch.optim.Adam(neural_params + [self.bg_color], lr=opt.plr, betas=(0.9, 0.999))
-            if opt.unified:
+            if opt.unified or opt.proposal_nerf:
                 self.neural_point_optimizer = torch.optim.Adam(neural_params + [self.stylecode], lr=opt.plr, betas=(0.9, 0.999))
             else:
                 self.neural_point_optimizer = torch.optim.Adam(neural_params + [self.bg_color] + [self.stylecode], lr=opt.plr, betas=(0.9, 0.999))
             self.optimizers.append(self.neural_point_optimizer)
-            print("neural_params", [(par[0], par[1].shape, par[1].requires_grad)  for par in param_lst if par[0].startswith("module.neural_points")])
+            #print("neural_params", [(par[0], par[1].shape, par[1].requires_grad)  for par in param_lst if par[0].startswith("module.neural_points")])
         else:
             # When not doing per-scene optimization
             print("no neural points as nn.Parameter")
@@ -178,7 +178,8 @@ class MvsPointsVolumetricMultiseqModel(NeuralPointsVolumetricMultiseqModel):
             self.setup_optimizer(self.opt)
 
     def prune_points(self, thresh):
-        self.neural_points.prune(thresh)
+        self.neural_points.prune_points(thresh)
+        #self.neural_points.prune(thresh)
 
     def clean_optimizer_scheduler(self):
         # self.neural_points.querier.clean_up()
@@ -238,9 +239,11 @@ class MvsPointsVolumetricMultiseqModel(NeuralPointsVolumetricMultiseqModel):
         return self.net_mvs.query_embedding(HDWD, cam_xyz, photometric_confidence, img_feats, c2ws, w2cs, intrinsics, cam_vid, pointdir_w=pointdir_w)
 
 
-    def grow_points(self, points_xyz, points_embedding, points_color, points_dir, points_conf):
-        self.neural_points.grow_points(points_xyz, points_embedding, points_color, points_dir, points_conf)
+    def grow_points(self, points_xyz, points_embedding, points_conf):
+        self.neural_points.grow_points(add_xyz=points_xyz, add_embedding=points_embedding, add_conf=points_conf)
         # self.neural_points.reset_querier()
+        if self.opt.feedforward == 0 and self.opt.is_train:
+            self.setup_optimizer(self.opt)
 
     def cleanup(self):
         if hasattr(self, "neural_points"):
