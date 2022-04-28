@@ -629,7 +629,6 @@ class PointAggregator_middle(torch.nn.Module):
             if self.opt.agg_color_xyz_mode != "None":
                 color_in = torch.cat([color_in, pts], dim=-1)
 
-            #import pdb; pdb.set_trace()
             if self.opt.catWithLocaldir:
                 color_in = torch.cat([color_in, local_viewdirs], dim=-1)
             else:

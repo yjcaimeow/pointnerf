@@ -93,7 +93,6 @@ class BaseOptions:
                             type=int,
                             help='# threads for loading data')
 
-
         #================================ model ================================#
         parser.add_argument('--combination',
                             default="concat",
@@ -151,6 +150,14 @@ class BaseOptions:
                             type=int,
                             default=30,
                             help='frames length')
+        parser.add_argument('--N_importance',
+                            type=int,
+                            default=128,
+                            help='input batch size')
+        parser.add_argument('--N_samples',
+                            type=int,
+                            default=64,
+                            help='input batch size')
         parser.add_argument('--batch_size',
                             type=int,
                             default=1,
@@ -163,13 +170,25 @@ class BaseOptions:
                             type=int,
                             default=0,
                             help='plot loss curves with tensorboard')
+        parser.add_argument('--contain_coarse',
+                            action='store_true',
+                            help='indicate a debug run')
+        parser.add_argument('--half_supervision',
+                            action='store_true',
+                            help='indicate a debug run')
+        parser.add_argument('--pe_bound',
+                            action='store_true',
+                            help='indicate a debug run')
         parser.add_argument('--weight_norm',
                             action='store_true',
                             help='indicate a debug run')
-        parser.add_argument('--unified',
+        parser.add_argument('--alpha_as_weight',
                             action='store_true',
                             help='indicate a debug run')
-        parser.add_argument('--nerf_distill_allsampleloc',
+        parser.add_argument('--proposal_nerf',
+                            action='store_true',
+                            help='indicate a debug run')
+        parser.add_argument('--unified',
                             action='store_true',
                             help='indicate a debug run')
         parser.add_argument('--nerf_raycolor',
@@ -178,15 +197,31 @@ class BaseOptions:
         parser.add_argument('--only_nerf',
                             action='store_true',
                             help='indicate a debug run')
-        parser.add_argument('--nerf_act_fn',
+        parser.add_argument('--nerf_distill',
                             action='store_true',
                             help='indicate a debug run')
-        parser.add_argument('--nerf_distill',
+        parser.add_argument('--nerf_aug',
+                            action='store_true',
+                            help='indicate a debug run')
+        parser.add_argument('--multi_nerf',
+                            action='store_true',
+                            help='indicate a debug run')
+        parser.add_argument('--inference_use_nerf',
                             action='store_true',
                             help='indicate a debug run')
         parser.add_argument('--debug',
                             action='store_true',
                             help='indicate a debug run')
+        parser.add_argument('--prune_points',
+                            action='store_true',
+                            help='indicate a debug run')
+        parser.add_argument('--nerf_create_points',
+                            action='store_true',
+                            help='indicate a debug run')
+        parser.add_argument('--iter_pg',
+                            type=int,
+                            default=100,
+                            help='feed batches in order without shuffling')
         parser.add_argument('--seq_num',
                             type=int,
                             default=5,

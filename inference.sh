@@ -1,7 +1,6 @@
 #!/bin/bash
 filename='/mnt/cache/caiyingjie/vox_res_all/waymo_fall_1006_vox100_res128-512.npz'
 #filename='/home/yjcai/tmp/'
-#filename=$1
 scale_factor=20
 frames_length=30
 zoom_in_scale=8
@@ -9,7 +8,8 @@ nrCheckpoint="../checkpoints"
 nrDataRoot="../data_src"
 name='waymo'
 
-resume_iter=200000
+resume_iter=$2
+#resume_iter=best #latest
 
 data_root="${nrDataRoot}/scannet/scans/"
 scan="scene0241_01"
@@ -22,7 +22,7 @@ color_grad=1
 vox_res=400
 vox_res_middle=100
 normview=0
-prune_thresh=0.1
+prune_thresh=-1
 prune_iter=-1
 
 feedforward=0
@@ -120,7 +120,7 @@ lr_decay_exp=0.1
 
 gpu_ids='0'
 
-#checkpoints_dir="/mnt/lustre/caiyingjie/pointnerf/unified.f30.nerf_4_128.shading_layers_2_2.create_points_0.7"
+#checkpoints_dir="/mnt/lustre/caiyingjie/pointnerf/s64.e512.D_300.SR_12.vsize_0.08.voxres_400.frame30.unified_proposal_gather"
 checkpoints_dir=$1
 resume_dir="${checkpoints_dir}/waymo"
 
@@ -134,7 +134,7 @@ n_threads=0
 
 train_and_test=0 #1
 test_num=10
-test_freq=50 #1200 #1200 #30184 #30184 #50000
+test_freq=100 #1200 #1200 #30184 #30184 #50000
 print_freq=1
 test_num_step=1
 
@@ -152,9 +152,8 @@ visual_items='ray_masked_coarse_raycolor gt_image_ray_masked final_coarse_raycol
 zero_one_loss_items='conf_coefficient' #regularize background to be either 0 or 1
 zero_one_loss_weights=" 0.0001 "
 sparse_loss_weight=0
-iter_pg=200
 
-color_loss_weights=" 1.0 1.0 0.01 "
+color_loss_weights=" 1.0 1.0 0.1 "
 color_loss_items='final_coarse_raycolor nerf_coarse_raycolor pts_weight '
 test_color_loss_items='coarse_raycolor ray_miss_coarse_raycolor ray_masked_coarse_raycolor final_coarse_raycolor'
 
@@ -172,14 +171,12 @@ PART=pat_taurus
 #--half_supervision \
 #--proposal_nerf \
 #--nerf_create_points \
-#--prune_points \
-CUDA_LAUNCH_BLOCKING=1 srun --partition=${PART} --gres=gpu:1 -N${NODENUM} --ntasks-per-node ${GPUNUM} --job-name=${JOBNAME} --kill-on-bad-exit=1 python ./train.py \
+#--inference_use_nerf \
+CUDA_LAUNCH_BLOCKING=1 srun --partition=${PART} --gres=gpu:1 -N${NODENUM} --ntasks-per-node ${GPUNUM} --job-name=${JOBNAME} --kill-on-bad-exit=1 python ./test.py \
     --zoom_in_scale $zoom_in_scale \
     --seq_num ${seq_num} \
     --catWithLocaldir \
     --proposal_nerf \
-    --nerf_create_points \
-    --iter_pg ${iter_pg} \
     --pe_bound \
     --fov \
     --filename $filename \

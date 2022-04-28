@@ -396,6 +396,8 @@ class BaseRenderingModel(BaseModel):
         # gt required in loss compute
         self.gt_image_4 = self.input['gt_image_4'].to(
             self.device) if 'gt_image_4' in input else None
+        self.gt_image_1over8 = self.input['gt_image_1over8'].to(
+            self.device) if 'gt_image_1over8' in input else None
         self.gt_image = self.input['gt_image'].to(
             self.device) if 'gt_image' in input else None
 
@@ -410,9 +412,10 @@ class BaseRenderingModel(BaseModel):
         for key, item in self.output.items():
             if key in self.visual_names:
                 setattr(self, key, item)
-        if "coarse_raycolor" not in self.visual_names:
-            key = "coarse_raycolor"
-            setattr(self, key, self.output[key])
+        # caiyingjie
+        #if "coarse_raycolor" not in self.visual_names:
+        #    key = "coarse_raycolor"
+        #    setattr(self, key, self.output[key])
 
     def check_setup_renderFunc_channels(self, opt):
         ''' Find render functions;
@@ -600,14 +603,20 @@ class BaseRenderingModel(BaseModel):
             elif name.startswith("pts_weight"):
                 #loss = self.l2loss(self.output[name], torch.zeros_like(self.output[name]))
                 loss = self.output[name]
+            elif name == "nerf_coarse_raycolor":
+                if self.opt.half_supervision:
+                    height, width = 64, 96
+                    loss = self.l2loss(self.output[name].view(height, width, 3)[height//2:,...].float(), self.gt_image_1over8.view(height, width, 3)[height//2:,...].float())
+                else:
+                    loss = self.l2loss(self.output[name].float(), self.gt_image_1over8.float())
             else:
                 #if name not in self.output:
                 #    print(fmt.YELLOW + "No required color loss item: " + name +
                 #          fmt.END)
-                if name.split('_')[-1]=="half":
+                if self.opt.half_supervision:
+#                if name.split('_')[-1]=="half":
                     height, width = 512,768
                     loss = self.l2loss(self.output[name].reshape(height, width, 3)[height//2:,...], self.gt_image.reshape(height, width, 3)[height//2:,...])
-                    #loss = self.l2loss(self.output[name[:-5]].reshape(height, width, 3)[height//2:,...], self.gt_image.reshape(height, width, 3)[height//2:,...])
                 else:
                     loss = self.l2loss(self.output[name], self.gt_image)
                 # print("loss", name, torch.max(torch.abs(loss)))

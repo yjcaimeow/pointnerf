@@ -549,7 +549,7 @@ class DiscriminatorBlock(nn.Module):
         return x
 
 class Generator(nn.Module):
-    def __init__(self, image_size, latent_dim, network_capacity = 16, transparent = False, attn_layers = [], no_const = False, fmap_max = 512, init_channels=128, use_guide=False, combination='concat'):
+    def __init__(self, image_size, latent_dim, network_capacity = 16, transparent = False, attn_layers = [], no_const = False, fmap_max = 512, input_dim=128, use_guide=False, combination='concat'):
         super().__init__()
         self.image_size = image_size
         self.latent_dim = latent_dim
@@ -561,7 +561,7 @@ class Generator(nn.Module):
 
         set_fmap_max = partial(min, fmap_max)
         filters = list(map(set_fmap_max, filters))
-        #init_channels = 128
+        init_channels = input_dim
         #init_channels = filters[0]
         filters = [init_channels, *filters]
         if use_guide and self.combination=='concat':
@@ -570,7 +570,6 @@ class Generator(nn.Module):
             in_out_pairs = zip([128, 128, 128, 64], [128, 128, 64, 32])
         #in_out_pairs = zip([128, 128, 96], [128, 64, 32])
         #in_out_pairs = zip(filters[:-1], filters[1:])
-        #import pdb; pdb.set_trace()
         self.no_const = no_const
 
         #if no_const:
@@ -619,11 +618,11 @@ class Generator(nn.Module):
             if exists(attn):
                 x = attn(x)
             x, rgb = block(x, rgb, style, input_noise)
-            if guide!=None and x.shape[2]==128:
-                if self.combination=='concat':
-                    x = torch.cat((x, guide), dim=1)
-                elif self.combination=='add':
-                    x = x + guide
+            #if guide!=None and x.shape[2]==128:
+            #    if self.combination=='concat':
+            #        x = torch.cat((x, guide), dim=1)
+            #    elif self.combination=='add':
+            #        x = x + guide
 #            if guide_512!=None and x.shape[2]==512:
 #                x = torch.cat((x, guide_512), dim=1)
 #        rgb = self.to_rgb(x, rgb, style)

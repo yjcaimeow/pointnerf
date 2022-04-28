@@ -628,7 +628,6 @@ class lighting_fast_querier():
         gridSize = int((B * N + kMaxThreadsPerBlock - 1) / kMaxThreadsPerBlock)
 
         coor_occ_tensor, occ_2_coor_tensor, coor_2_occ_tensor, occ_idx_tensor, occ_numpnts_tensor, occ_2_pnts_tensor = self.build_occ_vox(point_xyz_w_tensor, actual_numpoints_tensor, B, N, P, max_o, scaled_vdim_np, kMaxThreadsPerBlock, gridSize, scaled_vsize_gpu, scaled_vdim_gpu, query_size_gpu, grid_size_vol, d_coord_shift)
-        #import pdb; pdb.set_trace()
         # torch.cuda.synchronize()
         # print("coor_occ_tensor", torch.min(coor_occ_tensor), torch.max(coor_occ_tensor), torch.min(occ_2_coor_tensor), torch.max(occ_2_coor_tensor), torch.min(coor_2_occ_tensor), torch.max(coor_2_occ_tensor), torch.min(occ_idx_tensor), torch.max(occ_idx_tensor), torch.min(occ_numpnts_tensor), torch.max(occ_numpnts_tensor), torch.min(occ_2_pnts_tensor), torch.max(occ_2_pnts_tensor), occ_2_pnts_tensor.shape)
         # print("occ_numpnts_tensor", torch.sum(occ_numpnts_tensor > 0), ranges_np)
@@ -655,9 +654,13 @@ class lighting_fast_querier():
         # save_points(raypos_tensor.reshape(-1, 3), "./", "rawraypos_pnts")
         # raypos_masked = torch.masked_select(raypos_tensor, raypos_mask_tensor[..., None] > 0)
         # save_points(raypos_masked.reshape(-1, 3), "./", "raypos_pnts")
-        ray_mask_tensor = torch.max(raypos_mask_tensor, dim=-1)[0] >= 0 # B, R
+        if self.opt.unified or self.opt.proposal_nerf:
+            ray_mask_tensor = torch.max(raypos_mask_tensor, dim=-1)[0] >= 0 # B, R
+        else:
+            ray_mask_tensor = torch.max(raypos_mask_tensor, dim=-1)[0] > 0 # B, R
+
         R = torch.max(torch.sum(ray_mask_tensor.to(torch.int32))).cpu().numpy()
-        index_tensor = torch.full([B, R, SR], 49, dtype=torch.int32, device=device)
+        index_tensor = torch.full([B, R, SR], self.opt.z_depth_dim-1, dtype=torch.int32, device=device)
         sample_loc_tensor = torch.zeros([B, R, SR, 3], dtype=torch.float32, device=device)
         sample_pidx_tensor = torch.full([B, R, SR, K], -1, dtype=torch.int32, device=device)
         if R > 0:
@@ -716,7 +719,10 @@ class lighting_fast_querier():
             # save_points(queried_masked.reshape(-1, 3), "./", "queried_pnts{}".format(self.count))
             # print("valid ray",  torch.sum(torch.sum(sample_loc_mask_tensor, dim=-1) > 0))
             #
-            masked_valid_ray = torch.sum(sample_pidx_tensor.view(B, R, -1) >= 0, dim=-1) >= 0
+            if self.opt.unified or self.opt.proposal_nerf:
+                masked_valid_ray = torch.sum(sample_pidx_tensor.view(B, R, -1) >= 0, dim=-1) >= 0
+            else:
+                masked_valid_ray = torch.sum(sample_pidx_tensor.view(B, R, -1) >= 0, dim=-1) > 0
             R = torch.max(torch.sum(masked_valid_ray.to(torch.int32), dim=-1)).cpu().numpy()
             ray_mask_tensor.masked_scatter_(ray_mask_tensor, masked_valid_ray)
             sample_pidx_tensor = torch.masked_select(sample_pidx_tensor, masked_valid_ray[..., None, None].expand(-1, -1, SR, K)).reshape(B, R, SR, K)

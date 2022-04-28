@@ -39,8 +39,7 @@ def sample_pdf(in_bins, in_weights, n_samples, det=False):
     in_shape = in_bins.shape
     device = in_weights.device
 
-    bins = in_bins.data.cpu().numpy().reshape([-1, in_shape[2]])
-    bins = 0.5 * (bins[..., 1:] + bins[..., :-1])
+    binf = 0.5 * (bins[..., 1:] + bins[..., :-1])
     # bins: [NR x (S-1)]
 
     weights = in_weights.data.cpu().numpy().reshape([-1, in_shape[2]])
@@ -322,27 +321,18 @@ def nerf_near_far_linear_ray_generation(campos,
     tvals = torch.linspace(0, 1, point_count,
                            device=campos.device).view(1, -1)
     tvals = near * (1.-tvals) + far * (tvals)  # N x 1 x Sammples
+    N_rays = raydir.shape[1]
+    tvals = tvals.expand([N_rays, point_count])
+
     if jitter > 0.0:
         mids = .5 * (tvals[..., 1:] + tvals[..., :-1])
         upper = torch.cat([mids, tvals[..., -1:]], -1)
         lower = torch.cat([tvals[..., :1], mids], -1)
         t_rand = torch.rand([tvals.shape[0],raydir.shape[1],tvals.shape[2]], device=campos.device)
         tvals = lower + (upper - lower) * t_rand
-        # print("tvals, {}, t_rand {}, mids {}, upper {}, lower {}".format(tvals.shape, t_rand.shape, mids.shape, upper.shape, lower.shape))
-    segment_length = torch.cat([tvals[..., 1:] - tvals[..., :-1], torch.full((tvals.shape[0], tvals.shape[1], 1), 1e10, device=tvals.device)], axis=-1) * torch.linalg.norm(raydir[..., None, :], axis=-1)
-    raypos = campos[:, None, None, :] + raydir[:, :, None, :] * tvals[:, :, :, None]
-    # print("raypos, {}, campos {}, raydir {}, tvals {}".format(raypos.shape, campos.shape, raydir.shape, tvals.shape))
+    raypos = campos[:, None, :] + raydir.squeeze()[:, None, :] * tvals[..., None]
 
-    # print("raypos", raypos[0])
-    valid = torch.ones_like(tvals,
-                            dtype=raypos.dtype,
-                            device=raypos.device)
-    # print("campos", campos.shape, campos[0])
-    # print("raydir", raydir.shape, raydir[0,0])
-    # print("middle_point_ts", middle_point_ts.shape, middle_point_ts[0,0])
-    # print("raypos", raypos.shape, raypos[0,0])
-
-    return raypos, segment_length, valid, tvals
+    return raypos, tvals
 
 
 
@@ -504,16 +494,13 @@ def refine_cube_ray_generation(campos,
 
     return raypos, segment_length, valid, middle_point_ts
 
-
 def ray_march(ray_dist,
               ray_valid,
               ray_features,
-              render_func,
-              blend_func,
+              render_func=None,
+              blend_func=None,
               bg_color=None,
               shading_color_channel_num=32,
-              nerf_distill_allsampleloc=True,
-              nerf_acf_fn=False,
               unified=False):
     # ray_dist: N x Rays x Samples
     # ray_valid: N x Rays x Samples
@@ -525,16 +512,13 @@ def ray_march(ray_dist,
     # acc_transmission: N x Rays x Samples
     # blend_weight: N x Rays x Samples x 1
     # background_transmission: N x Rays x 1
-
-    point_color = render_func(ray_features)
+    #point_color = render_func(ray_features)
 
     # we are essentially predicting predict 1 - e^-sigma
-    if nerf_distill_allsampleloc:
+    if unified or ray_valid is None:
         sigma = ray_features[..., 0]
     else:
         sigma = ray_features[..., 0] * ray_valid.float()
-    if nerf_acf_fn:
-        sigma = F.relu(sigma)
     opacity = 1 - torch.exp(-sigma * ray_dist)
 
     # cumprod exclusive
@@ -547,21 +531,14 @@ def ray_march(ray_dist,
 
     blend_weight = blend_func(opacity, acc_transmission)[..., None]
 
+    point_color = render_func(ray_features)
     ray_color = torch.sum(point_color * blend_weight, dim=-2, keepdim=False)
-    if bg_color is not None:
+
+    if bg_color is not None and unified==False:
         ray_color += bg_color.to(opacity.device).float().view(
             background_transmission.shape[0], 1, shading_color_channel_num) * background_transmission
-    # #
-    # if point_color.shape[1] > 0 and (torch.any(torch.isinf(point_color)) or torch.any(torch.isnan(point_color))):
-    #     print("ray_color", torch.min(ray_color),torch.max(ray_color))
-
-        # print("background_transmission", torch.min(background_transmission), torch.max(background_transmission))
     background_blend_weight = blend_func(1, background_transmission)
-    # print("ray_color", torch.max(torch.abs(ray_color)), torch.max(torch.abs(sigma)), torch.max(torch.abs(opacity)),torch.max(torch.abs(acc_transmission)), torch.max(torch.abs(background_transmission)), torch.max(torch.abs(acc_transmission)), torch.max(torch.abs(background_blend_weight)))
-    if bg_color is None and unified==False:
-        return ray_color
-    return ray_color, point_color, opacity, acc_transmission, blend_weight, \
-        background_transmission, background_blend_weight
+    return ray_color, point_color, opacity, acc_transmission, blend_weight, background_transmission, background_blend_weight
 
 
 def alpha_ray_march(ray_dist, ray_valid, ray_features,

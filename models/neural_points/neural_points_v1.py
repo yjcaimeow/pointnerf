@@ -347,23 +347,6 @@ class NeuralPoints(nn.Module):
     #             print("point_xyz shape after jittering: ", point_xyz.shape)
     #     print('Loaded blender cloud ', self.opt.cloud_path, self.opt.num_point, point_xyz.shape)
 
-    def prune_point(self, thresh):
-        for index in range(len(self.xyz_all)):
-            points_conf = self.points_conf_all[index]
-            mask = points_conf[0,...,0] >= thresh
-
-            self.xyz_all[index] = nn.Parameter(self.xyz_all[index][mask, :])
-            self.xyz_all[index].requires_grad = self.opt.xyz_grad > 0
-
-            self.points_embeding_all[index] = nn.Parameter(self.points_embeding_all[index][:, mask, :])
-            self.points_embeding_all[index].requires_grad = self.opt.feat_grad > 0
-
-            self.points_conf_all[index] = nn.Parameter(points_conf[:, mask, :])
-            self.points_conf_all[index].requires_grad = self.opt.conf_grad > 0
-            print("@@@@@@@@@  pruned {}/{}".format(torch.sum(mask==0), mask.shape[0]))
-        self.xyz_all             = nn.ParameterList(self.xyz_all)
-        self.points_embeding_all = nn.ParameterList(self.points_embeding_all)
-        self.points_conf_all     = nn.ParameterList(self.points_conf_all)
 
     def prune(self, thresh):
         mask = self.points_conf[0,...,0] >= thresh
@@ -393,21 +376,16 @@ class NeuralPoints(nn.Module):
 
     def grow_points(self, add_xyz=None, add_embedding=None, add_color=None, add_dir=None, add_conf=None, add_eulers=None, add_Rw2c=None):
         # print(self.xyz.shape, self.points_conf.shape, self.points_embeding.shape, self.points_dir.shape, self.points_color.shape)
-        for index in range(len(self.xyz_all)):
-            self.xyz_all[index] = nn.Parameter(torch.cat([self.xyz_all[index], add_xyz], dim=0))
-            self.xyz_all[index].requires_grad = self.opt.xyz_grad > 0
-        self.xyz_all = nn.ParameterList(self.xyz_all)
+        self.xyz = nn.Parameter(torch.cat([self.xyz, add_xyz], dim=0))
+        self.xyz.requires_grad = self.opt.xyz_grad > 0
 
-        for index in range(len(self.xyz_all)):
-            self.points_embeding_all[index] = nn.Parameter(torch.cat([self.points_embeding_all[index], add_embedding[None, ...]], dim=1))
-            self.points_embeding_all[index].requires_grad = self.opt.feat_grad > 0
-        self.points_embeding_all = nn.ParameterList(self.points_embeding_all)
+        if self.points_embeding is not None:
+            self.points_embeding = nn.Parameter(torch.cat([self.points_embeding, add_embedding[None, ...]], dim=1))
+            self.points_embeding.requires_grad = self.opt.feat_grad > 0
 
-        for index in range(len(self.xyz_all)):
-            self.points_conf_all[index] = nn.Parameter(torch.cat([self.points_conf_all[index], add_conf[None, ...]], dim=1))
-            self.points_conf_all[index].requires_grad = self.opt.conf_grad > 0
-        self.points_conf_all = nn.ParameterList(self.points_conf_all)
-
+        if self.points_conf is not None:
+            self.points_conf = nn.Parameter(torch.cat([self.points_conf, add_conf[None, ...]], dim=1))
+            self.points_conf.requires_grad = self.opt.conf_grad > 0
         if self.points_dir is not None:
             self.points_dir = nn.Parameter(torch.cat([self.points_dir, add_dir[None, ...]], dim=1))
             self.points_dir.requires_grad = self.opt.dir_grad > 0
@@ -423,6 +401,8 @@ class NeuralPoints(nn.Module):
         if self.Rw2c is not None and self.Rw2c.dim() > 2:
             self.Rw2c = nn.Parameter(torch.cat([self.Rw2c, add_Rw2c[None,...]], dim=1))
             self.Rw2c.requires_grad = False
+
+
 
     # def set_points(self, points_xyz, points_embeding, points_color=None, points_dir=None, points_conf=None, parameter=False, Rw2c=None, eulers=None):
     #     if self.opt.default_conf > 0.0 and self.opt.default_conf <= 1.0 and points_conf is not None:

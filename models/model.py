@@ -5,7 +5,6 @@ import numpy as np
 from torch import nn
 from torch.nn import functional as F
 from op import FusedLeakyReLU, fused_leaky_relu, upfirdn2d
-from pdb import set_trace as st
 
 class PixelNorm(nn.Module):
     def __init__(self):
