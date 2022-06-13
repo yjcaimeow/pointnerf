@@ -86,7 +86,7 @@ class MvsPointsVolumetricMultiModel(NeuralPointsVolumetricMultiModel):
                                           betas=(0.9, 0.999))
             self.optimizers.append(self.optimizer)
             print("net_params", [(par[0], par[1].shape, par[1].requires_grad)  for par in param_lst if not par[0].startswith("module.neural_points")])
-        
+
         if len(neural_params) > 0:
             if self.stylecode!=None:
                 self.neural_point_optimizer = torch.optim.Adam(neural_params + [self.bg_color] + [self.stylecode], lr=opt.plr, betas=(0.9, 0.999))
@@ -170,9 +170,12 @@ class MvsPointsVolumetricMultiModel(NeuralPointsVolumetricMultiModel):
         self.top_ray_miss_loss = torch.zeros([self.num_probe + 1], dtype=torch.float32, device=self.device)
         self.top_ray_miss_ids = torch.arange(self.num_probe + 1, dtype=torch.int32, device=self.device)
 
-    def set_points(self, points_xyz, points_embedding, points_color=None, points_dir=None, points_conf=None, Rw2c=None, eulers=None, editing=False, bg_color=None, stylecode=None):
+    def set_points(self, points_xyz, points_embedding, points_color=None, points_dir=None, points_conf=None, Rw2c=None, eulers=None, editing=False, bg_color=None, stylecode=None, \
+                   points_xyz_middle=None, points_embeding_middle=None, points_color_middle=None, points_dir_middle=None, points_conf_middle=None):
         if not editing:
-            self.neural_points.set_points(points_xyz, points_embedding, points_color=points_color, points_dir=points_dir, points_conf=points_conf, parameter=self.opt.feedforward == 0, Rw2c=Rw2c, eulers=eulers)
+            self.neural_points.set_points(points_xyz, points_embedding, points_color=points_color, points_dir=points_dir, points_conf=points_conf, parameter=self.opt.feedforward == 0, Rw2c=Rw2c, eulers=eulers, fov=self.opt.fov, \
+                    points_xyz_middle=points_xyz_middle, points_embeding_middle=points_embeding_middle, points_color_middle=points_color_middle, points_dir_middle=points_dir_middle, \
+                    points_conf_middle=points_conf_middle)
         else:
             self.neural_points.editing_set_points(points_xyz, points_embedding, points_color=points_color, points_dir=points_dir, points_conf=points_conf, parameter=self.opt.feedforward == 0, Rw2c=Rw2c, eulers=eulers)
         if self.opt.feedforward == 0 and self.opt.is_train:

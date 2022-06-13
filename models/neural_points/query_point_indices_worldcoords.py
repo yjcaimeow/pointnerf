@@ -3,8 +3,9 @@ import numpy as np
 from numpy import dot
 from math import sqrt
 import pycuda
+import pycuda.autoinit
 from pycuda.compiler import SourceModule
-import pycuda.driver as drv
+#import pycuda.driver as drv
 import pycuda.gpuarray as gpuarray
 import matplotlib.pyplot as plt
 import torch
@@ -14,9 +15,9 @@ from models.rendering.diff_ray_marching import near_far_linear_ray_generation, n
 
 from data.load_blender import load_blender_data
 
-X = torch.cuda.FloatTensor(8)
-src = torch.cuda.ByteTensor(8)
-src = torch.cuda.DoubleTensor(8)
+#X = torch.cuda.FloatTensor(8)
+#src = torch.cuda.ByteTensor(8)
+#src = torch.cuda.DoubleTensor(8)
 
 
 class Holder(pycuda.driver.PointerHolderBase):
@@ -35,9 +36,9 @@ class lighting_fast_querier():
         print("querier device", device, device.index)
         self.gpu = device.index
         self.opt = opt
-        drv.init()
+        #drv.init()
         # self.device = drv.Device(gpu)
-        self.ctx = drv.Device(self.gpu).make_context()
+        #self.ctx = drv.Device(self.gpu).make_context()
         self.claim_occ, self.map_coor2occ, self.fill_occ2pnts, self.mask_raypos, self.get_shadingloc, self.query_along_ray = self.build_cuda()
         self.inverse = self.opt.inverse
         self.count=0
@@ -81,22 +82,25 @@ class lighting_fast_querier():
         return np.asarray(radius_limit_np).astype(np.float32), np.asarray(depth_limit_np).astype(np.float32), ranges_np, vsize_np, vdim_np, scaled_vsize_np, scaled_vdim_np, vscale_np, ranges_gpu, scaled_vsize_gpu, scaled_vdim_gpu, vscale_gpu, kernel_size_gpu, query_size_gpu
 
 
-    def query_points(self, pixel_idx_tensor, point_xyz_pers_tensor, point_xyz_w_tensor, actual_numpoints_tensor, h, w, intrinsic, near_depth, far_depth, ray_dirs_tensor, \
-                     cam_pos_tensor, cam_rot_tensor):
-        #import pdb;pdb.set_trace()
+    def query_points(self, pixel_idx_tensor, point_xyz_pers_tensor, point_xyz_w_tensor, actual_numpoints_tensor, h, w, intrinsic, near_depth, far_depth, ray_dirs_tensor, local_ray_dirs_tensor, \
+                     cam_pos_tensor, cam_rot_tensor, vsize):
         near_depth, far_depth = np.asarray(near_depth).item() , np.asarray(far_depth).item()
-        radius_limit_np, depth_limit_np, ranges_np, vsize_np, vdim_np, scaled_vsize_np, scaled_vdim_np, vscale_np, range_gpu, scaled_vsize_gpu, scaled_vdim_gpu, vscale_gpu, kernel_size_gpu, query_size_gpu = self.get_hyperparameters(self.opt.vsize, point_xyz_w_tensor, ranges=self.opt.ranges)
+        radius_limit_np, depth_limit_np, ranges_np, vsize_np, vdim_np, scaled_vsize_np, scaled_vdim_np, vscale_np, range_gpu, scaled_vsize_gpu, scaled_vdim_gpu, vscale_gpu, kernel_size_gpu, query_size_gpu = \
+            self.get_hyperparameters(vsize, point_xyz_w_tensor, ranges=self.opt.ranges)
+########################            #self.get_hyperparameters(self.opt.vsize, point_xyz_w_tensor, ranges=self.opt.ranges)
         # print("self.opt.ranges", self.opt.ranges, range_gpu, ray_dirs_tensor)
         if self.opt.inverse > 0:
             raypos_tensor, _, _, _ = near_far_disparity_linear_ray_generation(cam_pos_tensor, ray_dirs_tensor, self.opt.z_depth_dim, near=near_depth, far=far_depth, jitter=0.3 if self.opt.is_train > 0 else 0.)
         else:
             raypos_tensor, _, _, _ = near_far_linear_ray_generation(cam_pos_tensor, ray_dirs_tensor, self.opt.z_depth_dim, near=near_depth, far=far_depth, \
                                                                     jitter=0.3 if self.opt.is_train > 0 else 0.)
-        sample_pidx_tensor, sample_loc_w_tensor, ray_mask_tensor = self.query_grid_point_index(h, w, pixel_idx_tensor, raypos_tensor, point_xyz_w_tensor, actual_numpoints_tensor, kernel_size_gpu, query_size_gpu, self.opt.SR, self.opt.K, ranges_np, scaled_vsize_np, scaled_vdim_np, vscale_np, self.opt.max_o, self.opt.P, radius_limit_np, depth_limit_np, range_gpu, scaled_vsize_gpu, scaled_vdim_gpu, vscale_gpu, ray_dirs_tensor, cam_pos_tensor, kMaxThreadsPerBlock=self.opt.gpu_maxthr)
+        sample_pidx_tensor, sample_loc_w_tensor, ray_mask_tensor, index_tensor = self.query_grid_point_index(h, w, pixel_idx_tensor, raypos_tensor, point_xyz_w_tensor, actual_numpoints_tensor, kernel_size_gpu, query_size_gpu, self.opt.SR, self.opt.K, ranges_np, scaled_vsize_np, scaled_vdim_np, vscale_np, self.opt.max_o, self.opt.P, radius_limit_np, depth_limit_np, range_gpu, scaled_vsize_gpu, scaled_vdim_gpu, vscale_gpu, ray_dirs_tensor, cam_pos_tensor, kMaxThreadsPerBlock=self.opt.gpu_maxthr)
 
         sample_ray_dirs_tensor = torch.masked_select(ray_dirs_tensor, ray_mask_tensor[..., None]>0).reshape(ray_dirs_tensor.shape[0],-1,3)[...,None,:].expand(-1, -1, self.opt.SR, -1).contiguous()
+        sample_local_ray_dirs_tensor = torch.masked_select(local_ray_dirs_tensor, ray_mask_tensor[..., None]>0).reshape(local_ray_dirs_tensor.shape[0],-1,3)[...,None,:].expand(-1, -1, self.opt.SR, -1).contiguous()
         # print("sample_ray_dirs_tensor", sample_ray_dirs_tensor.shape)
-        return sample_pidx_tensor, self.w2pers(sample_loc_w_tensor, cam_rot_tensor, cam_pos_tensor), sample_loc_w_tensor, sample_ray_dirs_tensor, ray_mask_tensor, vsize_np, ranges_np
+        return sample_pidx_tensor, self.w2pers(sample_loc_w_tensor, cam_rot_tensor, cam_pos_tensor), sample_loc_w_tensor, sample_ray_dirs_tensor, sample_local_ray_dirs_tensor, ray_mask_tensor, vsize_np, ranges_np, \
+            raypos_tensor, index_tensor
 
 
     def w2pers(self, point_xyz_w, camrotc2w, campos):
@@ -422,7 +426,8 @@ class lighting_fast_querier():
                     const int D,       // 3
                     const int SR,       // 3
                     float *sample_loc,       // B * R * SR * 3
-                    int *sample_loc_mask       // B * R * SR
+                    int *sample_loc_mask,       // B * R * SR
+                    int *index_tensor       // B * R * SR
                 ) {
                     int index = blockIdx.x * blockDim.x + threadIdx.x; // index of gpu thread
                     int i_batch = index / (R * D);  // index of batch
@@ -431,6 +436,7 @@ class lighting_fast_querier():
                     if (temp >= 0) {
                         int r = (index - i_batch * R * D) / D;
                         int loc_inds = i_batch * R * SR + r * SR + temp;
+                        index_tensor[loc_inds]=index % D;
                         sample_loc[loc_inds * 3] = raypos[index * 3];
                         sample_loc[loc_inds * 3 + 1] = raypos[index * 3 + 1];
                         sample_loc[loc_inds * 3 + 2] = raypos[index * 3 + 2];
@@ -546,7 +552,7 @@ class lighting_fast_querier():
     def build_occ_vox(self, point_xyz_w_tensor, actual_numpoints_tensor, B, N, P, max_o, scaled_vdim_np, kMaxThreadsPerBlock, gridSize, scaled_vsize_gpu, scaled_vdim_gpu, kernel_size_gpu, grid_size_vol, d_coord_shift):
         device = point_xyz_w_tensor.device
         #print("world_xyz", point_xyz_w_tensor.shape, torch.min(point_xyz_w_tensor.view(-1,3), dim=-2)[0], torch.max(point_xyz_w_tensor.view(-1,3), dim=-2)[0])
-        #print (scaled_vdim_np,'!!!!', kMaxThreadsPerBlock, gridSize)
+        #print (scaled_vdim_np,'!!!!', kMaxThreadsPerBlock, gridSize, '======build volume')
         coor_occ_tensor = torch.zeros([B, scaled_vdim_np[0], scaled_vdim_np[1], scaled_vdim_np[2]], dtype=torch.int32, device=device)
         occ_2_pnts_tensor = torch.full([B, max_o, P], -1, dtype=torch.int32, device=device)
         occ_2_coor_tensor = torch.full([B, max_o, 3], -1, dtype=torch.int32, device=device)
@@ -613,7 +619,6 @@ class lighting_fast_querier():
 
     def query_grid_point_index(self, h, w, pixel_idx_tensor, raypos_tensor, point_xyz_w_tensor, actual_numpoints_tensor, kernel_size_gpu, query_size_gpu, SR, K, ranges_np, scaled_vsize_np, scaled_vdim_np, vscale_np, max_o, P, radius_limit_np, depth_limit_np, ranges_gpu, scaled_vsize_gpu, scaled_vdim_gpu, vscale_gpu, ray_dirs_tensor, cam_pos_tensor, kMaxThreadsPerBlock = 512):
     #def query_grid_point_index(self, h, w, pixel_idx_tensor, raypos_tensor, point_xyz_w_tensor, actual_numpoints_tensor, kernel_size_gpu, query_size_gpu, SR, K, ranges_np, scaled_vsize_np, scaled_vdim_np, vscale_np, max_o, P, radius_limit_np, depth_limit_np, ranges_gpu, scaled_vsize_gpu, scaled_vdim_gpu, vscale_gpu, ray_dirs_tensor, cam_pos_tensor, kMaxThreadsPerBlock = 1024):
-
         device = point_xyz_w_tensor.device
         B, N = point_xyz_w_tensor.shape[0], point_xyz_w_tensor.shape[1]
         pixel_size = scaled_vdim_np[0] * scaled_vdim_np[1]
@@ -624,7 +629,6 @@ class lighting_fast_querier():
         gridSize = int((B * N + kMaxThreadsPerBlock - 1) / kMaxThreadsPerBlock)
 
         coor_occ_tensor, occ_2_coor_tensor, coor_2_occ_tensor, occ_idx_tensor, occ_numpnts_tensor, occ_2_pnts_tensor = self.build_occ_vox(point_xyz_w_tensor, actual_numpoints_tensor, B, N, P, max_o, scaled_vdim_np, kMaxThreadsPerBlock, gridSize, scaled_vsize_gpu, scaled_vdim_gpu, query_size_gpu, grid_size_vol, d_coord_shift)
-        #import pdb; pdb.set_trace()
         # torch.cuda.synchronize()
         # print("coor_occ_tensor", torch.min(coor_occ_tensor), torch.max(coor_occ_tensor), torch.min(occ_2_coor_tensor), torch.max(occ_2_coor_tensor), torch.min(coor_2_occ_tensor), torch.max(coor_2_occ_tensor), torch.min(occ_idx_tensor), torch.max(occ_idx_tensor), torch.min(occ_numpnts_tensor), torch.max(occ_numpnts_tensor), torch.min(occ_2_pnts_tensor), torch.max(occ_2_pnts_tensor), occ_2_pnts_tensor.shape)
         # print("occ_numpnts_tensor", torch.sum(occ_numpnts_tensor > 0), ranges_np)
@@ -651,16 +655,19 @@ class lighting_fast_querier():
         # save_points(raypos_tensor.reshape(-1, 3), "./", "rawraypos_pnts")
         # raypos_masked = torch.masked_select(raypos_tensor, raypos_mask_tensor[..., None] > 0)
         # save_points(raypos_masked.reshape(-1, 3), "./", "raypos_pnts")
+        if self.opt.unified or self.opt.proposal_nerf:
+            ray_mask_tensor = torch.max(raypos_mask_tensor, dim=-1)[0] >= 0 # B, R
+        else:
+            ray_mask_tensor = torch.max(raypos_mask_tensor, dim=-1)[0] > 0 # B, R
 
-        ray_mask_tensor = torch.max(raypos_mask_tensor, dim=-1)[0] > 0 # B, R
         R = torch.max(torch.sum(ray_mask_tensor.to(torch.int32))).cpu().numpy()
+        index_tensor = torch.full([B, R, SR], self.opt.z_depth_dim-1, dtype=torch.int32, device=device)
         sample_loc_tensor = torch.zeros([B, R, SR, 3], dtype=torch.float32, device=device)
         sample_pidx_tensor = torch.full([B, R, SR, K], -1, dtype=torch.int32, device=device)
         if R > 0:
             raypos_tensor = torch.masked_select(raypos_tensor, ray_mask_tensor[..., None, None].expand(-1, -1, D, 3)).reshape(B, R, D, 3)
             raypos_mask_tensor = torch.masked_select(raypos_mask_tensor, ray_mask_tensor[..., None].expand(-1, -1, D)).reshape(B, R, D)
             # print("R", R, raypos_tensor.shape, raypos_mask_tensor.shape)
-
             raypos_maskcum = torch.cumsum(raypos_mask_tensor, dim=-1).to(torch.int32)
             raypos_mask_tensor = (raypos_mask_tensor * raypos_maskcum * (raypos_maskcum <= SR)) - 1
             sample_loc_mask_tensor = torch.zeros([B, R, SR], dtype=torch.int32, device=device)
@@ -673,6 +680,7 @@ class lighting_fast_querier():
                 np.int32(SR),
                 Holder(sample_loc_tensor),
                 Holder(sample_loc_mask_tensor),
+                Holder(index_tensor),
                 block=(kMaxThreadsPerBlock, 1, 1), grid=(gridSize, 1)
             )
 
@@ -712,13 +720,16 @@ class lighting_fast_querier():
             # save_points(queried_masked.reshape(-1, 3), "./", "queried_pnts{}".format(self.count))
             # print("valid ray",  torch.sum(torch.sum(sample_loc_mask_tensor, dim=-1) > 0))
             #
-            masked_valid_ray = torch.sum(sample_pidx_tensor.view(B, R, -1) >= 0, dim=-1) > 0
+            if self.opt.unified or self.opt.proposal_nerf:
+                masked_valid_ray = torch.sum(sample_pidx_tensor.view(B, R, -1) >= 0, dim=-1) >= 0
+            else:
+                masked_valid_ray = torch.sum(sample_pidx_tensor.view(B, R, -1) >= 0, dim=-1) > 0
             R = torch.max(torch.sum(masked_valid_ray.to(torch.int32), dim=-1)).cpu().numpy()
             ray_mask_tensor.masked_scatter_(ray_mask_tensor, masked_valid_ray)
             sample_pidx_tensor = torch.masked_select(sample_pidx_tensor, masked_valid_ray[..., None, None].expand(-1, -1, SR, K)).reshape(B, R, SR, K)
             sample_loc_tensor = torch.masked_select(sample_loc_tensor, masked_valid_ray[..., None, None].expand(-1, -1, SR, 3)).reshape(B, R, SR, 3)
         # self.count+=1
-        return sample_pidx_tensor, sample_loc_tensor, ray_mask_tensor.to(torch.int8)
+        return sample_pidx_tensor, sample_loc_tensor, ray_mask_tensor.to(torch.int8), index_tensor
 
 
 def load_pnts(point_path, point_num):

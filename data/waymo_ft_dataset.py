@@ -87,13 +87,13 @@ def get_ray_directions(H, W, focal, center=None):
 
 class WaymoFtDataset(BaseDataset):
 
-    def __init__(self, opt, img_wh=[1920,1280], scale_factor=20, max_len=-1, norm_w2c=None, norm_c2w=None):
+    def __init__(self, opt, img_wh=[1920,1280], max_len=-1, norm_w2c=None, norm_c2w=None):
         self.opt = opt
         self.data_dir = opt.data_root
+        self.scale_factor = opt.scale_factor
         self.scan = opt.scan
         self.split = opt.split
-        self.scale_factor = scale_factor
-        self.img_wh = (int(img_wh[0] // scale_factor), int(img_wh[1] // scale_factor))
+        self.img_wh = (int(img_wh[0] // self.scale_factor), int(img_wh[1] // self.scale_factor))
         print ('self.img_wh', self.img_wh)
 
         self.max_len = max_len
@@ -113,14 +113,14 @@ class WaymoFtDataset(BaseDataset):
             self.bg_color = [float(one) for one in self.opt.bg_color.split(",")]
 
         self.define_transforms()
-        data_file_name = '/home/xschen/yjcai/pointnerf/data/waymo/waymo_f30_1006_vox100_res128-256.npz'
+        #data_file_name = '/home/xschen/yjcai/pointnerf/data/waymo/waymo_f30_1006_wovox_res256-512.npz'
         #FILENAME = '/home/xschen/yjcai/segment-10061305430875486848_1080_000_1100_000_with_camera_labels.tfrecord'
         #from data.load_waymo import load_waymo_data
         #self.images, self.poses, self.hwf, self.intrinsic, self.all_id_list, self.test_id_list, self.train_id_list, \
         #    self.points_xyz_all, self.camposes, self.centerdirs = load_waymo_data(FILENAME=FILENAME)
         #np.savez(data_file_name, images=self.images, poses = self.poses, hwf=self.hwf, intrinsic=self.intrinsic, all_id_list=self.all_id_list, test_id_list=self.test_id_list, train_id_list=self.train_id_list, oints_xyz_all=self.points_xyz_all, camposes=self.camposes, centerdirs=self.centerdirs)
         #exit()
-        aymo_data = np.load(data_file_name)
+        waymo_data = np.load(self.opt.filename)
         self.images, self.poses, self.hwf, self.intrinsic, self.points_xyz_all, self.camposes, self.centerdirs = \
                 torch.from_numpy(waymo_data['images']), torch.from_numpy(waymo_data['poses']), torch.from_numpy(waymo_data['hwf']), \
                 torch.from_numpy(waymo_data['intrinsic']), torch.from_numpy(waymo_data['oints_xyz_all']), \
@@ -142,7 +142,7 @@ class WaymoFtDataset(BaseDataset):
         img = self.images[id]
         c2w = self.poses[id]
         intrinsic = self.intrinsic
-        camrot = c2w[0:3, 0:3]
+        camrot = (c2w[0:3, 0:3])
         campos = c2w[0:3, 3]
 
         item["intrinsic"] = intrinsic
@@ -180,14 +180,15 @@ class WaymoFtDataset(BaseDataset):
         pixelcoords = np.stack((px, py), axis=-1).astype(np.float32)  # H x W x 2
         # raydir = get_cv_raydir(pixelcoords, self.height, self.width, focal, camrot)
         item["pixel_idx"] = pixelcoords
-        raydir = get_blender_raydir(pixelcoords, self.height, self.width, item["intrinsic"][0][0], camrot.numpy(), self.opt.dir_norm > 0)
+        local_dirs, raydir = get_blender_raydir(pixelcoords, self.height, self.width, item["intrinsic"][0][0], camrot.numpy(), self.opt.dir_norm > 0)
         #raydir = get_dtu_raydir(pixelcoords, item["intrinsic"].numpy(), camrot.numpy(), self.opt.dir_norm > 0)
         raydir = np.reshape(raydir, (-1, 3))
         item['raydir'] = torch.from_numpy(raydir).float()
-        gt_image = img[py.astype(np.int32), px.astype(np.int32),:]
-        gt_image = np.reshape(gt_image, (-1, 3))
-        item['gt_image'] = gt_image
-        #item['gt_image'] = np.reshape(img, (-1, 3))
+        item['local_raydir'] = torch.from_numpy(local_dirs).float().reshape(-1,3)
+        #gt_image = img[py.astype(np.int32), px.astype(np.int32),:]
+        #gt_image = np.reshape(gt_image, (-1, 3))
+        #item['gt_image'] = gt_image
+        item['gt_image'] = np.reshape(img, (-1, 3))
         if self.bg_color:
             if self.bg_color == 'random':
                 val = np.random.rand()

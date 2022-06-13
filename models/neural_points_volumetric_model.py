@@ -3,6 +3,7 @@ from .neural_points.neural_points import NeuralPoints
 from .aggregators.point_aggregators import PointAggregator
 import os
 from utils import format as fmt
+import random
 
 class NeuralPointsVolumetricModel(BaseRenderingModel):
 
@@ -257,39 +258,61 @@ class NeuralPointsRayMarching(nn.Module):
         self.neural_points = neural_points
         if self.opt.neural_render=='cnn':
             from models.neural_render.neural_renderer import NeuralRenderer
-            self.neural_render_2d = NeuralRenderer(input_dim=128)
+            self.neural_render_2d = NeuralRenderer(input_dim=self.opt.shading_color_channel_num)
         elif self.opt.neural_render=='style':
+            #from models.model import Generator
+            #self.G = Generator()
             from models.neural_render.stylegan2_pytorch import StyleVectorizer, Generator
             self.S = StyleVectorizer(emb=self.opt.z_dim, depth=8)
-            self.G = Generator(image_size=512, latent_dim=self.opt.z_dim, network_capacity=self.opt.network_capacity)
-    
-    def latent_to_w(iself, style_vectorizer, latent_descr):
+            self.G = Generator(image_size=512, latent_dim=self.opt.z_dim, network_capacity=self.opt.network_capacity, input_dim=self.opt.shading_color_channel_num)
+
+    def latent_to_w(self, style_vectorizer, latent_descr):
         return [(style_vectorizer(latent_descr.cuda()), 8)]
-    
+
     def styles_def_to_tensor(self, styles_def):
         return torch.cat([t[:, None, :].expand(-1, n, -1) for t, n in styles_def], dim=1)
-    
+
+    def make_noise(self, batch, latent_dim, n_noise, device):
+        if n_noise == 1:
+            return torch.randn(batch, latent_dim, device=device)
+
+        noises = torch.randn(n_noise, batch, latent_dim, device=device).unbind(0)
+        return noises
+
+
+    def mixing_noise(self, batch, latent_dim, prob, device='cuda'):
+        if prob > 0 and random.random() < prob:
+            return self.make_noise(batch, latent_dim, 2, device)
+        else:
+            return [self.make_noise(batch, latent_dim, 1, device)]
+
+
     def forward(self,
                 campos,
                 raydir,
+                local_raydir=None,
                 gt_image=None,
                 bg_color=None,
                 camrotc2w=None,
                 pixel_idx=None,
+                c2w=None,
                 near=None,
                 far=None,
                 focal=None,
                 h=None,
                 w=None,
+                id=None,
                 style_code=None,
                 intrinsic=None,
                 **kargs):
         output = {}
         # B, channel, 292, 24, 32;      B, 3, 294, 24, 32;     B, 294, 24;     B, 291, 2
-        sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, ray_mask_tensor, vsize, grid_vox_sz = self.neural_points({"pixel_idx": pixel_idx, "camrotc2w": camrotc2w, "campos": campos, "near": near, "far": far,"focal": focal, "h": h, "w": w, "intrinsic": intrinsic,"gt_image":gt_image, "raydir":raydir})
-        
+        sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, sample_local_ray_dirs, ray_mask_tensor, vsize, \
+            grid_vox_sz = self.neural_points({"pixel_idx": pixel_idx, "camrotc2w": camrotc2w, "campos": campos, "near": near, "far": far,"focal": focal, "h": h, "w": w, \
+                                              "c2w":c2w, "intrinsic": intrinsic,"gt_image":gt_image, "raydir":raydir, "id":id, 'vsize':self.opt.vsize, "local_raydir":local_raydir})
+
         decoded_features, ray_valid, weight, conf_coefficient = self.aggregator(sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, \
-            sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, vsize, grid_vox_sz)
+            sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, sample_local_ray_dirs, vsize, grid_vox_sz)
         ray_dist = torch.cummax(sample_loc[..., 2], dim=-1)[0]
         ray_dist = torch.cat([ray_dist[..., 1:] - ray_dist[..., :-1], torch.full((ray_dist.shape[0], ray_dist.shape[1], 1), vsize[2], device=ray_dist.device)], dim=-1)
 
@@ -311,7 +334,7 @@ class NeuralPointsRayMarching(nn.Module):
                 blend_weight,
                 background_transmission,
                 _,
-            ) = ray_march(ray_dist, ray_valid, decoded_features, self.render_func, self.blend_func, bg_color)
+            ) = ray_march(ray_dist, ray_valid, decoded_features, self.render_func, self.blend_func, bg_color, self.opt.shading_color_channel_num)
             ray_color = self.tone_map(ray_color)
 
             output["coarse_raycolor"] = ray_color
@@ -337,18 +360,18 @@ class NeuralPointsRayMarching(nn.Module):
             output["blend_weight"] = blend_weight.detach()
             output["conf_coefficient"] = conf_coefficient
 
-
         res = self.fill_invalid(output, bg_color)
         img_h, img_w = h.item(), w.item()
         if self.opt.neural_render=='cnn':
-            res['final_coarse_raycolor'] = self.neural_render_2d(res['coarse_raycolor'].reshape(1, img_h, img_w, 128)).reshape(1, -1, 3)
-            #res['final_coarse_raycolor'] = self.neural_render_2d(res['coarse_raycolor'].reshape(1, img_h, img_w, 128)).reshape(1, img_h*img_w, 3)
+            res['final_coarse_raycolor'] = self.neural_render_2d(res['coarse_raycolor'].reshape(1, img_h, img_w, self.opt.shading_color_channel_num)).reshape(1, -1, 3)
         elif self.opt.neural_render=='style':
-            w_space = self.latent_to_w(self.S, style_code)
+            w_space = self.latent_to_w(self.S, style_code.reshape(1, 256))
             w_styles = self.styles_def_to_tensor(w_space)
-            res['final_coarse_raycolor'] = self.G(w_styles, initial=res['coarse_raycolor'].reshape(1, img_h, img_w, 128).permute(0,3,1,2)).reshape(1, -1, 3)
-            #res['final_coarse_raycolor'] = self.G(w_styles, initial=res['coarse_raycolor'].reshape(1, img_h, img_w, 128).permute(0,3,1,2), \
-            #        style=style_code).reshape(1, img_h*img_w, 3)
+            res['final_coarse_raycolor'] = self.G(w_styles, initial=res['coarse_raycolor'].reshape(1, img_h, img_w, self.opt.shading_color_channel_num).permute(0,3,1,2)).reshape(1, -1, 3)
+            #res['final_coarse_raycolor'] = self.G(w_styles, initial=res['coarse_raycolor'].reshape(1, img_h, img_w, self.opt.shading_color_channel_num).permute(0,3,1,2), \
+            #    depth_guide=(img_fea_h, img_fea_2h)).reshape(1, -1, 3)
+            #styles = self.mixing_noise(batch=1, latent_dim=256, prob=0.9)
+            #res['final_coarse_raycolor'] = self.G(res['coarse_raycolor'].reshape(1, img_h, img_w, self.opt.shading_color_channel_num).permute(0,3,1,2), styles).reshape(1, -1, 3)
         return res
 
     def fill_invalid(self, output, bg_color):
@@ -371,7 +394,7 @@ class NeuralPointsRayMarching(nn.Module):
         output['coarse_mask'] = 1 - coarse_is_background_tensor
         # coarse_raycolor_tensor = self.tonemap_func(
         coarse_raycolor_tensor = self.tone_map(
-                torch.ones([B, OR, 128], dtype=output["coarse_raycolor"].dtype, device=output["coarse_raycolor"].device) * bg_color[None, ...])
+                torch.ones([B, OR, self.opt.shading_color_channel_num], dtype=output["coarse_raycolor"].dtype, device=output["coarse_raycolor"].device) * bg_color[None, ...])
         coarse_raycolor_tensor[ray_inds[..., 0], ray_inds[..., 1], :] = output["coarse_raycolor"]
         output["coarse_raycolor"] = coarse_raycolor_tensor
 

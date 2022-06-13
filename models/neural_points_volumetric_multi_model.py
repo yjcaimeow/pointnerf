@@ -1,6 +1,7 @@
 from .base_rendering_model import *
 from .neural_points.neural_points import NeuralPoints
 from .aggregators.point_aggregators import PointAggregator
+from .aggregators.point_aggregators_middle import PointAggregator_middle
 import os
 from utils import format as fmt
 
@@ -11,6 +12,7 @@ class NeuralPointsVolumetricMultiModel(BaseRenderingModel):
         BaseRenderingModel.modify_commandline_options(parser, is_train)
         NeuralPoints.modify_commandline_options(parser, is_train)
         PointAggregator.modify_commandline_options(parser, is_train)
+        PointAggregator_middle.modify_commandline_options(parser, is_train)
 
         parser.add_argument(
             '--neural_point_dir',
@@ -143,6 +145,8 @@ class NeuralPointsVolumetricMultiModel(BaseRenderingModel):
         # additional parameters
 
         self.aggregator = self.check_getAggregator(opt)
+        if opt.multi_res:
+            self.aggregator_middle = PointAggregator_middle(opt)
         self.is_compute_depth = opt.compute_depth or not not opt.depth_loss_items
         checkpoint_path = os.path.join(opt.checkpoints_dir, opt.name, '{}_net_ray_marching.pth'.format(opt.resume_iter))
         checkpoint_path = checkpoint_path if os.path.isfile(checkpoint_path) else None
@@ -152,7 +156,7 @@ class NeuralPointsVolumetricMultiModel(BaseRenderingModel):
             self.neural_points = None
 
         add_property2dict(param, self, [
-            'aggregator', 'is_compute_depth', "neural_points", "opt"
+            'aggregator', 'aggregator_middle', 'is_compute_depth', "neural_points", "opt"
         ])
         add_property2dict(param, opt, [
             'num_pos_freqs', 'num_viewdir_freqs'
@@ -233,6 +237,7 @@ class NeuralPointsRayMarching(nn.Module):
              render_func=None,
              blend_func=None,
              aggregator=None,
+             aggregator_middle=None,
              is_compute_depth=False,
              neural_points=None,
              opt=None,
@@ -242,6 +247,7 @@ class NeuralPointsRayMarching(nn.Module):
         super(NeuralPointsRayMarching, self).__init__()
 
         self.aggregator = aggregator
+        self.aggregator_middle = aggregator_middle
 
         self.num_pos_freqs = num_pos_freqs
         self.num_viewdir_freqs = num_viewdir_freqs
@@ -257,25 +263,30 @@ class NeuralPointsRayMarching(nn.Module):
         self.neural_points = neural_points
         if self.opt.neural_render=='cnn':
             from models.neural_render.neural_renderer import NeuralRenderer
-            self.neural_render_2d = NeuralRenderer(input_dim=128)
+            self.neural_render_2d = NeuralRenderer(input_dim=self.opt.shading_color_channel_num)
         elif self.opt.neural_render=='style':
-            from models.neural_render.stylegan2_pytorch import StyleVectorizer, Generator
+            from models.neural_render.stylegan2_pytorch_8x import StyleVectorizer, Generator
             self.S = StyleVectorizer(emb=self.opt.z_dim, depth=8)
-            self.G = Generator(image_size=512, latent_dim=self.opt.z_dim, network_capacity=self.opt.network_capacity)
-    
+            self.G = Generator(image_size=512, latent_dim=self.opt.z_dim, network_capacity=self.opt.network_capacity, init_channels=self.opt.shading_color_channel_num)
+
     def latent_to_w(iself, style_vectorizer, latent_descr):
         return [(style_vectorizer(latent_descr.cuda()), 8)]
-    
+
     def styles_def_to_tensor(self, styles_def):
         return torch.cat([t[:, None, :].expand(-1, n, -1) for t, n in styles_def], dim=1)
-    
+
     def forward(self,
                 campos,
                 raydir,
+                local_raydir=None,
                 gt_image=None,
                 bg_color=None,
                 camrotc2w=None,
                 pixel_idx=None,
+                c2w=None,
+                c2w_m=None,
+                fov_id_s=None,
+                fov_id_m=None,
                 near=None,
                 far=None,
                 focal=None,
@@ -285,6 +296,7 @@ class NeuralPointsRayMarching(nn.Module):
                 intrinsic=None,
                 campos_m=None,
                 raydir_m=None,
+                local_raydir_m=None,
                 camrotc2w_m=None,
                 pixel_idx_m=None,
                 focal_m=None,
@@ -293,11 +305,13 @@ class NeuralPointsRayMarching(nn.Module):
                 intrinsic_m=None,
                 **kargs):
         output = {}
-        # B, channel, 292, 24, 32;      B, 3, 294, 24, 32;     B, 294, 24;     B, 291, 2
-        sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, ray_mask_tensor, vsize, grid_vox_sz = self.neural_points({"pixel_idx": pixel_idx, "camrotc2w": camrotc2w, "campos": campos, "near": near, "far": far,"focal": focal, "h": h, "w": w, "intrinsic": intrinsic,"gt_image":gt_image, "raydir":raydir})
-        
+        sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, \
+            sample_loc_w, sample_ray_dirs, sample_local_ray_dirs, ray_mask_tensor, vsize, grid_vox_sz = \
+            self.neural_points({"pixel_idx": pixel_idx, "camrotc2w": camrotc2w, "campos": campos, "near": near, "far": far,"focal": focal, "c2w":c2w, \
+                                "h": h, "w": w, "intrinsic": intrinsic,"gt_image":gt_image, "raydir":raydir, 'vsize':self.opt.vsize, "fov_ids":fov_id_s, "local_raydir":local_raydir})
+
         decoded_features, ray_valid, weight, conf_coefficient = self.aggregator(sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, \
-            sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, vsize, grid_vox_sz)
+            sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, sample_local_ray_dirs, vsize, grid_vox_sz)
         ray_dist = torch.cummax(sample_loc[..., 2], dim=-1)[0]
         ray_dist = torch.cat([ray_dist[..., 1:] - ray_dist[..., :-1], torch.full((ray_dist.shape[0], ray_dist.shape[1], 1), vsize[2], device=ray_dist.device)], dim=-1)
 
@@ -316,7 +330,7 @@ class NeuralPointsRayMarching(nn.Module):
             blend_weight,
             background_transmission,
             _,
-        ) = ray_march(ray_dist, ray_valid, decoded_features, self.render_func, self.blend_func, bg_color)
+        ) = ray_march(ray_dist, ray_valid, decoded_features, self.render_func, self.blend_func, bg_color, self.opt.shading_color_channel_num)
         ray_color = self.tone_map(ray_color)
 
         output["coarse_raycolor"] = ray_color
@@ -327,18 +341,16 @@ class NeuralPointsRayMarching(nn.Module):
             output["weight"] = weight.detach()
             output["blend_weight"] = blend_weight.detach()
             output["conf_coefficient"] = conf_coefficient
-        res = self.fill_invalid(output, bg_color)
-        if 1==1:
-        #if self.opt.multi_res:
+        output = self.fill_invalid(output, bg_color)
+        if self.opt.multi_res:
             ### middle resolution
             sampled_color_m, sampled_Rw2c_m, sampled_dir_m, sampled_conf_m, sampled_embedding_m, sampled_xyz_pers_m, sampled_xyz_m, sample_pnt_mask_m, \
-                sample_loc_m, sample_loc_w_m, sample_ray_dirs_m, ray_mask_tensor_m, vsize_m, grid_vox_sz_m = \
-                self.neural_points({"pixel_idx": pixel_idx_m, "camrotc2w": camrotc2w_m, "campos": campos_m, "near": near, \
-                "far": far,"focal": focal_m, "h": h_m, "w": w_m, "intrinsic": intrinsic_m, "gt_image":gt_image, "raydir":raydir_m})
-            
-            decoded_features_m, ray_valid_m, weight_m, conf_coefficient_m = self.aggregator(sampled_color_m, sampled_Rw2c_m, \
-                sampled_dir_m, sampled_conf_m, \
-                sampled_embedding_m, sampled_xyz_pers_m, sampled_xyz_m, sample_pnt_mask_m, sample_loc_m, sample_loc_w_m, sample_ray_dirs_m, vsize_m, grid_vox_sz_m)
+                sample_loc_m, sample_loc_w_m, sample_ray_dirs_m, sample_local_ray_dirs_m, ray_mask_tensor_m, vsize_m, grid_vox_sz_m = \
+                self.neural_points({"pixel_idx": pixel_idx_m, "camrotc2w": camrotc2w_m, "campos": campos_m, "near": near, "far": far,"focal": focal_m, "c2w":c2w_m, "fov_ids":fov_id_m, \
+                                    "h": h_m, "w": w_m, "intrinsic": intrinsic_m, "gt_image":gt_image, "raydir":raydir_m, "local_raydir": local_raydir_m, 'vsize':(np.array(self.opt.vsize)/1.25).tolist()}, use_middle=True)
+
+            decoded_features_m, ray_valid_m, weight_m, conf_coefficient_m = self.aggregator_middle(sampled_color_m, sampled_Rw2c_m, sampled_dir_m, sampled_conf_m, \
+                sampled_embedding_m, sampled_xyz_pers_m, sampled_xyz_m, sample_pnt_mask_m, sample_loc_m, sample_loc_w_m, sample_ray_dirs_m, sample_local_ray_dirs_m, vsize_m, grid_vox_sz_m)
             ray_dist_m = torch.cummax(sample_loc_m[..., 2], dim=-1)[0]
             ray_dist_m = torch.cat([ray_dist_m[..., 1:] - ray_dist_m[..., :-1], torch.full((ray_dist_m.shape[0], ray_dist_m.shape[1], 1), \
                 vsize_m[2], device=ray_dist_m.device)], dim=-1)
@@ -358,7 +370,8 @@ class NeuralPointsRayMarching(nn.Module):
                 blend_weight_m,
                 background_transmission_m,
                 _,
-            ) = ray_march(ray_dist_m, ray_valid_m, decoded_features_m, self.render_func, self.blend_func, bg_color)
+            ) = ray_march(ray_dist_m, ray_valid_m, decoded_features_m, self.render_func, self.blend_func, bg_color[...,:self.opt.shading_color_channel_num_middle], \
+                          self.opt.shading_color_channel_num_middle)
             ray_color_m = self.tone_map(ray_color_m)
 
             output["coarse_raycolor_m"] = ray_color_m
@@ -369,26 +382,20 @@ class NeuralPointsRayMarching(nn.Module):
                 output["weight_m"] = weight_m.detach()
                 output["blend_weight_m"] = blend_weight_m.detach()
                 output["conf_coefficient_m"] = conf_coefficient_m
-            res = self.fill_invalid(output, bg_color, multi=True)
+            output = self.fill_invalid(output, bg_color, multi=True)
 
         img_h, img_w = h.item(), w.item()
         if self.opt.neural_render=='cnn':
-            res['final_coarse_raycolor'] = self.neural_render_2d(res['coarse_raycolor'].reshape(1, img_h, img_w, 128)).reshape(1, -1, 3)
+            output['final_coarse_raycolor'] = self.neural_render_2d(output['coarse_raycolor'].reshape(1, img_h, img_w, \
+                        self.opt.shading_color_channel_num)).reshape(1, -1, 3)
         elif self.opt.neural_render=='style':
             w_space = self.latent_to_w(self.S, style_code)
             w_styles = self.styles_def_to_tensor(w_space)
-            res['final_coarse_raycolor'] = self.G(w_styles, initial=res['coarse_raycolor'].reshape(1, img_h, img_w, 128).permute(0,3,1,2), \
-                    guide=res['coarse_raycolor_m'].reshape(1, img_h*2, img_w*2, 128).permute(0,3,1,2)).reshape(1, -1, 3)
-        return res
+            output['final_coarse_raycolor'] = self.G(w_styles, initial=output['coarse_raycolor'].reshape(1, img_h, img_w, self.opt.shading_color_channel_num).permute(0,3,1,2), \
+                    guide=output['coarse_raycolor_m'].reshape(1, img_h*2, img_w*2, self.opt.shading_color_channel_num_middle).permute(0,3,1,2)).reshape(1, -1, 3)
+        return output
 
     def fill_invalid(self, output, bg_color, multi=False):
-        #print (fmt.RED+'========')
-        #print (bg_color, bg_color.requires_grad)
-        #print ('========'+fmt.END)
-        # ray_mask:             torch.Size([1, 1024])
-        # coarse_is_background: torch.Size([1, 336, 1])  -> 1, 1024, 1
-        # coarse_raycolor:      torch.Size([1, 336, 3])  -> 1, 1024, 3
-        # coarse_point_opacity: torch.Size([1, 336, 24]) -> 1, 1024, 24
         if multi:
             ray_mask = output["ray_mask_m"]
             B, OR = ray_mask.shape
@@ -398,7 +405,7 @@ class NeuralPointsRayMarching(nn.Module):
             output["coarse_is_background_m"] = coarse_is_background_tensor
             output['coarse_mask_m'] = 1 - coarse_is_background_tensor
             coarse_raycolor_tensor = self.tone_map(
-                    torch.ones([B, OR, 128], dtype=output["coarse_raycolor"].dtype, device=output["coarse_raycolor"].device) * bg_color[None, ...])
+                torch.ones([B, OR, self.opt.shading_color_channel_num_middle], dtype=output["coarse_raycolor"].dtype, device=output["coarse_raycolor"].device) * bg_color[None, ...][...,:self.opt.shading_color_channel_num_middle])
             coarse_raycolor_tensor[ray_inds[..., 0], ray_inds[..., 1], :] = output["coarse_raycolor_m"]
             output["coarse_raycolor_m"] = coarse_raycolor_tensor
 
@@ -423,7 +430,7 @@ class NeuralPointsRayMarching(nn.Module):
         output['coarse_mask'] = 1 - coarse_is_background_tensor
         # coarse_raycolor_tensor = self.tonemap_func(
         coarse_raycolor_tensor = self.tone_map(
-                torch.ones([B, OR, 128], dtype=output["coarse_raycolor"].dtype, device=output["coarse_raycolor"].device) * bg_color[None, ...])
+                torch.ones([B, OR, self.opt.shading_color_channel_num], dtype=output["coarse_raycolor"].dtype, device=output["coarse_raycolor"].device) * bg_color[None, ...])
         coarse_raycolor_tensor[ray_inds[..., 0], ray_inds[..., 1], :] = output["coarse_raycolor"]
         output["coarse_raycolor"] = coarse_raycolor_tensor
 

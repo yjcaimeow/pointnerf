@@ -33,6 +33,10 @@ class BaseOptions:
             action='store_true',
             help='if specified, print more debugging information')
         parser.add_argument(
+            '--only_test',
+            action='store_true',
+            help='if specified, print more debugging information')
+        parser.add_argument(
             '--context_weight_gate',
             action='store_true',
             help='if specified, print more debugging information')
@@ -42,6 +46,10 @@ class BaseOptions:
             help='if specified, print more debugging information')
         parser.add_argument(
             '--inference',
+            action='store_true',
+            help='if specified, print more debugging information')
+        parser.add_argument(
+            '--perceiver_io',
             action='store_true',
             help='if specified, print more debugging information')
         parser.add_argument(
@@ -162,6 +170,10 @@ class BaseOptions:
                             type=int,
                             default=1,
                             help='input batch size')
+        parser.add_argument('--local_rank',
+                            type=int,
+                            default=0,
+                            help='local_rank init value')
         parser.add_argument('--render_only',
                             type=int,
                             default=0,
@@ -170,6 +182,9 @@ class BaseOptions:
                             type=int,
                             default=0,
                             help='plot loss curves with tensorboard')
+        parser.add_argument('--ddp_train',
+                            action='store_true',
+                            help='indicate a debug run')
         parser.add_argument('--contain_coarse',
                             action='store_true',
                             help='indicate a debug run')
@@ -203,12 +218,6 @@ class BaseOptions:
         parser.add_argument('--nerf_aug',
                             action='store_true',
                             help='indicate a debug run')
-        parser.add_argument('--ddp_train',
-                            action='store_true',
-                            help='indicate a debug run')
-        parser.add_argument('--mask_moving_obj',
-                            action='store_true',
-                            help='indicate a debug run')
         parser.add_argument('--multi_nerf',
                             action='store_true',
                             help='indicate a debug run')
@@ -231,23 +240,6 @@ class BaseOptions:
         parser.add_argument('--seq_num',
                             type=int,
                             default=5,
-                            help='feed batches in order without shuffling')
-        parser.add_argument('--sample_num',
-                            type=int,
-                            default=5000,
-                            help='feed batches in order without shuffling')
-        parser.add_argument('--port',
-                            type=str,
-                            default='12345',
-                            help='feed batches in order without shuffling')
-        parser.add_argument('--world_size',
-                            type=int,
-                            default=1,
-                            help='feed batches in order without shuffling')
-        parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
-        parser.add_argument('--local_rank',
-                            type=int,
-                            default=0,
                             help='feed batches in order without shuffling')
         parser.add_argument('--vid',
                             type=int,
@@ -321,12 +313,12 @@ class BaseOptions:
 
         self.print_and_save_options(opt)
 
-        str_ids = opt.gpu_ids.split(',')
-        opt.gpu_ids = [
-            int(x) for x in opt.gpu_ids.split(',') if x.strip() and int(x) >= 0
-        ]
-#        if len(opt.gpu_ids) > 0:
-#            torch.cuda.set_device(opt.gpu_ids[0])
+        #str_ids = opt.gpu_ids.split(',')
+        #opt.gpu_ids = [
+        #    int(x) for x in opt.gpu_ids.split(',') if x.strip() and int(x) >= 0
+        #]
+        #if len(opt.gpu_ids) > 0:
+        #    torch.cuda.set_device(opt.gpu_ids[0])
 
         self.opt = opt
         return self.opt

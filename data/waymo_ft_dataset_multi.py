@@ -24,6 +24,7 @@ import cv2
 from .data_utils import get_dtu_raydir
 from .data_utils import get_blender_raydir
 from plyfile import PlyData, PlyElement
+from utils.kitti_object import get_lidar_in_image_fov
 FLIP_Z = np.asarray([
     [1,0,0],
     [0,1,0],
@@ -87,13 +88,13 @@ def get_ray_directions(H, W, focal, center=None):
 
 class WaymoFtDataset(BaseDataset):
 
-    def __init__(self, opt, img_wh=[1920,1280], scale_factor=20, max_len=-1, norm_w2c=None, norm_c2w=None):
+    def __init__(self, opt, img_wh=[1920,1280], max_len=-1, norm_w2c=None, norm_c2w=None):
         self.opt = opt
         self.data_dir = opt.data_root
         self.scan = opt.scan
         self.split = opt.split
-        self.scale_factor = scale_factor
-        self.img_wh = (int(img_wh[0] // scale_factor), int(img_wh[1] // scale_factor))
+        self.scale_factor = opt.scale_factor
+        self.img_wh = (int(img_wh[0] // self.scale_factor), int(img_wh[1] // self.scale_factor))
         print ('self.img_wh', self.img_wh)
 
         self.max_len = max_len
@@ -101,48 +102,51 @@ class WaymoFtDataset(BaseDataset):
         self.blender2opencv = np.array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
         self.height, self.width = int(self.img_wh[1]), int(self.img_wh[0])
 
-        if not self.opt.bg_color or self.opt.bg_color == 'black':
-            self.bg_color = (0, 0, 0)
-        elif self.opt.bg_color == 'white':
-            self.bg_color = (1, 1, 1)
-        elif self.opt.bg_color == 'red':
-            self.bg_color = (1, 0, 0)
-        elif self.opt.bg_color == 'random':
-            self.bg_color = 'random'
-        else:
-            self.bg_color = [float(one) for one in self.opt.bg_color.split(",")]
+        self.all_id_list = list(range(self.opt.frames_length))
+        self.train_id_list = [self.all_id_list[i] for i in self.all_id_list if i%10!=0]
+        self.id_list = self.train_id_list if self.split=="train" else self.all_id_list
 
         self.define_transforms()
-        data_file_name = '/home/xschen/yjcai/pointnerf/data/waymo/waymo_f30_1006_vox100_res64-256.npz'
-        #FILENAME = '/home/xschen/yjcai/segment-10061305430875486848_1080_000_1100_000_with_camera_labels.tfrecord'
-        #from data.load_waymo import load_waymo_data
-        #self.images, self.poses, self.hwf, self.intrinsic, self.all_id_list, self.test_id_list, self.train_id_list, \
-        #    self.points_xyz_all, self.camposes, self.centerdirs = load_waymo_data(FILENAME=FILENAME)
-        #np.savez(data_file_name, images=self.images, poses = self.poses, hwf=self.hwf, intrinsic=self.intrinsic, all_id_list=self.all_id_list, test_id_list=self.test_id_list, train_id_list=self.train_id_list, oints_xyz_all=self.points_xyz_all, camposes=self.camposes, centerdirs=self.centerdirs)
-        #exit()
-        waymo_data = np.load(data_file_name)
+
+        ''' load low-resolution image
+            then filter with id_list
+        '''
+        waymo_data = np.load(self.opt.filename)
+        print ('============= filename ===========', self.opt.filename)
         self.images, self.poses, self.hwf, self.intrinsic, self.points_xyz_all, self.camposes, self.centerdirs = \
                 torch.from_numpy(waymo_data['images']), torch.from_numpy(waymo_data['poses']), torch.from_numpy(waymo_data['hwf']), \
                 torch.from_numpy(waymo_data['intrinsic']), torch.from_numpy(waymo_data['oints_xyz_all']), \
                 torch.from_numpy(waymo_data['camposes']), torch.from_numpy(waymo_data['centerdirs'])
-        self.all_id_list = list(range(self.opt.frames_length))
-        self.train_id_list = [self.all_id_list[i] for i in self.all_id_list if i%10!=0]
-        self.id_list = self.train_id_list if self.split=="train" else self.all_id_list
 
         self.images = self.images[self.id_list]
         self.poses = self.poses[self.id_list]
         self.camposes = self.camposes[self.id_list]
         self.centerdirs = self.centerdirs[self.id_list]
-        
-        data_file_name = '/home/xschen/yjcai/pointnerf/data/waymo/waymo_f30_1006_vox100_res128-256.npz'
-        waymo_data = np.load(data_file_name)
-        self.images_m, self.poses_m, self.hwf_m, self.intrinsic_m, self.points_xyz_all_m, self.camposes_m, self.centerdirs_m = \
-                torch.from_numpy(waymo_data['images']), torch.from_numpy(waymo_data['poses']), torch.from_numpy(waymo_data['hwf']), \
-                torch.from_numpy(waymo_data['intrinsic']), torch.from_numpy(waymo_data['oints_xyz_all']), \
-                torch.from_numpy(waymo_data['camposes']), torch.from_numpy(waymo_data['centerdirs'])
-        
+
+        ''' load middle-resolution image
+            then filter with id_list
+        '''
+        self.poses_m = self.poses
+        self.camposes_m = self.camposes
+        self.centerdirs_m = self.centerdirs
+        self.intrinsic_m = self.intrinsic*2
+        self.intrinsic_m[2][2]=1
+        print ('========intrisic=========')
+        print (self.intrinsic)
+        print (self.intrinsic_m)
+
         self.norm_w2c, self.norm_c2w = torch.eye(4, device="cuda", dtype=torch.float32), torch.eye(4, device="cuda", dtype=torch.float32)
         self.total = len(self.id_list)
+        filtered_pcd = np.load("/mnt/cache/caiyingjie/filtered_pcd.npz")
+        self.filtered_pcd_vox_res_400 = torch.from_numpy(filtered_pcd['vox_res_400'])
+        self.filtered_pcd_vox_res_500 = torch.from_numpy(filtered_pcd['vox_res_500'])
+        self.fov_ids_s, self.fov_ids_m = [],[]
+        for pose, pose_m in zip(self.poses, self.poses_m):
+            _, _, fov_ids, _  = get_lidar_in_image_fov(self.filtered_pcd_vox_res_400, pose, self.intrinsic, xmin=0, ymin=0, xmax=self.img_wh[0], ymax=int(self.img_wh[1]), return_more=True)
+            self.fov_ids_s.append(fov_ids)
+            _, _, fov_ids, _  = get_lidar_in_image_fov(self.filtered_pcd_vox_res_500, pose_m, self.intrinsic_m, xmin=0, ymin=0, xmax=self.img_wh[0]*2, ymax=int(self.img_wh[1])*2, return_more=True)
+            self.fov_ids_m.append(fov_ids)
+        print ('=== filtered_pcd shape ===', self.filtered_pcd_vox_res_400.shape, self.filtered_pcd_vox_res_500.shape)
         print("dataset total: including (images, poses, camposes, centerdirs) \n", self.split, self.images.shape, self.poses.shape, self.camposes.shape, self.centerdirs.shape)
 
     def __getitem__(self, id, crop=False, full_img=False):
@@ -164,25 +168,26 @@ class WaymoFtDataset(BaseDataset):
         item["c2w_m"] = self.poses_m[id]
         item["camrotc2w_m"] = self.poses_m[id][0:3, 0:3]
         item['lightpos_m'] = item["campos_m"]
-
         dist = np.linalg.norm(campos)
 
         middle = dist + 0.7
         item['middle'] = torch.FloatTensor([middle]).view(1, 1)
-        
+
         ### extra
         middle = np.linalg.norm(self.poses_m[id][0:3, 3]) + 0.7
         item['middle_m'] = torch.FloatTensor([middle]).view(1, 1)
-        
+
         item['far'] = torch.FloatTensor([self.near_far[1]]).view(1, 1)
         item['near'] = torch.FloatTensor([self.near_far[0]]).view(1, 1)
         item['h'] = self.height
         item['w'] = self.width
-        
+
         item['h_m'] = self.height*2
         item['w_m'] = self.width*2
-        
+
         item['id'] = id
+        item['fov_id_s'] = self.fov_ids_s[id]
+        item['fov_id_m'] = self.fov_ids_m[id]
         if full_img:
             item['images'] = img[None,...].clone()
         # gt_image = np.transpose(img, (1, 2, 0))
@@ -201,38 +206,28 @@ class WaymoFtDataset(BaseDataset):
                         np.arange(0, self.width).astype(np.float32),
                         np.arange(0, self.height).astype(np.float32))
         pixelcoords = np.stack((px, py), axis=-1).astype(np.float32)  # H x W x 2
-        # raydir = get_cv_raydir(pixelcoords, self.height, self.width, focal, camrot)
         item["pixel_idx"] = pixelcoords
-        raydir = get_blender_raydir(pixelcoords, self.height, self.width, item["intrinsic"][0][0], camrot.numpy(), self.opt.dir_norm > 0)
-        #raydir = get_dtu_raydir(pixelcoords, item["intrinsic"].numpy(), camrot.numpy(), self.opt.dir_norm > 0)
+        local_dirs, raydir = get_blender_raydir(pixelcoords, self.height, self.width, item["intrinsic"][0][0], camrot.numpy(), self.opt.dir_norm > 0)
         raydir = np.reshape(raydir, (-1, 3))
         item['raydir'] = torch.from_numpy(raydir).float()
+        item['local_raydir'] = torch.from_numpy(local_dirs).float().reshape(-1,3)
         #gt_image = img[py.astype(np.int32), px.astype(np.int32),:]
         #gt_image = np.reshape(gt_image, (-1, 3))
         #item['gt_image'] = gt_image
         item['gt_image'] = np.reshape(img, (-1, 3))
-        ''' middle '''
+        #''' middle '''
         px, py = np.meshgrid(np.arange(0, self.width*2).astype(np.float32),
                              np.arange(0, self.height*2).astype(np.float32))
         pixelcoords = np.stack((px, py), axis=-1).astype(np.float32)  # H x W x 2
         item["pixel_idx_m"] = pixelcoords
-        raydir = get_blender_raydir(pixelcoords, self.height*2, self.width*2, item["intrinsic_m"][0][0], item['camrotc2w_m'].numpy(), self.opt.dir_norm > 0)
+        local_dirs, raydir = get_blender_raydir(pixelcoords, self.height*2, self.width*2, item["intrinsic_m"][0][0], item['camrotc2w_m'].numpy(), self.opt.dir_norm > 0)
         raydir = np.reshape(raydir, (-1, 3))
         item['raydir_m'] = torch.from_numpy(raydir).float()
-        if self.bg_color:
-            if self.bg_color == 'random':
-                val = np.random.rand()
-                if val > 0.5:
-                    item['bg_color'] = torch.FloatTensor([1, 1, 1])
-                else:
-                    item['bg_color'] = torch.FloatTensor([0, 0, 0])
-            else:
-                item['bg_color'] = torch.FloatTensor(self.bg_color)
+        item['local_raydir_m'] = torch.from_numpy(local_dirs).float().reshape(-1,3)
         return item
 
     @staticmethod
     def modify_commandline_options(parser, is_train):
-        # ['random', 'random2', 'patch'], default: no random sample
         parser.add_argument('--random_sample',
                             type=str,
                             default='none',

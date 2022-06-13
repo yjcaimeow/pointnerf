@@ -92,7 +92,6 @@ class NeuralPointsVolumetricModel(BaseRenderingModel):
         # coarse_is_background: torch.Size([1, 336, 1])  -> 1, 1024, 1
         # coarse_raycolor:      torch.Size([1, 336, 3])  -> 1, 1024, 3
         # coarse_point_opacity: torch.Size([1, 336, 24]) -> 1, 1024, 24
-        #import pdb; pdb.set_trace()
         ray_mask = output["ray_mask"]
         B, OR = ray_mask.shape
         ray_inds = torch.nonzero(ray_mask) # 336, 2

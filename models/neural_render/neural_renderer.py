@@ -3,7 +3,6 @@ import torch
 from math import log2
 from models.neural_render.layers import Blur
 
-
 class NeuralRenderer(nn.Module):
     ''' Neural renderer class
 
@@ -77,25 +76,23 @@ class NeuralRenderer(nn.Module):
 
     def forward(self, x):
         x = x.permute((0,3,1,2))
-        # print (x.shape)
-        # print ('hello world')
         net = self.conv_in(x)
 
         if self.use_rgb_skip:
-            rgb = self.conv_rgb[0](x)
-            #rgb = self.upsample_rgb(self.conv_rgb[0](x))
+            #rgb = self.conv_rgb[0](x)
+            rgb = self.upsample_rgb(self.conv_rgb[0](x))
 
         for idx, layer in enumerate(self.conv_layers):
-            #hid = layer(self.upsample_2(net))
-            hid = layer(net)
+            hid = layer(self.upsample_2(net))
+            #hid = layer(net)
             if self.use_norm:
                 hid = self.norms[idx](hid)
             net = self.actvn(hid)
 
             if self.use_rgb_skip:
                 rgb = rgb + self.conv_rgb[idx + 1](net)
-                #if idx < len(self.conv_layers) - 1:
-                #    rgb = self.upsample_rgb(rgb)
+                if idx < len(self.conv_layers) - 1:
+                    rgb = self.upsample_rgb(rgb)
 
         if not self.use_rgb_skip:
             rgb = self.conv_rgb(net)

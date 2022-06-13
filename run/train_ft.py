@@ -710,36 +710,32 @@ def main():
             cam_ind = nearest_view(campos, camdir, points_xyz_all, train_dataset.id_list)
             unique_cam_ind = torch.unique(cam_ind)
             print("unique_cam_ind", unique_cam_ind.shape)
-            # points_xyz_all = [points_xyz_all[cam_ind[:,0]==unique_cam_ind[i], :] for i in range(len(unique_cam_ind))]
+            points_xyz_all = [points_xyz_all[cam_ind[:,0]==unique_cam_ind[i], :] for i in range(len(unique_cam_ind))]
 
-            # featuredim = opt.point_features_dim
-            # points_embedding_all = torch.zeros([1, 0, featuredim], device=unique_cam_ind.device, dtype=torch.float32)
-            # points_color_all = torch.zeros([1, 0, 3], device=unique_cam_ind.device, dtype=torch.float32)
-            # points_dir_all = torch.zeros([1, 0, 3], device=unique_cam_ind.device, dtype=torch.float32)
-            # points_conf_all = torch.zeros([1, 0, 1], device=unique_cam_ind.device, dtype=torch.float32)
-            # print("extract points embeding & colors", )
-            # for i in tqdm(range(len(unique_cam_ind))):
-            #     id = unique_cam_ind[i]
-            #     batch = train_dataset.get_item(id, full_img=True)
-            #     HDWD = [train_dataset.height, train_dataset.width]
-            #     c2w = batch["c2w"][0].cuda()
-            #     w2c = torch.inverse(c2w)
-            #     intrinsic = batch["intrinsic"].cuda()
-            #     # cam_xyz_all 252, 4
-            #     cam_xyz_all = (torch.cat([points_xyz_all[i], torch.ones_like(points_xyz_all[i][...,-1:])], dim=-1) @ w2c.transpose(0,1))[..., :3]
-            #     embedding, color, dir, conf = model.query_embedding(HDWD, cam_xyz_all[None,...], None, batch['images'].cuda(), c2w[None, None,...], w2c[None, None,...], intrinsic[:, None,...], 0, pointdir_w=True)
-            #     conf = conf * opt.default_conf if opt.default_conf > 0 and opt.default_conf < 1.0 else conf
-            #     points_embedding_all = torch.cat([points_embedding_all, embedding], dim=1)
-            #     points_color_all = torch.cat([points_color_all, color], dim=1)
-            #     points_dir_all = torch.cat([points_dir_all, dir], dim=1)
-            #     points_conf_all = torch.cat([points_conf_all, conf], dim=1)
-            #     # visualizer.save_neural_points(id, cam_xyz_all, color, batch, save_ref=True)
-            # points_xyz_all=torch.cat(points_xyz_all, dim=0)
-            points_embedding_all = torch.randn((1, len(points_xyz_all), 32))
-            points_color_all = torch.randn((1, len(points_xyz_all), 3))
-            points_dir_all = torch.randn((1, len(points_xyz_all), 3))
-            points_conf_all = torch.ones((1, len(points_xyz_all), 1))
-            #visualizer.save_neural_points("init", points_xyz_all, points_color_all, None, save_ref=load_points == 0)
+            featuredim = opt.point_features_dim
+            points_embedding_all = torch.zeros([1, 0, featuredim], device=unique_cam_ind.device, dtype=torch.float32)
+            points_color_all = torch.zeros([1, 0, 3], device=unique_cam_ind.device, dtype=torch.float32)
+            points_dir_all = torch.zeros([1, 0, 3], device=unique_cam_ind.device, dtype=torch.float32)
+            points_conf_all = torch.zeros([1, 0, 1], device=unique_cam_ind.device, dtype=torch.float32)
+            print("extract points embeding & colors", )
+            for i in tqdm(range(len(unique_cam_ind))):
+                id = unique_cam_ind[i]
+                batch = train_dataset.get_item(id, full_img=True)
+                HDWD = [train_dataset.height, train_dataset.width]
+                c2w = batch["c2w"][0].cuda()
+                w2c = torch.inverse(c2w)
+                intrinsic = batch["intrinsic"].cuda()
+                # cam_xyz_all 252, 4
+                cam_xyz_all = (torch.cat([points_xyz_all[i], torch.ones_like(points_xyz_all[i][...,-1:])], dim=-1) @ w2c.transpose(0,1))[..., :3]
+                embedding, color, dir, conf = model.query_embedding(HDWD, cam_xyz_all[None,...], None, batch['images'].cuda(), c2w[None, None,...], w2c[None, None,...], intrinsic[:, None,...], 0, pointdir_w=True)
+                conf = conf * opt.default_conf if opt.default_conf > 0 and opt.default_conf < 1.0 else conf
+                points_embedding_all = torch.cat([points_embedding_all, embedding], dim=1)
+                points_color_all = torch.cat([points_color_all, color], dim=1)
+                points_dir_all = torch.cat([points_dir_all, dir], dim=1)
+                points_conf_all = torch.cat([points_conf_all, conf], dim=1)
+                # visualizer.save_neural_points(id, cam_xyz_all, color, batch, save_ref=True)
+            points_xyz_all=torch.cat(points_xyz_all, dim=0)
+            visualizer.save_neural_points("init", points_xyz_all, points_color_all, None, save_ref=load_points == 0)
             print("vis")
             # visualizer.save_neural_points("cam", campos, None, None, None)
             # print("vis")

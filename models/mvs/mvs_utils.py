@@ -293,7 +293,7 @@ def gen_render_path(c2ws, N_views=30):
 from scipy.interpolate import CubicSpline
 
 #################################################  MVS  helper functions   #####################################
-from kornia.utils import create_meshgrid
+#from kornia.utils import create_meshgrid
 
 
 def homo_warp_nongrid(c2w, w2c, intrinsic, ref_cam_xyz, HD, WD, filter=True, **kwargs):
@@ -478,7 +478,7 @@ def normalize(v):
     return v/np.linalg.norm(v)
 
 from torch.optim.lr_scheduler import CosineAnnealingLR, MultiStepLR
-from warmup_scheduler import GradualWarmupScheduler
+#from warmup_scheduler import GradualWarmupScheduler
 
 
 def construct_vox_points(xyz_val, vox_res, partition_xyz=None, space_min=None, space_max=None):
@@ -554,10 +554,8 @@ def construct_vox_points_closest(xyz_val, vox_res, partition_xyz=None, space_min
     xyz_centroid = scatter_mean(xyz_val, inv_idx, dim=0)
     xyz_centroid_prop = xyz_centroid[inv_idx,:]
     xyz_residual = torch.norm(xyz_val - xyz_centroid_prop, dim=-1)
-    print("xyz_residual", xyz_residual.shape)
 
     _, min_idx = scatter_min(xyz_residual, inv_idx, dim=0)
-    print("min_idx", min_idx.shape)
     return xyz_centroid, sparse_grid_idx, min_idx
 
 

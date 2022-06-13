@@ -1,7 +1,7 @@
 from .base_rendering_model import *
 from .neural_points_volumetric_multiseq_model import NeuralPointsVolumetricMultiseqModel
 from .neural_points.neural_points import NeuralPoints
-from .mvs.mvs_points_model import MvsPointsModel
+#from .mvs.mvs_points_model import MvsPointsModel
 from .mvs import mvs_utils
 from. import base_model
 from .aggregators.point_aggregators import PointAggregator
@@ -18,7 +18,7 @@ class MvsPointsVolumetricMultiseqModel(NeuralPointsVolumetricMultiseqModel):
 
     @staticmethod
     def modify_commandline_options(parser, is_train=True):
-        MvsPointsModel.modify_commandline_options(parser, is_train)
+        #MvsPointsModel.modify_commandline_options(parser, is_train)
         NeuralPointsVolumetricMultiseqModel.modify_commandline_options(parser, is_train=is_train)
         parser.add_argument(
             '--mode',
@@ -57,9 +57,8 @@ class MvsPointsVolumetricMultiseqModel(NeuralPointsVolumetricMultiseqModel):
                 mvs_params = mvs_params + [par[1] for par in param_lst]
             else:
                 param_lst = list(net.named_parameters())
-
-                net_params = net_params + [par[1] for par in param_lst if not par[0].startswith("module.neural_points")]
-                neural_params = neural_params + [par[1] for par in param_lst if par[0].startswith("module.neural_points")]
+                net_params = net_params + [par[1] for par in param_lst if not par[0].startswith("neural_points")]
+                neural_params = neural_params + [par[1] for par in param_lst if par[0].startswith("neural_points")]
         self.net_params = net_params
         self.neural_params = neural_params
         self.mvs_params = mvs_params
@@ -85,10 +84,11 @@ class MvsPointsVolumetricMultiseqModel(NeuralPointsVolumetricMultiseqModel):
             #    self.neural_point_optimizer = torch.optim.Adam(neural_params + [self.bg_color] + [self.stylecode], lr=opt.plr, betas=(0.9, 0.999))
             #else:
             #    self.neural_point_optimizer = torch.optim.Adam(neural_params + [self.bg_color], lr=opt.plr, betas=(0.9, 0.999))
-            if opt.unified or opt.proposal_nerf:
-                self.neural_point_optimizer = torch.optim.Adam(neural_params + [self.stylecode], lr=opt.plr, betas=(0.9, 0.999))
-            else:
-                self.neural_point_optimizer = torch.optim.Adam(neural_params + [self.bg_color] + [self.stylecode], lr=opt.plr, betas=(0.9, 0.999))
+            self.neural_point_optimizer = torch.optim.Adam(neural_params, lr=opt.plr, betas=(0.9, 0.999))
+            #if opt.unified or opt.proposal_nerf:
+            #    self.neural_point_optimizer = torch.optim.Adam(neural_params + [self.stylecode], lr=opt.plr, betas=(0.9, 0.999))
+            #else:
+            #    self.neural_point_optimizer = torch.optim.Adam(neural_params + [self.bg_color] + [self.stylecode], lr=opt.plr, betas=(0.9, 0.999))
             self.optimizers.append(self.neural_point_optimizer)
             #print("neural_params", [(par[0], par[1].shape, par[1].requires_grad)  for par in param_lst if par[0].startswith("module.neural_points")])
         else:
@@ -169,12 +169,12 @@ class MvsPointsVolumetricMultiseqModel(NeuralPointsVolumetricMultiseqModel):
 
     def set_points(self, points_xyz, points_embedding, points_color=None, points_dir=None, points_conf=None, Rw2c=None, eulers=None, editing=False, bg_color=None, stylecode=None):
         if not editing:
-            self.neural_points.set_points(points_xyz, points_embedding, points_color=points_color, points_dir=points_dir, points_conf=points_conf, parameter=self.opt.feedforward == 0, Rw2c=Rw2c, eulers=eulers, fov=self.opt.fov)
+            self.neural_points.set_points(points_xyz, points_embedding, points_color=points_color, points_dir=points_dir, points_conf=points_conf, parameter=self.opt.feedforward == 0, Rw2c=Rw2c, eulers=eulers, fov=self.opt.fov, stylecode=stylecode)
         else:
             self.neural_points.editing_set_points(points_xyz, points_embedding, points_color=points_color, points_dir=points_dir, points_conf=points_conf, parameter=self.opt.feedforward == 0, Rw2c=Rw2c, eulers=eulers)
         if self.opt.feedforward == 0 and self.opt.is_train:
-            self.bg_color = bg_color
-            self.stylecode = stylecode
+#            self.bg_color = bg_color
+#            self.stylecode = stylecode
             self.setup_optimizer(self.opt)
 
     def prune_points(self, thresh):

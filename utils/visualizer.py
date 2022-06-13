@@ -8,7 +8,7 @@ import time
 from tensorboardX import SummaryWriter
 import datetime
 import torch
-import imageio
+#import imageio
 from utils.util import to8b
 from models.mvs.mvs_utils import *
 
@@ -142,6 +142,8 @@ class Visualizer:
     def accumulate_losses(self, losses):
         self.acc_iterations += 1
         for k, v in losses.items():
+            if k == 'conf_coefficient':
+                continue
             if k not in self.acc_losses:
                 self.acc_losses[k] = 0
             self.acc_losses[k] += v
@@ -156,7 +158,7 @@ class Visualizer:
         return self.acc_losses[key + "_psnr"] / self.acc_iterations
 
     def print_losses(self, total_steps):
-        m = 'End of iteration {} \t Number of batches {} \t Time taken: {:.2f}s\n'.format(
+        m = 'End of epoch {} \t Number of batches {} \t Time taken: {:.2f}s\n'.format(
             total_steps, self.acc_iterations, (time.time() - self.start_time))
         m += '[Average Loss] '
         for k, v in self.acc_losses.items():

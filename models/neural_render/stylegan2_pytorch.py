@@ -560,7 +560,7 @@ class DiscriminatorBlock(nn.Module):
         return x
 
 class Generator(nn.Module):
-    def __init__(self, image_size, latent_dim, network_capacity = 16, transparent = False, attn_layers = [], no_const = False, fmap_max = 512):
+    def __init__(self, image_size, latent_dim, network_capacity = 16, transparent = False, attn_layers = [], no_const = False, fmap_max = 512, input_dim=32):
         super().__init__()
         self.image_size = image_size
         self.latent_dim = latent_dim
@@ -571,10 +571,11 @@ class Generator(nn.Module):
 
         set_fmap_max = partial(min, fmap_max)
         filters = list(map(set_fmap_max, filters))
-        init_channels = 128
+        init_channels = input_dim
         #init_channels = filters[0]
         filters = [init_channels, *filters]
 
+        #in_out_pairs = zip([131, 32, 32], [32, 16, 8])
         in_out_pairs = zip(filters[:-1], filters[1:])
         self.no_const = no_const
 
@@ -602,12 +603,13 @@ class Generator(nn.Module):
                 out_chan,
                 upsample = not_first,
                 upsample_rgb = not_last,
+                #upsample = False,
+                #upsample_rgb = False,
                 rgba = transparent
             )
             self.blocks.append(block)
 
-    def forward(self, styles, initial=None, input_noise=None, guide=None):
-        import pdb; pdb.set_trace()
+    def forward(self, styles, initial=None, input_noise=None, guide=None, depth_guide=None):
         batch_size = styles.shape[0]
         image_size = self.image_size
 
@@ -627,10 +629,14 @@ class Generator(nn.Module):
             if exists(attn):
                 x = attn(x)
             x, rgb = block(x, rgb, style, input_noise)
-            if guide!=None and x.shape[2]==256:
-                bs, channel, height, width = x.shape
-                x = torch.cat((x, point_guid_256.reshape(bs, height, width, channel).permute(0,3,1,2)), dim=1)
-        print ('====neural render shape:', rgb.shape)
+            #if x.shape[2]==128:
+            #    x = x + depth_guide[0][None, None, ...]
+            #elif x.shape[2]==256:
+            #    x = x + depth_guide[1][None, None, ...]
+            #if x.shape[2]==256 and guide!=None:
+            #    print (x.shape, guide.shape, '=====')
+            #    x = x + guide
+
         return rgb.permute(0,2,3,1)
 
 class Discriminator(nn.Module):
@@ -897,8 +903,8 @@ class Trainer():
         self.rank = rank
         self.world_size = world_size
 
-        self.logger = None
         #self.logger = aim.Session(experiment=name) if log else None
+        self.logger = None
 
     @property
     def image_extension(self):

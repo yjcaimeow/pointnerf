@@ -1,5 +1,5 @@
 import numpy as np
-import open3d as o3d
+#import open3d as o3d
 def get_cv_raydir(pixelcoords, height, width, focal, rot):
     # pixelcoords: H x W x 2
     if isinstance(focal, float):
@@ -43,14 +43,15 @@ def get_blender_raydir(pixelcoords, height, width, focal, rot, dir_norm):
     x = (pixelcoords[..., 0] + 0.5 - width / 2.0) / focal
     y = (pixelcoords[..., 1] + 0.5 - height / 2.0) / focal
     z = np.ones_like(x)
-    dirs = np.stack([x, -y, -z], axis=-1)
-    dirs = np.sum(dirs[...,None,:] * rot[:,:], axis=-1) # h*w*1*3   x   3*3
+    local_dirs = np.stack([x, -y, -z], axis=-1)
+    dirs = np.sum(local_dirs[...,None,:] * rot[:,:], axis=-1) # h*w*1*3   x   3*3
     if dir_norm:
         # print("dirs",dirs-dirs / (np.linalg.norm(dirs, axis=-1, keepdims=True) + 1e-5))
         dirs = dirs / (np.linalg.norm(dirs, axis=-1, keepdims=True) + 1e-5)
+        local_dirs = local_dirs / (np.linalg.norm(local_dirs, axis=-1, keepdims=True) + 1e-5)
     # print("dirs", dirs.shape)
     #print (dirs.dtype, '=============')
-    return dirs
+    return local_dirs, dirs
 
 def get_dtu_raydir(pixelcoords, intrinsic, rot, dir_norm):
     # rot is c2w

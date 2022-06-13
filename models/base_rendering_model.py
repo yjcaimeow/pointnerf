@@ -17,14 +17,14 @@ from PIL import Image
 def mse2psnr(x): return -10.* torch.log(x)/np.log(10.)
 
 class BaseRenderingModel(BaseModel):
-    ''' A base rendering model that provides the basic loss functions, 
-        selctions of different rendering functions, ray generation functions, 
-        blending functions (for collocated and non-collocated ray marching), 
-        and functions to setup encoder and decoders. 
+    ''' A base rendering model that provides the basic loss functions,
+        selctions of different rendering functions, ray generation functions,
+        blending functions (for collocated and non-collocated ray marching),
+        and functions to setup encoder and decoders.
         A sub model needs to at least re-implement create_network_models() and run_network_models() for actual rendering.
         Examples are: hirarchical_volumetric_model etc.
 
-        The model collects 
+        The model collects
     '''
     @staticmethod
     def modify_commandline_options(parser, is_train=True):
@@ -205,14 +205,14 @@ class BaseRenderingModel(BaseModel):
         return parser
 
     def add_default_color_losses(self, opt):
-        ''' if no color loss terms are specified, this function is called to 
+        ''' if no color loss terms are specified, this function is called to
             add default supervision into opt.color_loss_items
         '''
 
         opt.color_loss_items = []  # add this to actual names in subclasses
 
     def add_default_visual_items(self, opt):
-        ''' if no visual terms are specified, this function is called to 
+        ''' if no visual terms are specified, this function is called to
             add default visualization items
         '''
         opt.visual_items = ['gt_image'
@@ -394,6 +394,10 @@ class BaseRenderingModel(BaseModel):
                 self.input[key] = item.to(self.device)
 
         # gt required in loss compute
+        self.gt_image_4 = self.input['gt_image_4'].to(
+            self.device) if 'gt_image_4' in input else None
+        self.gt_image_1over8 = self.input['gt_image_1over8'].to(
+            self.device) if 'gt_image_1over8' in input else None
         self.gt_image = self.input['gt_image'].to(
             self.device) if 'gt_image' in input else None
 
@@ -402,18 +406,19 @@ class BaseRenderingModel(BaseModel):
 
         self.gt_mask = self.input['gt_mask'].to(
             self.device) if 'gt_mask' in input else None
-        
+
 
     def set_visuals(self):
         for key, item in self.output.items():
             if key in self.visual_names:
                 setattr(self, key, item)
-        if "coarse_raycolor" not in self.visual_names:
-            key = "coarse_raycolor"
-            setattr(self, key, self.output[key])
+        # caiyingjie
+        #if "coarse_raycolor" not in self.visual_names:
+        #    key = "coarse_raycolor"
+        #    setattr(self, key, self.output[key])
 
     def check_setup_renderFunc_channels(self, opt):
-        ''' Find render functions; 
+        ''' Find render functions;
             the function is often used by subclasses when creating rendering networks.
         '''
 
@@ -542,12 +547,14 @@ class BaseRenderingModel(BaseModel):
         for i, name in enumerate(opt.color_loss_items):
             if name.startswith("ray_masked"):
                 unmasked_name = name[len("ray_masked")+1:]
-                masked_output = torch.masked_select(self.output[unmasked_name], (self.output["ray_mask"] > 0)[..., None].expand(-1, -1, 3)).reshape(1, -1, 3)
-                masked_gt = torch.masked_select(self.gt_image, (self.output["ray_mask"] > 0)[..., None].expand(-1, -1, 3)).reshape(1, -1, 3)
-                if masked_output.shape[1] > 0:
-                    loss = self.l2loss(masked_output, masked_gt)
-                else:
-                    loss = torch.tensor(0.0, dtype=torch.float32, device=masked_output.device)
+                #masked_output = torch.masked_select(self.output[unmasked_name], (self.output["ray_mask"] > 0)[..., None].expand(-1, -1, 3)).reshape(1, -1, 3)
+                masked_gt = torch.masked_select(self.gt_image_4, (self.output["ray_mask"] > 0)[..., None].expand(-1, -1, 3)).reshape(1, -1, 3).float()
+                loss = self.l2loss(self.output[unmasked_name], masked_gt)
+                #if masked_output.shape[1] > 0:
+                #    loss = self.l2loss(self.output[unmasked_name], masked_gt)
+                    #loss = self.l2loss(masked_output, masked_gt)
+                #else:
+                #    loss = torch.tensor(0.0, dtype=torch.float32, device=masked_output.device)
                 # print("loss", name, torch.max(torch.abs(loss)))
             elif name.startswith("ray_miss"):
                 unmasked_name = name[len("ray_miss") + 1:]
@@ -593,12 +600,25 @@ class BaseRenderingModel(BaseModel):
                 # img = csave.view(512, 640, 3).detach().numpy()
                 # self.save_image(img, filepath)
                 # print("psnrkey recal:",mse2psnr(torch.nn.MSELoss().to("cuda")(masked_output, masked_gt)) )
+            elif name.startswith("pts_weight"):
+                #loss = self.l2loss(self.output[name], torch.zeros_like(self.output[name]))
+                loss = self.output[name]
+            elif name == "nerf_coarse_raycolor":
+                if self.opt.half_supervision:
+                    height, width = 64, 96
+                    loss = self.l2loss(self.output[name].view(height, width, 3)[height//2:,...].float(), self.gt_image_1over8.view(height, width, 3)[height//2:,...].float())
+                else:
+                    loss = self.l2loss(self.output[name].float(), self.gt_image_1over8.float())
             else:
-                if name not in self.output:
-                    print(fmt.YELLOW + "No required color loss item: " + name +
-                          fmt.END)
-                # print("no_mask")
-                loss = self.l2loss(self.output[name], self.gt_image)
+                #if name not in self.output:
+                #    print(fmt.YELLOW + "No required color loss item: " + name +
+                #          fmt.END)
+                if self.opt.half_supervision:
+#                if name.split('_')[-1]=="half":
+                    height, width = 512,768
+                    loss = self.l2loss(self.output[name].reshape(height, width, 3)[height//2:,...], self.gt_image.reshape(height, width, 3)[height//2:,...])
+                else:
+                    loss = self.l2loss(self.output[name], self.gt_image)
                 # print("loss", name, torch.max(torch.abs(loss)))
             self.loss_total += (loss * opt.color_loss_weights[i] + 1e-6)
             # loss.register_hook(lambda grad: print(torch.any(torch.isnan(grad)), grad, opt.color_loss_weights[i]))
@@ -627,18 +647,18 @@ class BaseRenderingModel(BaseModel):
             setattr(self, "loss_" + name, loss)
 
         #zero_one regularization losses
-        for i, name in enumerate(opt.zero_one_loss_items):
-            if name not in self.output:
-                print(fmt.YELLOW + "No required zero_one loss item: " + name +
-                      fmt.END)
-                # setattr(self, "loss_" + name, torch.zeros([1], device="cuda", dtype=torch.float32))
-            else:
-                val = torch.clamp(self.output[name], self.opt.zero_epsilon,
-                                  1 - self.opt.zero_epsilon)
-                # print("self.output[name]",torch.min(self.output[name]), torch.max(self.output[name]))
-                loss = torch.mean(torch.log(val) + torch.log(1 - val))
-                self.loss_total += loss * opt.zero_one_loss_weights[i]
-                setattr(self, "loss_" + name, loss)
+        #for i, name in enumerate(opt.zero_one_loss_items):
+        #    if name not in self.output:
+        #        print(fmt.YELLOW + "No required zero_one loss item: " + name +
+        #              fmt.END)
+        #        # setattr(self, "loss_" + name, torch.zeros([1], device="cuda", dtype=torch.float32))
+        #    else:
+        #        val = torch.clamp(self.output[name], self.opt.zero_epsilon,
+        #                          1 - self.opt.zero_epsilon)
+        #        # print("self.output[name]",torch.min(self.output[name]), torch.max(self.output[name]))
+        #        loss = torch.mean(torch.log(val) + torch.log(1 - val))
+        #        self.loss_total += loss * opt.zero_one_loss_weights[i]
+        #        setattr(self, "loss_" + name, loss)
 
         # l2 square regularization losses
         for i, name in enumerate(opt.l2_size_loss_items):
