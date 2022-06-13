@@ -962,7 +962,7 @@ class NeuralPoints(nn.Module):
         img_fea, img_fea_2h = None, None
         if self.opt.fov and use_middle==False:
             if "seq_id" in inputs:
-                self.xyz, _, fov_ids, pts_2d = get_lidar_in_image_fov(self.xyz_all[inputs["seq_id"]].squeeze(), c2w.squeeze(), intrinsic.squeeze(), xmin=0, ymin=0, xmax=int(w), ymax=int(h), return_more=True)
+                self.xyz, self.local_xyz, fov_ids, pts_2d = get_lidar_in_image_fov(self.xyz_all[inputs["seq_id"]].squeeze(), c2w.squeeze(), intrinsic.squeeze(), xmin=0, ymin=0, xmax=int(w), ymax=int(h), return_more=True)
                 self.points_embeding = self.points_embeding_all[inputs["seq_id"]].squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
                 self.points_conf = self.points_conf_all[inputs["seq_id"]].squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
                 if "1" in list(self.opt.point_color_mode):

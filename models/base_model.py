@@ -65,9 +65,7 @@ class BaseModel:
             assert isinstance(name, str)
             net = getattr(self, 'net_{}'.format(name))
             assert isinstance(net, nn.Module)
-            #import pdb; pdb.set_trace()
             net = nn.SyncBatchNorm.convert_sync_batchnorm(net.cuda())
-#            net = DDP(net, device_ids=[torch.cuda.current_device()])
             net = DDP(net, device_ids=[self.local_rank], output_device=self.local_rank)
             setattr(self, 'net_{}'.format(name), net)
 

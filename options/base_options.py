@@ -48,10 +48,19 @@ class BaseOptions:
             '--inference',
             action='store_true',
             help='if specified, print more debugging information')
+
         parser.add_argument(
             '--perceiver_io',
             action='store_true',
             help='if specified, print more debugging information')
+        parser.add_argument('--N', type=int, default=512, help='name of the experiment')
+        parser.add_argument('--D', type=int, default=64, help='name of the experiment')
+        parser.add_argument('--E', type=int, default=64, help='name of the experiment')
+        parser.add_argument('--C', type=int, default=56, help='name of the experiment')
+        parser.add_argument('--num_self_attention_heads', type=int, default=4, help='name of the experiment')
+        parser.add_argument('--num_self_attention_blocks', type=int, default=4, help='name of the experiment')
+        parser.add_argument('--num_self_attention_layers_per_block', type=int, default=2, help='name of the experiment')
+
         parser.add_argument(
             '--fov',
             action='store_true',

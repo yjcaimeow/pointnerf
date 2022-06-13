@@ -317,6 +317,7 @@ class PerceiverEncoder(nn.Module):
         #input_adapter: InputAdapter,
         num_latents: int,
         num_latent_channels: int,
+        num_input_channels: int,
         num_cross_attention_heads: int = 4,
         num_cross_attention_qk_channels: Optional[int] = None,
         num_cross_attention_v_channels: Optional[int] = None,
@@ -453,6 +454,7 @@ class PerceiverDecoder(nn.Module):
         self,
         #output_adapter: OutputAdapter,
         num_latent_channels: int,
+        num_output_query_channels: int,
         num_cross_attention_heads: int = 4,
         num_cross_attention_qk_channels: Optional[int] = None,
         num_cross_attention_v_channels: Optional[int] = None,
@@ -493,8 +495,8 @@ class PerceiverDecoder(nn.Module):
 
         self.cross_attn = cross_attn
         #self.output_adapter = output_adapter
-        self.feature_linear = nn.Linear(96, 128)
-        self.alpha_linear = nn.Linear(96, 1)
+        self.feature_linear = nn.Linear(num_output_query_channels, 128)
+        self.alpha_linear = nn.Linear(num_output_query_channels, 1)
         self.density_super_act = torch.nn.Softplus()
 
     def forward(self, x, output_query):

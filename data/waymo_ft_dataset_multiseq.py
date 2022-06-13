@@ -145,7 +145,7 @@ class WaymoFtDataset(BaseDataset):
 
         self.norm_w2c, self.norm_c2w = torch.eye(4, device="cuda", dtype=torch.float32), torch.eye(4, device="cuda", dtype=torch.float32)
         self.total = len(self.images)
-        print("dataset total: including (images, poses, camposes, centerdirs) \n", self.split, self.images.shape, self.poses.shape, self.camposes.shape, self.centerdirs.shape, self.images_4.shape)
+        #print("dataset total: including (images, poses, camposes, centerdirs) \n", self.split, self.images.shape, self.poses.shape, self.camposes.shape, self.centerdirs.shape, self.images_4.shape)
 
     def resize(self, imgs, img_H=128, img_W=192):
         imgs_half_res = np.zeros((imgs.shape[0], img_H, img_W, 3))

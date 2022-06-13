@@ -616,7 +616,8 @@ class BaseRenderingModel(BaseModel):
                 if self.opt.half_supervision:
 #                if name.split('_')[-1]=="half":
                     height, width = 512,768
-                    loss = self.l2loss(self.output[name].reshape(height, width, 3)[height//2:,...], self.gt_image.reshape(height, width, 3)[height//2:,...])
+                    batch_size = self.output[name].shape[0]
+                    loss = self.l2loss(self.output[name].reshape(batch_size, height, width, 3)[:,height//2:,...], self.gt_image.reshape(batch_size, height, width, 3)[:,height//2:,...])
                 else:
                     loss = self.l2loss(self.output[name], self.gt_image)
                 # print("loss", name, torch.max(torch.abs(loss)))

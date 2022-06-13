@@ -19,8 +19,8 @@ scan="scene0241_01"
 load_points=2
 feat_grad=1
 conf_grad=1
-dir_grad=1
-color_grad=1
+dir_grad=0
+color_grad=0
 vox_res=400
 vox_res_middle=100
 normview=0
@@ -105,7 +105,7 @@ num_viewdir_freqs=4 #6
 random_sample='full_image'
 random_sample_size=56 # 32 * 32 = 1024
 
-batch_size=1
+batch_size=4
 
 plr=0.0004
 lr=0.0004 # 0.0005 #0.00015
@@ -114,12 +114,11 @@ lr_decay_iters=1000000
 lr_decay_exp=0.1
 
 #checkpoints_dir="/mnt/lustre/caiyingjie/pointnerf/unified.f30.nerf_4_128.shading_layers_2_2.create_points_0.7"
-checkpoints_dir='/mnt/lustre/caiyingjie/pointnerf/'+$1
+checkpoints_dir=$1
 resume_dir="${checkpoints_dir}/waymo"
 
-save_iter_freq=100
-save_point_freq=100
-maximum_step=200000 #500000 #250000 #800000
+save_iter_freq=200
+maximum_step=600000 # 3000 epoch
 
 niter=10000 #1000000
 niter_decay=10000 #250000
@@ -127,8 +126,8 @@ n_threads=0
 
 train_and_test=0 #1
 test_num=10
-test_freq=50 #1200 #1200 #30184 #30184 #50000
-print_freq=1
+test_freq=200
+print_freq=100
 test_num_step=1
 
 prob_freq=10000 #10001
@@ -167,9 +166,10 @@ PART=VA-Human
 #--prune_points \
 #CUDA_LAUNCH_BLOCKING=1 srun --partition=${PART} --gres=gpu:1 -N${NODENUM} --ntasks-per-node ${GPUNUM} --job-name=${JOBNAME} --kill-on-bad-exit=1 python ./train_iter.py \
 TOOLS="srun --partition=$PART --gres=gpu:${GPUNUM} -n$NODENUM --ntasks-per-node=1 --cpus-per-task=8"
-$TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch --nnodes=$NODENUM --nproc_per_node=$GPUNUM --node_rank \$SLURM_PROCID --master_addr=\$(sinfo -Nh -n \$SLURM_NODELIST | head -n 1 | cut -d ' ' -f 1) --master_port $2 train.py \
+$TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch --nnodes=$NODENUM --nproc_per_node=$GPUNUM --node_rank \$SLURM_PROCID --master_addr=\$(sinfo -Nh -n \$SLURM_NODELIST | head -n 1 | cut -d ' ' -f 1) --master_port $2 train_iter.py \
     --zoom_in_scale $zoom_in_scale \
     --ddp_train --half_supervision \
+    --perceiver_io \
     --seq_num ${seq_num} \
     --catWithLocaldir \
     --iter_pg ${iter_pg} \
@@ -235,7 +235,6 @@ $TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch --nnodes=$N
     --agg_feat_xyz_mode $agg_feat_xyz_mode \
     --agg_alpha_xyz_mode $agg_alpha_xyz_mode \
     --agg_color_xyz_mode $agg_color_xyz_mode  \
-    --save_point_freq $save_point_freq  \
     --raydist_mode_unit $raydist_mode_unit  \
     --agg_dist_pers $agg_dist_pers \
     --agg_intrp_order $agg_intrp_order \

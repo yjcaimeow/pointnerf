@@ -16,7 +16,6 @@ from tqdm import tqdm
 from tensorboardX import SummaryWriter
 import torch.backends.cudnn as cudnn
 
-loss_fn_vgg = lpips.LPIPS(net='vgg', version='0.1').cuda()
 try:
     from skimage.measure import compare_ssim
     from skimage.measure import compare_psnr
@@ -215,7 +214,7 @@ def render_vid(model, dataset, visualizer, opt, bg_info, steps=0, gen_vid=True):
     return
 
 def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, gen_vid=False, lpips=True, max_test_psnr=0, \
-         max_train_psnr=0, bg_color=None, all_z=None, best_PSNR_half=None, sequence_length_list=None, train_sequence_length_list=None):
+         max_train_psnr=0, bg_color=None, all_z=None, best_PSNR_half=None, sequence_length_list=None, train_sequence_length_list=None, loss_fn_vgg=None):
     print('-----------------------------------Testing-----------------------------------')
     inference_time = time.time()
     model.eval()
@@ -224,7 +223,7 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
 
     height = dataset.height*opt.zoom_in_scale
     width = dataset.width*opt.zoom_in_scale
-    visualizer.reset()
+    #visualizer.reset()
 
     alllist_psnr_train, alllist_psnr_test = [],[]
     alllist_ssim_train, alllist_ssim_test = [],[]
@@ -381,12 +380,12 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
             for img_index, img in enumerate(gts):
                 filepath = os.path.join(rootdir, str(img_index).zfill(4)+'_gt.png')
                 if opt.half_supervision:
-                    img[0:height//2]=0
+                    img = img[height//2:,:]
                 save_image(np.asarray(img), filepath)
         for img_index, img in enumerate(preds):
             filepath = os.path.join(rootdir, str(img_index).zfill(4)+'_pred.png')
             if opt.half_supervision:
-                img[0:height//2]=0
+                img = img[height//2:,:]
             save_image(np.asarray(img), filepath)
     return psnr_train_list, pnsr_test_list, ssim_train_list, ssim_test_list, lpips_train_list, lpips_test_list
 
@@ -683,11 +682,12 @@ def main():
     test_opt.split = "test"
     test_dataset = WaymoFtDataset(test_opt)
 
+    loss_fn_vgg = lpips.LPIPS(net='vgg', version='0.1').cuda()
     if opt.only_test:
         with torch.no_grad():
             psnr_train_list, pnsr_test_list, ssim_train_list, ssim_test_list, lpips_train_list, lpips_test_list = \
                 test(epoch, model, test_dataset, Visualizer(test_opt), test_opt, test_bg_info, test_steps=total_steps, lpips=True, bg_color=bg_color, best_PSNR_half=best_PSNR_half, \
-                sequence_length_list=test_dataset.sequence_length_list, train_sequence_length_list=train_dataset.sequence_length_list)
+                sequence_length_list=test_dataset.sequence_length_list, train_sequence_length_list=train_dataset.sequence_length_list, loss_fn_vgg=loss_fn_vgg)
         exit()
     with open('/tmp/.neural-volumetric.name', 'w') as f:
         f.write(opt.name + '\n')
@@ -709,106 +709,106 @@ def main():
         visualizer.print_details('saving model ({}, epoch {}, total_steps {})'.format(opt.name, 0, total_steps))
 
     for epoch in range(epoch_count, opt.niter + opt.niter_decay + 1):
-        visualizer.reset()
         if opt.ddp_train:
             sampler.set_epoch(epoch)
         for i, data in enumerate(data_loader):
+            if opt.maximum_step is not None and total_steps >= opt.maximum_step:
+                break
             total_steps += 1
             data['bg_color'] = bg_color
             model.set_input(data)
             model.optimize_parameters(total_steps=total_steps)
             losses = model.get_current_losses()
-            if local_rank==0:
-                for key in losses.keys():
-                    if key != "conf_coefficient":
-                        writer.add_scalar(key, losses[key].item(), total_steps)
+#            if local_rank==0:
+#                for key in losses.keys():
+#                    if key != "conf_coefficient":
+#                        writer.add_scalar(key, losses[key].item(), total_steps)
 
             visualizer.accumulate_losses(losses)
 
             if opt.lr_policy.startswith("iter"):
                 model.update_learning_rate(opt=opt, total_steps=total_steps)
 
-        if epoch and epoch % opt.print_freq == 0 and local_rank==0:
-            visualizer.print_losses(epoch)
+            if total_steps and total_steps % opt.print_freq == 0 and local_rank==0:
+                visualizer.print_losses(total_steps, epoch, writer)
+                visualizer.reset()
+                model.print_lr(opt=opt, total_steps=total_steps)
 
-        if hasattr(opt, "save_point_freq") and epoch and epoch % opt.save_point_freq == 0:
-            visualizer.save_neural_points(epoch, model.neural_points.xyz, model.neural_points.points_embeding, data, save_ref=opt.load_points==0)
+            try:
+                if (total_steps % opt.save_iter_freq == 0 and total_steps) or total_steps==1:
+                    other_states = {
+                        "best_PSNR": best_PSNR,
+                        "best_epoch": best_epoch,
+                        'epoch_count': epoch,
+                        'total_steps': total_steps,
+                    }
+                    visualizer.print_details('saving model ({}, epoch {}, total_steps {})'.format(opt.name, epoch, total_steps))
+                    model.save_networks(total_steps, other_states)
 
-        try:
-            if (epoch % opt.save_iter_freq == 0 and epoch) or epoch==100:
-                other_states = {
-                    "best_PSNR": best_PSNR,
-                    "best_epoch": best_epoch,
-                    'epoch_count': epoch,
-                    'total_steps': total_steps,
-                }
-                visualizer.print_details('saving model ({}, epoch {}, total_steps {})'.format(opt.name, epoch, total_steps))
-                model.save_networks(epoch, other_states)
+            except Exception as e:
+                visualizer.print_details(e)
+            #### test model
+            if total_steps % opt.test_freq == 0 or total_steps==1:
+                model.opt.is_train = 0
+                model.opt.no_loss = 1
+                #model.print_lr(opt=opt, total_steps=total_steps)
+                with torch.no_grad():
+                    psnr_train_list, pnsr_test_list, ssim_train_list, ssim_test_list, lpips_train_list, lpips_test_list = \
+                    test(epoch, model, test_dataset, Visualizer(test_opt), test_opt, test_bg_info, test_steps=total_steps, lpips=True, bg_color=bg_color, best_PSNR_half=best_PSNR_half, \
+                        sequence_length_list=test_dataset.sequence_length_list, train_sequence_length_list=train_dataset.sequence_length_list, loss_fn_vgg=loss_fn_vgg)
+                model.opt.no_loss = 0
+                model.opt.is_train = 1
 
-        except Exception as e:
-            visualizer.print_details(e)
-        #### test model
-        if epoch % opt.test_freq == 0 or epoch==100:
-            model.opt.is_train = 0
-            model.opt.no_loss = 1
-            model.print_lr(opt=opt, total_steps=total_steps)
-            with torch.no_grad():
-                psnr_train_list, pnsr_test_list, ssim_train_list, ssim_test_list, lpips_train_list, lpips_test_list = \
-                test(epoch, model, test_dataset, Visualizer(test_opt), test_opt, test_bg_info, test_steps=total_steps, lpips=True, bg_color=bg_color, best_PSNR_half=best_PSNR_half, \
-                    sequence_length_list=test_dataset.sequence_length_list, train_sequence_length_list=train_dataset.sequence_length_list)
-            model.opt.no_loss = 0
-            model.opt.is_train = 1
+                model.train()
 
-            model.train()
+                if local_rank==0:
+                    test_psnr_half = (sum(pnsr_test_list)/len(pnsr_test_list))
+                    train_psnr_half = (sum(psnr_train_list)/len(psnr_train_list))
+                    train_ssim_value_half = (sum(ssim_train_list)/len(ssim_train_list))
+                    test_ssim_value_half =(sum(ssim_test_list)/len(ssim_test_list))
+                    train_lpips_value_half_vgg = (sum(lpips_train_list)/len(lpips_train_list))
+                    test_lpips_value_half_vgg = (sum(lpips_test_list)/len(lpips_test_list))
 
-            if local_rank==0:
-                test_psnr_half = (sum(pnsr_test_list)/len(pnsr_test_list))
-                train_psnr_half = (sum(psnr_train_list)/len(psnr_train_list))
-                train_ssim_value_half = (sum(ssim_train_list)/len(ssim_train_list))
-                test_ssim_value_half =(sum(ssim_test_list)/len(ssim_test_list))
-                train_lpips_value_half_vgg = (sum(lpips_train_list)/len(lpips_train_list))
-                test_lpips_value_half_vgg = (sum(lpips_test_list)/len(lpips_test_list))
+                    best_epoch = epoch if test_psnr_half > best_PSNR_half else best_epoch
+                    best_PSNR = max(train_psnr_half, best_PSNR)
+                    best_PSNR_half = max(test_psnr_half, best_PSNR_half)
 
-                best_epoch = epoch if test_psnr_half > best_PSNR_half else best_epoch
-                best_PSNR = max(train_psnr_half, best_PSNR)
-                best_PSNR_half = max(test_psnr_half, best_PSNR_half)
+                    best_SSIM = max(train_ssim_value_half, best_SSIM)
+                    best_SSIM_half = max(test_ssim_value_half, best_SSIM_half)
 
-                best_SSIM = max(train_ssim_value_half, best_SSIM)
-                best_SSIM_half = max(test_ssim_value_half, best_SSIM_half)
+                    best_LPIPS_VGG = min(train_lpips_value_half_vgg, best_LPIPS_VGG)
+                    best_LPIPS_half_VGG = min(test_lpips_value_half_vgg, best_LPIPS_half_VGG)
 
-                best_LPIPS_VGG = min(train_lpips_value_half_vgg, best_LPIPS_VGG)
-                best_LPIPS_half_VGG = min(test_lpips_value_half_vgg, best_LPIPS_half_VGG)
+                    writer.add_scalar('PSNR_test', test_psnr_half, total_steps)
+                    writer.add_scalar('PSNR_train', train_psnr_half, total_steps)
 
-                writer.add_scalar('PSNR_test', test_psnr_half, epoch)
-                writer.add_scalar('PSNR_train', train_psnr_half, epoch)
+                    writer.add_scalar('SSIM_test', test_ssim_value_half, total_steps)
+                    writer.add_scalar('SSIM_train', train_ssim_value_half, total_steps)
 
-                writer.add_scalar('SSIM_test', test_ssim_value_half, epoch)
-                writer.add_scalar('SSIM_train', train_ssim_value_half, epoch)
+                    writer.add_scalar('LPIPS_test', test_lpips_value_half_vgg, total_steps)
+                    writer.add_scalar('LPIPS_train', train_lpips_value_half_vgg, total_steps)
 
-                writer.add_scalar('LPIPS_test', test_lpips_value_half_vgg, epoch)
-                writer.add_scalar('LPIPS_train', train_lpips_value_half_vgg, epoch)
+                    print (fmt.GREEN+'========EVALUTION=====')
+                    print (opt.checkpoints_dir)
+                    visualizer.print_details(f"test at epoch {epoch}")
 
-                print (fmt.GREEN+'========EVALUTION=====')
-                print (opt.checkpoints_dir)
-                visualizer.print_details(f"test at epoch {epoch}")
+                    visualizer.print_details(f"===== PSNR =====")
+                    visualizer.print_details(f"HALF : train & test: {train_psnr_half}, {test_psnr_half}")
+                    visualizer.print_details(f"BEST : {best_PSNR}, {best_PSNR_half} {best_epoch}")
 
-                visualizer.print_details(f"===== PSNR =====")
-                visualizer.print_details(f"HALF : train & test: {train_psnr_half}, {test_psnr_half}")
-                visualizer.print_details(f"BEST : {best_PSNR}, {best_PSNR_half} {best_epoch}")
+                    visualizer.print_details(f"===== SSIM =====")
+                    visualizer.print_details(f"HALF : train & test: {train_ssim_value_half}, {test_ssim_value_half}")
+                    visualizer.print_details(f"BEST : {best_SSIM}, {best_SSIM_half} {best_epoch}")
 
-                visualizer.print_details(f"===== SSIM =====")
-                visualizer.print_details(f"HALF : train & test: {train_ssim_value_half}, {test_ssim_value_half}")
-                visualizer.print_details(f"BEST : {best_SSIM}, {best_SSIM_half} {best_epoch}")
-
-                visualizer.print_details(f"===== LPIPS VGG =====")
-                visualizer.print_details(f"HALF : train & test: {train_lpips_value_half_vgg}, {test_lpips_value_half_vgg}")
-                visualizer.print_details(f"BEST : {best_LPIPS_VGG}, {best_LPIPS_half_VGG} {best_epoch}")
-                for seq_id in range(len(train_dataset.filenames)):
-                    visualizer.print_details(f"====== {train_dataset.filenames[seq_id]} ======")
-                    visualizer.print_details(f"psnr          train & test : {psnr_train_list[seq_id]}, {pnsr_test_list[seq_id]}")
-                    visualizer.print_details(f"ssim          train & test : {ssim_train_list[seq_id]}, {ssim_test_list[seq_id]}")
-                    visualizer.print_details(f"lpips         train & test : {lpips_train_list[seq_id]}, {lpips_test_list[seq_id]}")
-                print (fmt.END)
+                    visualizer.print_details(f"===== LPIPS VGG =====")
+                    visualizer.print_details(f"HALF : train & test: {train_lpips_value_half_vgg}, {test_lpips_value_half_vgg}")
+                    visualizer.print_details(f"BEST : {best_LPIPS_VGG}, {best_LPIPS_half_VGG} {best_epoch}")
+                    for seq_id in range(len(train_dataset.filenames)):
+                        visualizer.print_details(f"====== {train_dataset.filenames[seq_id]} ======")
+                        visualizer.print_details(f"psnr          train & test : {psnr_train_list[seq_id]}, {pnsr_test_list[seq_id]}")
+                        visualizer.print_details(f"ssim          train & test : {ssim_train_list[seq_id]}, {ssim_test_list[seq_id]}")
+                        visualizer.print_details(f"lpips         train & test : {lpips_train_list[seq_id]}, {lpips_test_list[seq_id]}")
+                    print (fmt.END)
 
     writer.close()
     del train_dataset
