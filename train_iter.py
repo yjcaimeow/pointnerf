@@ -582,22 +582,13 @@ def main():
     torch.backends.cudnn.benchmark = True
     from options import TrainOptions
     opt = TrainOptions().parse()
-#    basedir = "/mnt/lustre/caiyingjie/pointnerf/"
-    basedir = "/home/xschen/yjcai/pointnerf"
+    basedir = "/mnt/lustre/caiyingjie/pointnerf/"
+#    basedir = "/home/xschen/yjcai/pointnerf"
 
     if opt.ddp_train:
-        if opt.ddp_train_type=='normal':
-            if mp.get_start_method(allow_none=True) is None:
-                mp.set_start_method('spawn')
-            rank = int(os.environ['RANK'])
-            num_gpus = torch.cuda.device_count()
-            torch.cuda.set_device(rank % num_gpus)
-            dist.init_process_group(backend='nccl')
-            seed=6666
-        else:
-            from engine.engine import Engine
-            engine = Engine(args=opt)
-            seed = engine.local_rank
+        from engine.engine import Engine
+        engine = Engine(args=opt)
+        seed = engine.local_rank
         torch.manual_seed(seed)
         cudnn.benchmark = True
     local_rank = int(os.environ["LOCAL_RANK"])

@@ -115,10 +115,6 @@ class BaseOptions:
                             help='# threads for loading data')
 
         #================================ model ================================#
-        parser.add_argument('--ddp_train_type',
-                            default="normal",
-                            type=str,
-                            help='cnn | style | condition')
         parser.add_argument('--combination',
                             default="concat",
                             type=str,
