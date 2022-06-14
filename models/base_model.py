@@ -66,7 +66,7 @@ class BaseModel:
             net = getattr(self, 'net_{}'.format(name))
             assert isinstance(net, nn.Module)
             net = nn.SyncBatchNorm.convert_sync_batchnorm(net.cuda())
-            net = DDP(net, device_ids=[self.local_rank], output_device=self.local_rank)
+            net = DDP(net, device_ids=[self.local_rank], output_device=self.local_rank, find_unused_parameters=True)
             setattr(self, 'net_{}'.format(name), net)
 
     def get_networks(self) -> [nn.Module]:

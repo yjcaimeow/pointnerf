@@ -36,9 +36,16 @@ class lighting_fast_querier():
         print("querier device", device, device.index)
         self.gpu = device.index
         self.opt = opt
-        #drv.init()
-        # self.device = drv.Device(gpu)
-        #self.ctx = drv.Device(self.gpu).make_context()
+#        drv.init()
+        #import pycuda.autoinit
+        #dev = drv.Device(self.gpu)
+#        ctx = drv.Device(self.gpu).make_context()
+        #ctx = dev.retain_primary_context()
+
+        #ctx.push()
+        #ctx.pop()
+
+#        self.ctx = drv.Device(self.gpu).make_context()
         self.claim_occ, self.map_coor2occ, self.fill_occ2pnts, self.mask_raypos, self.get_shadingloc, self.query_along_ray = self.build_cuda()
         self.inverse = self.opt.inverse
         self.count=0
@@ -896,44 +903,44 @@ def load_init_points(scan, data_dir="/home/xharlie/user_space/data/nrData/nerf/n
     points_xyz = torch.stack([x,y,z], dim=-1).to(torch.float32)
     return points_xyz
 
-if __name__ == "__main__":
-    obj = "lego"
-    # point_file = "{}.pkl".format(obj)
-    # point_dir = os.path.expandvars("${nrDataRoot}/nerf/nerf_synthetic_points/")
-    r = 0.36000002589322094
-    ranges = np.array([-1., -1.3, -1.2, 1., 1.3, 1.2], dtype=np.float32)
-    vdim = np.array([400, 400, 400], dtype=np.int32)
-    # vsize = np.array([2 * r / vdim[0], 2 * r / vdim[1], 4. / vdim[2]], dtype=np.float32)
-    vsize = np.array([0.005, 0.005, 0.005], dtype=np.float32)
-    vscale = np.array([2, 2, 2], dtype=np.int32)
-    SR = 24
-    P = 128
-    K = 8
-    NN = 2
-    ray_num = 2048
-    kernel_size = np.array([5, 5, 5], dtype=np.int32)
-    radius_limit = 0  # r / 400 * 5 #r / 400 * 5
-    depth_limit = 0  # 4. / 400 * 1.5 # r / 400 * 2
-    max_o = 500000
-    near_depth, far_depth = 2., 6.
-    shading_count = 400
-
-    xrange = np.arange(0, 800, 1, dtype=np.int32)
-    yrange = np.arange(0, 800, 1, dtype=np.int32)
-    xv, yv = np.meshgrid(xrange, yrange, sparse=False, indexing='ij')
-    inds = np.arange(len(xv.reshape(-1)), dtype=np.int32)
-    np.random.shuffle(inds)
-    inds = inds[:ray_num, ...]
-    pixel_idx = np.stack([xv, yv], axis=-1).reshape(-1, 2)[inds]  # 20000 * 2
-    gpu = 0
-    imgidx = 3
-    split = ["train"]
-
-    if gpu < 0:
-        import pycuda.autoinit
-    else:
-        drv.init()
-        dev1 = drv.Device(gpu)
-        ctx1 = dev1.make_context()
-    try_build(ranges, vsize, vdim, vscale, max_o, P, kernel_size, SR, K, pixel_idx, obj,
-              radius_limit, depth_limit, near_depth, far_depth, shading_count, split=split, imgidx=imgidx, gpu=0, NN=NN)
+#if __name__ == "__main__":
+#    obj = "lego"
+#    # point_file = "{}.pkl".format(obj)
+#    # point_dir = os.path.expandvars("${nrDataRoot}/nerf/nerf_synthetic_points/")
+#    r = 0.36000002589322094
+#    ranges = np.array([-1., -1.3, -1.2, 1., 1.3, 1.2], dtype=np.float32)
+#    vdim = np.array([400, 400, 400], dtype=np.int32)
+#    # vsize = np.array([2 * r / vdim[0], 2 * r / vdim[1], 4. / vdim[2]], dtype=np.float32)
+#    vsize = np.array([0.005, 0.005, 0.005], dtype=np.float32)
+#    vscale = np.array([2, 2, 2], dtype=np.int32)
+#    SR = 24
+#    P = 128
+#    K = 8
+#    NN = 2
+#    ray_num = 2048
+#    kernel_size = np.array([5, 5, 5], dtype=np.int32)
+#    radius_limit = 0  # r / 400 * 5 #r / 400 * 5
+#    depth_limit = 0  # 4. / 400 * 1.5 # r / 400 * 2
+#    max_o = 500000
+#    near_depth, far_depth = 2., 6.
+#    shading_count = 400
+#
+#    xrange = np.arange(0, 800, 1, dtype=np.int32)
+#    yrange = np.arange(0, 800, 1, dtype=np.int32)
+#    xv, yv = np.meshgrid(xrange, yrange, sparse=False, indexing='ij')
+#    inds = np.arange(len(xv.reshape(-1)), dtype=np.int32)
+#    np.random.shuffle(inds)
+#    inds = inds[:ray_num, ...]
+#    pixel_idx = np.stack([xv, yv], axis=-1).reshape(-1, 2)[inds]  # 20000 * 2
+#    gpu = 0
+#    imgidx = 3
+#    split = ["train"]
+#
+#    if gpu < 0:
+#        import pycuda.autoinit
+#    else:
+#        drv.init()
+#        dev1 = drv.Device(gpu)
+#        ctx1 = dev1.make_context()
+#    try_build(ranges, vsize, vdim, vscale, max_o, P, kernel_size, SR, K, pixel_idx, obj,
+#              radius_limit, depth_limit, near_depth, far_depth, shading_count, split=split, imgidx=imgidx, gpu=0, NN=NN)

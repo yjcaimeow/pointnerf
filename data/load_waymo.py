@@ -15,8 +15,10 @@ from waymo_open_dataset.utils import  frame_utils
 from waymo_open_dataset import dataset_pb2 as open_dataset
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+import sys
+sys.path.append('../')
 import models.mvs.mvs_utils as mvs_utils
-from .data_utils import get_dtu_raydir
+#from .data_utils import get_dtu_raydir
 def rgba(r):
   """Generates a color based on range.
 
@@ -174,7 +176,7 @@ pose_nerf2camera = np.array([
     ])
 pose_camera2nerf = np.linalg.inv(pose_nerf2camera).astype(np.float32)
 
-def load_waymo_data(FILENAME, frames_length=11,  half_res=True, step=10, \
+def load_waymo_data(FILENAME, frames_length=200,  half_res=True, step=10, \
                     load_point=True, start_frame=0, \
                     split='test', scale_factor=10, args=None, device = None, vox_res=100, width=1920, height=1280):
     dataset = tf.data.TFRecordDataset(FILENAME, compression_type='')
@@ -259,9 +261,9 @@ def load_waymo_data(FILENAME, frames_length=11,  half_res=True, step=10, \
         c2w = pose_camera2world
         campos = c2w[:3, 3]
         camrot = c2w[:3,:3]
-        raydir = get_dtu_raydir(centerpixel, K, camrot, True)
+        #raydir = get_dtu_raydir(centerpixel, K, camrot, True)
         camposes.append(campos)
-        centerdirs.append(raydir)
+        #centerdirs.append(raydir)
 
         all_imgs.append(undist_img)
         all_poses.append(pose_camera2world)
@@ -285,7 +287,7 @@ def load_waymo_data(FILENAME, frames_length=11,  half_res=True, step=10, \
     imgs = np.asarray(all_imgs, dtype=np.float32)
     poses = np.asarray(all_poses, dtype=np.float32)
     camposes=np.stack(camposes, axis=0)
-    centerdirs=np.concatenate(centerdirs, axis=0)
+    #centerdirs=np.concatenate(centerdirs, axis=0)
     poses = np.concatenate([-poses[:, :, 1:2], poses[:, :, 2:3], -poses[:, :, 0:1], poses[:, :, 3:4]], 2)
 
     test_id_list = all_id_list[::step]
@@ -297,11 +299,27 @@ def load_waymo_data(FILENAME, frames_length=11,  half_res=True, step=10, \
         K = K/scale_factor
         K[2][2] = 1
         ### for target img size
-        img_H, img_W = H*1, W*1
+        img_H, img_W = H*4, W*4
         imgs_half_res = np.zeros((imgs.shape[0], img_H, img_W, 3))
 
         for i, img in enumerate(imgs):
             imgs_half_res[i] = cv2.resize(img,  (img_W, img_H), interpolation=cv2.INTER_AREA)
         imgs = np.asarray(imgs_half_res, dtype=np.float32)
-    return torch.from_numpy(imgs), torch.from_numpy(poses), [H, W, focal], torch.from_numpy(K), all_id_list, test_id_list, train_id_list, \
-        torch.from_numpy(all_points), torch.from_numpy(camposes), torch.from_numpy(centerdirs)
+    return torch.from_numpy(imgs), torch.from_numpy(poses), [H, W, focal], torch.from_numpy(K), torch.from_numpy(all_points), all_id_list, test_id_list, train_id_list, \
+            torch.from_numpy(camposes)
+            #torch.from_numpy(camposes), torch.from_numpy(centerdirs)
+
+def main(filename):
+    img, poses, hwf, k, pcd, *_ = load_waymo_data(filename)
+    dstroot = filename.replace('tfrecord', 'folder')
+    os.makedirs(dstroot, exist_ok=True)
+    np.save(os.path.join(dstroot, 'pcd.npy'), pcd)
+    for index in range(len(img)):
+        np.savez(os.path.join(dstroot, str(index).zfill(3)+'_info.npz'), image=img[index], pose=poses[index], hwf=hwf, k=k)
+
+from multiprocessing import Pool
+if __name__ == '__main__':
+    import glob
+    filenames = glob.glob('/mnt/lustre/caiyingjie/data/selected_waymo/*.tfrecord')
+    with Pool(150) as p:
+        print(p.map(main, filenames))

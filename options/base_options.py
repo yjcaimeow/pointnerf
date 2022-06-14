@@ -2,7 +2,6 @@ import argparse
 import os
 from models import find_model_class_by_name
 from data import find_dataset_class_by_name
-import torch
 
 
 class BaseOptions:
@@ -183,6 +182,10 @@ class BaseOptions:
                             type=int,
                             default=1,
                             help='input batch size')
+        parser.add_argument('--port',
+                            type=int,
+                            default=66666,
+                            help='local_rank init value')
         parser.add_argument('--local_rank',
                             type=int,
                             default=0,
@@ -314,6 +317,7 @@ class BaseOptions:
         with open(file_name, 'wt') as opt_file:
             opt_file.write(message)
             opt_file.write('\n')
+        opt_file.close()
 
     def parse(self):
         opt = self.gather_options()

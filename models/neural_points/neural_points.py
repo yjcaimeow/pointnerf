@@ -968,6 +968,8 @@ class NeuralPoints(nn.Module):
                 mask=None
                 if self.opt.perceiver_io:
                     mask = get_irregular_mask()
+                    zeros = torch.ones(mask.shape)
+                    mask = torch.cat((zeros, torch.from_numpy(mask))).numpy()
                 self.xyz, self.local_xyz, fov_ids, pts_2d = get_lidar_in_image_fov(self.xyz_all[inputs["seq_id"]].squeeze(), c2w.squeeze(), intrinsic.squeeze(), xmin=0, ymin=0, xmax=int(w), ymax=int(h), return_more=True, mask=mask)
 
                 #name = str(inputs['id'].item())
@@ -1014,4 +1016,4 @@ class NeuralPoints(nn.Module):
 
         sampled_Rw2c = self.Rw2c if self.Rw2c.dim() == 2 else torch.index_select(self.Rw2c, 0, sample_pidx).view(B, R, SR, K, self.Rw2c.shape[1], self.Rw2c.shape[2])
 
-        return sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding[..., 6:], sampled_embedding[..., 3:6], sampled_embedding[..., :3], sample_pnt_mask, sample_loc, sample_loc_w_tensor, sample_ray_dirs_tensor, sample_local_ray_dirs_tensor, ray_mask_tensor, vsize, self.grid_vox_sz, raypos_tensor, index_tensor
+        return sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding[..., 6:], sampled_embedding[..., 3:6], sampled_embedding[..., :3], sample_pnt_mask, sample_loc, sample_loc_w_tensor, sample_ray_dirs_tensor, sample_local_ray_dirs_tensor, ray_mask_tensor, vsize, self.grid_vox_sz, raypos_tensor, index_tensor, mask

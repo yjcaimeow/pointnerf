@@ -1,4 +1,3 @@
-import sys
 import os
 import copy
 import torch
@@ -17,6 +16,8 @@ from tensorboardX import SummaryWriter
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 import torch.multiprocessing as mp
+import cv2
+
 try:
     from skimage.measure import compare_ssim
     from skimage.measure import compare_psnr
@@ -229,26 +230,8 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
     alllist_psnr_train, alllist_psnr_test = [],[]
     alllist_ssim_train, alllist_ssim_test = [],[]
     alllist_lpips_train, alllist_lpips_test = [],[]
-    #start, end = 0, 0
 
-    #if opt.neural_render == 'style':
-    #    tmp = torch.zeros(size=(1, opt.z_dim))
-    #    all_z_new = []
-    #    for seq_index in range(len(sequence_length_list)):
-    #        start = end
-    #        end = end + train_sequence_length_list[seq_index]
-    #        seq_codes = all_z[start:end]
-    #        seq_codes_filltest = []
-    #        train_idx=0
-    #        for frame_index in range(sequence_length_list[seq_index]):
-    #            if frame_index%10==0:
-    #                seq_codes_filltest.append(tmp.squeeze().cpu())
-    #            else:
-    #                seq_codes_filltest.append(seq_codes[train_idx].cpu())
-    #                train_idx = train_idx+1
-    #        seq_codes_filltest = torch.stack(seq_codes_filltest)
-    #        all_z_new.append(seq_codes_filltest)
-    preds, gts = [],[]
+    preds, gts, random_masks = [],[],[]
 
     train_psnr_half, test_psnr_half = [],[]
     ssim_train_half, ssim_test_half = [],[]
@@ -295,6 +278,8 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
         model.set_input(data)
         output = model.test()
 
+        if opt.perceiver_io:
+            random_masks.append(output["random_masks"])
         curr_visuals = model.get_current_visuals(data=data)
         pred = curr_visuals['final_coarse_raycolor']
         gt = tmpgts['gt_image']
@@ -384,10 +369,17 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
                     img = img[height//2:,:]
                 save_image(np.asarray(img), filepath)
         for img_index, img in enumerate(preds):
+            if opt.perceiver_io:
+                masked_img = (1-cv2.resize(random_masks[img_index][0], (768, 512), interpolation=cv2.INTER_AREA)[...,None]) * gts[img_index]
+                filepath = os.path.join(rootdir, str(img_index).zfill(4)+'_masked.png')
+                if opt.half_supervision:
+                    masked_img = masked_img[height//2:,:]
+                save_image(masked_img, filepath)
             filepath = os.path.join(rootdir, str(img_index).zfill(4)+'_pred.png')
             if opt.half_supervision:
                 img = img[height//2:,:]
             save_image(np.asarray(img), filepath)
+
     return psnr_train_list, pnsr_test_list, ssim_train_list, ssim_test_list, lpips_train_list, lpips_test_list
 
 def update_pcds(model, data_loader, all_z, opt, opacity_thresh):
@@ -578,13 +570,50 @@ def create_all_bg(dataset, model, img_lst, c2ws_lst, w2cs_lst, intrinsics_all, H
     dataset.opt.random_sample = random_sample
     return bg_ray_lst
 
+def init_distributed_mode(args, verbose=False):
+    if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
+        args.rank = int(os.environ["RANK"])
+        args.world_size = int(os.environ['WORLD_SIZE'])
+        args.gpu = int(os.environ['LOCAL_RANK'])
+        os.environ['MASTER_PORT'] = str(getattr(args, 'port', '29529'))
+    if 'USE_MULTIPLE_JOBS' in os.environ:
+        from init_multinode import init_multinode
+        init_multinode(args)
+    elif 'SLURM_PROCID' in os.environ:
+        args.rank = int(os.environ['SLURM_PROCID'])
+        args.gpu = args.rank % torch.cuda.device_count()
+        args.world_size = int(os.environ['SLURM_NTASKS'])
+        node_list = os.environ['SLURM_NODELIST']
+        num_gpus = torch.cuda.device_count()
+        addr = subprocess.getoutput(
+            f'scontrol show hostname {node_list} | head -n1')
+        os.environ['MASTER_PORT'] = str(getattr(args, 'port', '29529'))
+        os.environ['MASTER_ADDR'] = addr
+        os.environ['WORLD_SIZE'] = str(args.world_size)
+        os.environ['LOCAL_RANK'] = str(args.rank % num_gpus)
+        os.environ['RANK'] = str(args.rank)
+
+    else:
+        print('Not using distributed mode')
+        args.distributed = False
+        return
+
+    args.distributed = True
+
+    torch.cuda.set_device(args.gpu)
+    args.dist_backend = 'nccl'
+    print('| distributed init (rank {}): {}, gpu {}'.format(
+        args.rank, args.dist_url, args.gpu), flush=True)
+    torch.distributed.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
+                                         world_size=args.world_size, rank=args.rank)
+    torch.distributed.barrier()
+    if verbose:
+        setup_for_distributed(args.rank == 0)
+
 def main():
-    torch.backends.cudnn.benchmark = True
     from options import TrainOptions
     opt = TrainOptions().parse()
     basedir = "/mnt/lustre/caiyingjie/pointnerf/"
-#    basedir = "/home/xschen/yjcai/pointnerf"
-
     if opt.ddp_train:
         from engine.engine import Engine
         engine = Engine(args=opt)
@@ -592,14 +621,13 @@ def main():
         torch.manual_seed(seed)
         cudnn.benchmark = True
     local_rank = int(os.environ["LOCAL_RANK"])
+
     if local_rank==0:
         writer = SummaryWriter(os.path.join(basedir, 'summaries', opt.checkpoints_dir.split('/')[-1]))
 
     from data.waymo_ft_dataset_multiseq import WaymoFtDataset
     train_dataset = WaymoFtDataset(opt)
-
     sampler = torch.utils.data.distributed.DistributedSampler(train_dataset) if opt.ddp_train else None
-
     data_loader = torch.utils.data.DataLoader(train_dataset, \
         sampler=sampler, \
         shuffle=(sampler is None), \
@@ -662,17 +690,17 @@ def main():
         epoch_count = 1
         total_steps = 0
         del points_xyz_all_list, points_embedding_all, points_color_all, points_dir_all, points_conf_all, all_z
-    model.setup(opt, train_len=train_dataset.total)
-    model.train()
     if opt.ddp_train:
         model.set_ddp()
+    model.setup(opt, train_len=train_dataset.total)
+    model.train()
     if opt.resume_dir:
         load_path = os.path.join(opt.resume_dir, str(opt.resume_iter)+'_states.pth')
         if os.path.isfile(load_path):
             print ('LOADING HISTORY TOTAL STEPS!')
             state_info = torch.load(load_path, map_location='cpu')
             total_steps = state_info['total_steps']
-
+            epoch_count = state_info['epoch_count']
     # create test loader
     test_opt = copy.deepcopy(opt)
     test_opt.is_train = False
@@ -688,8 +716,10 @@ def main():
     if opt.only_test:
         with torch.no_grad():
             psnr_train_list, pnsr_test_list, ssim_train_list, ssim_test_list, lpips_train_list, lpips_test_list = \
-                test(epoch, model, test_dataset, Visualizer(test_opt), test_opt, test_bg_info, test_steps=total_steps, lpips=True, bg_color=bg_color, best_PSNR_half=best_PSNR_half, \
+                test(epoch, model, test_dataset, Visualizer(test_opt), test_opt, None, test_steps=total_steps, lpips=True, bg_color=bg_color, best_PSNR_half=best_PSNR_half, \
                 sequence_length_list=test_dataset.sequence_length_list, train_sequence_length_list=train_dataset.sequence_length_list, loss_fn_vgg=loss_fn_vgg)
+            test_psnr_half = (sum(pnsr_test_list)/len(pnsr_test_list))
+            print (test_psnr_half, '======test_psnr_half')
         exit()
     with open('/tmp/.neural-volumetric.name', 'w') as f:
         f.write(opt.name + '\n')
@@ -699,16 +729,6 @@ def main():
         for scheduler in model.schedulers:
             for i in range(total_steps):
                 scheduler.step()
-
-    test_bg_info = None
-
-    if total_steps == 0 and (train_dataset.total > 30):
-        other_states = {
-            'epoch_count': 0,
-            'total_steps': total_steps,
-        }
-        model.save_networks(total_steps, other_states)
-        visualizer.print_details('saving model ({}, epoch {}, total_steps {})'.format(opt.name, 0, total_steps))
 
     for epoch in range(epoch_count, opt.niter + opt.niter_decay + 1):
         if opt.ddp_train:
@@ -721,11 +741,6 @@ def main():
             model.set_input(data)
             model.optimize_parameters(total_steps=total_steps)
             losses = model.get_current_losses()
-#            if local_rank==0:
-#                for key in losses.keys():
-#                    if key != "conf_coefficient":
-#                        writer.add_scalar(key, losses[key].item(), total_steps)
-
             visualizer.accumulate_losses(losses)
 
             if opt.lr_policy.startswith("iter"):
@@ -756,7 +771,7 @@ def main():
                 #model.print_lr(opt=opt, total_steps=total_steps)
                 with torch.no_grad():
                     psnr_train_list, pnsr_test_list, ssim_train_list, ssim_test_list, lpips_train_list, lpips_test_list = \
-                    test(epoch, model, test_dataset, Visualizer(test_opt), test_opt, test_bg_info, test_steps=total_steps, lpips=True, bg_color=bg_color, best_PSNR_half=best_PSNR_half, \
+                    test(epoch, model, test_dataset, Visualizer(test_opt), test_opt, None, test_steps=total_steps, lpips=True, bg_color=bg_color, best_PSNR_half=best_PSNR_half, \
                         sequence_length_list=test_dataset.sequence_length_list, train_sequence_length_list=train_dataset.sequence_length_list, loss_fn_vgg=loss_fn_vgg)
                 model.opt.no_loss = 0
                 model.opt.is_train = 1
@@ -876,5 +891,4 @@ def create_comb_dataset(test_opt, opt, total_steps, prob=None, test_num_step=1):
     return test_dataset
 
 if __name__ == '__main__':
-    torch.multiprocessing.set_start_method('spawn')
     main()

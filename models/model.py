@@ -651,7 +651,8 @@ class Generator(nn.Module):
         self.decoder = Decoder(model_opt)
 
     def make_noise(self):
-        device = self.input.input.device
+        #device = self.input.input.device
+        device = self.input.device
 
         noises = [torch.randn(1, 1, 2 ** 2, 2 ** 2, device=device)]
 

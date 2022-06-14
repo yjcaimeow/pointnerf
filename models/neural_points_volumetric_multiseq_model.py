@@ -336,10 +336,10 @@ class NeuralPointsRayMarching(nn.Module):
         sampled_conf, sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, sample_local_ray_dirs, ray_mask_tensor, raypos_tensor, lidar_pcd_fea, lidar_pcd_xyz = [], [],[],[],[],[],[],[],[],[],[], None, None
         perceiver_io_feature=None
         if self.opt.perceiver_io:
-            perceiver_io_feature = []
+            perceiver_io_feature, random_masks = [],[]
         for batch_index in range(batch_size):
             _, sampled_Rw2c, _, sampled_conf_i, sampled_embedding_i, sampled_xyz_pers_i, sampled_xyz_i, sample_pnt_mask_i, sample_loc_i, sample_loc_w_i, \
-                sample_ray_dirs_i, sample_local_ray_dirs_i, ray_mask_tensor_i, vsize, grid_vox_sz, raypos_tensor_i, _ = self.neural_points({"pixel_idx": pixel_idx[batch_index:batch_index+1], \
+                sample_ray_dirs_i, sample_local_ray_dirs_i, ray_mask_tensor_i, vsize, grid_vox_sz, raypos_tensor_i, _, mask_i = self.neural_points({"pixel_idx": pixel_idx[batch_index:batch_index+1], \
                                                                                                                                             "camrotc2w": camrotc2w[batch_index:batch_index+1],
                                                                                                                                             "campos": campos[batch_index:batch_index+1], "near": near[batch_index:batch_index+1], "far": far[batch_index:batch_index+1], \
                                                                                                                                             "focal": focal, "h": h[batch_index:batch_index+1], "w": w[batch_index:batch_index+1], "c2w":c2w[batch_index:batch_index+1], \
@@ -358,9 +358,8 @@ class NeuralPointsRayMarching(nn.Module):
             ray_mask_tensor.append(ray_mask_tensor_i)
             raypos_tensor.append(raypos_tensor_i)
             if self.opt.perceiver_io:
-#                print (torch.min(self.neural_points.local_xyz,-2)[0], torch.max(self.neural_points.local_xyz, -2)[0], 'min max------', self.neural_points.local_xyz.shape)
+                random_masks.append(mask_i)
                 tmp = ray_mask_tensor_i.reshape(64,96)
-                #ray_inds_hole = torch.nonzero(tmp==0) # 336, 2
                 ray_inds_hole = torch.nonzero(tmp[32:,:]==0) # 336, 2
                 ray_inds_hole[:,0]+=32
 
@@ -379,9 +378,6 @@ class NeuralPointsRayMarching(nn.Module):
 
                 perceiver_io_raycolor, *_ = ray_march(ray_dist, None, torch.cat((query_pcd_alpha, query_pcd_fea), dim=-1).view(1, ray_dist.shape[1], ray_dist.shape[2], 129), self.render_func, self.blend_func, None, query_pcd_fea.shape[-1])
                 perceiver_io_feature.append(perceiver_io_raycolor)
-                #query_pcd_xyz.append(query_points_local)
-                #lidar_pcd_xyz.append(self.neural_points.local_xyz)
-                #lidar_pcd_fea.append(self.neural_points.points_embeding)
 
         sampled_conf = torch.cat(sampled_conf, 1)
         sampled_embedding = torch.cat(sampled_embedding, 1)
@@ -397,7 +393,7 @@ class NeuralPointsRayMarching(nn.Module):
 
         if self.opt.perceiver_io:
             perceiver_io_feature = torch.cat(perceiver_io_feature, 1)
-
+            output["random_masks"]= random_masks
         ray_valid = None
         img_h, img_w = h[0].item(), w[0].item()
 

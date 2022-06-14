@@ -3,7 +3,7 @@ from .neural_points_volumetric_multiseq_model import NeuralPointsVolumetricMulti
 from .neural_points.neural_points import NeuralPoints
 #from .mvs.mvs_points_model import MvsPointsModel
 from .mvs import mvs_utils
-from. import base_model
+from . import base_model
 from .aggregators.point_aggregators import PointAggregator
 import os
 import torch.nn.functional as F
@@ -331,7 +331,7 @@ class MvsPointsVolumetricMultiseqModel(NeuralPointsVolumetricMultiseqModel):
                 state_dict["neural_points.points_conf"] = torch.ones_like(self.net_ray_marching.module.neural_points.points_conf) * self.opt.default_conf
             if isinstance(net, nn.DataParallel):
                 net = net.module
-            net.load_state_dict(state_dict, strict=False)
+            net.load_state_dict(state_dict, strict=True)
 
     def test(self, gen_points=False):
         with torch.no_grad():

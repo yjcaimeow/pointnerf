@@ -7,7 +7,7 @@ from .mvs_utils import *
 from .renderer import run_network_mvs
 from ..depth_estimators.mvsnet import MVSNet as Ofcl_MVSNet
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def weights_init(m):

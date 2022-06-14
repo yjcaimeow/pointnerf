@@ -14,7 +14,7 @@ from ..depth_estimators.mvsnet import MVSNet as Ofcl_MVSNet
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from inplace_abn import InPlaceABN
 from collections import OrderedDict
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 from torchvision import transforms as T
 
 feature_str_lst=['appr_feature_str0', 'appr_feature_str1', 'appr_feature_str2', 'appr_feature_str3']

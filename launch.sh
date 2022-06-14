@@ -105,7 +105,7 @@ num_viewdir_freqs=4 #6
 random_sample='full_image'
 random_sample_size=56 # 32 * 32 = 1024
 
-batch_size=1
+batch_size=4
 
 plr=0.0002
 lr=0.0002 # 0.0005 #0.00015

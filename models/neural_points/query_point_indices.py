@@ -17,9 +17,9 @@ import time
 
 from data.load_blender import load_blender_data
 
-X = torch.cuda.FloatTensor(8)
-src = torch.cuda.ByteTensor(8)
-src = torch.cuda.DoubleTensor(8)
+#X = torch.cuda.FloatTensor(8)
+#src = torch.cuda.ByteTensor(8)
+#src = torch.cuda.DoubleTensor(8)
 
 
 class Holder(pycuda.driver.PointerHolderBase):
@@ -909,36 +909,36 @@ def save_queried_points(point_xyz_tensor, point_xyz_pers_tensor, sample_pidx_ten
 
 
 
-if __name__ == "__main__":
-    obj = "lego"
-    point_file = "{}.pkl".format(obj)
-    point_dir = os.path.expandvars("${nrDataRoot}/nerf/nerf_synthetic_points/")
-    r = 0.36000002589322094
-    ranges = np.array([-r, -r, 2., r, r, 6.], dtype=np.float32)
-    vdim = np.array([800, 800, 400], dtype=np.int32)
-    vsize = np.array([2 * r / vdim[0], 2 * r / vdim[1], 4. / vdim[2]], dtype=np.float32)
-    vscale = np.array([2, 2, 1], dtype=np.int32)
-    SR = 24
-    P = 16
-    kernel_size = np.array([5, 5, 1], dtype=np.int32)
-    radius_limit = 0  # r / 400 * 5 #r / 400 * 5
-    depth_limit = 0  # 4. / 400 * 1.5 # r / 400 * 2
-    max_o = None
-    K = 32
-
-    xrange = np.arange(0, 800, 1, dtype=np.int32)
-    yrange = np.arange(0, 800, 1, dtype=np.int32)
-    xv, yv = np.meshgrid(xrange, yrange, sparse=False, indexing='ij')
-    pixel_idx = np.stack([xv, yv], axis=-1).reshape(-1, 2)  # 20000 * 2
-    gpu = 0
-    imgidx = 3
-    split = ["train"]
-
-    if gpu < 0:
-        import pycuda.autoinit
-    else:
-        drv.init()
-        dev1 = drv.Device(gpu)
-        ctx1 = dev1.make_context()
-    try_build(point_file, point_dir, ranges, vsize, vdim, vscale, max_o, P, kernel_size, SR, K, pixel_idx, obj,
-              radius_limit, depth_limit, split=split, imgidx=imgidx, gpu=0)
+#if __name__ == "__main__":
+#    obj = "lego"
+#    point_file = "{}.pkl".format(obj)
+#    point_dir = os.path.expandvars("${nrDataRoot}/nerf/nerf_synthetic_points/")
+#    r = 0.36000002589322094
+#    ranges = np.array([-r, -r, 2., r, r, 6.], dtype=np.float32)
+#    vdim = np.array([800, 800, 400], dtype=np.int32)
+#    vsize = np.array([2 * r / vdim[0], 2 * r / vdim[1], 4. / vdim[2]], dtype=np.float32)
+#    vscale = np.array([2, 2, 1], dtype=np.int32)
+#    SR = 24
+#    P = 16
+#    kernel_size = np.array([5, 5, 1], dtype=np.int32)
+#    radius_limit = 0  # r / 400 * 5 #r / 400 * 5
+#    depth_limit = 0  # 4. / 400 * 1.5 # r / 400 * 2
+#    max_o = None
+#    K = 32
+#
+#    xrange = np.arange(0, 800, 1, dtype=np.int32)
+#    yrange = np.arange(0, 800, 1, dtype=np.int32)
+#    xv, yv = np.meshgrid(xrange, yrange, sparse=False, indexing='ij')
+#    pixel_idx = np.stack([xv, yv], axis=-1).reshape(-1, 2)  # 20000 * 2
+#    gpu = 0
+#    imgidx = 3
+#    split = ["train"]
+#
+#    if gpu < 0:
+#        import pycuda.autoinit
+#    else:
+#        drv.init()
+#        dev1 = drv.Device(gpu)
+#        ctx1 = dev1.make_context()
+#    try_build(point_file, point_dir, ranges, vsize, vdim, vscale, max_o, P, kernel_size, SR, K, pixel_idx, obj,
+#              radius_limit, depth_limit, split=split, imgidx=imgidx, gpu=0)
