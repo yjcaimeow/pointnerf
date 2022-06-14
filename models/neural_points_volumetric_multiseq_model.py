@@ -5,6 +5,8 @@ import os
 from utils import format as fmt
 import random
 from utils.kitti_object import trans_world2nerf
+from .helpers.networks import init_seq, positional_encoding, effective_range
+
 class NeuralPointsVolumetricMultiseqModel(BaseRenderingModel):
 
     @staticmethod
@@ -331,9 +333,10 @@ class NeuralPointsRayMarching(nn.Module):
                 **kargs):
         output = {}
         batch_size = gt_image.shape[0]
-        lengths, sampled_conf, sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, sample_local_ray_dirs, ray_mask_tensor, raypos_tensor, lidar_pcd_fea, lidar_pcd_xyz = [], [],[],[],[],[],[],[],[],[],[],[], None, None
+        sampled_conf, sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, sample_local_ray_dirs, ray_mask_tensor, raypos_tensor, lidar_pcd_fea, lidar_pcd_xyz = [], [],[],[],[],[],[],[],[],[],[], None, None
+        perceiver_io_feature=None
         if self.opt.perceiver_io:
-            lidar_pcd_fea, lidar_pcd_xyz = [],[]
+            perceiver_io_feature = []
         for batch_index in range(batch_size):
             _, sampled_Rw2c, _, sampled_conf_i, sampled_embedding_i, sampled_xyz_pers_i, sampled_xyz_i, sample_pnt_mask_i, sample_loc_i, sample_loc_w_i, \
                 sample_ray_dirs_i, sample_local_ray_dirs_i, ray_mask_tensor_i, vsize, grid_vox_sz, raypos_tensor_i, _ = self.neural_points({"pixel_idx": pixel_idx[batch_index:batch_index+1], \
@@ -343,7 +346,6 @@ class NeuralPointsRayMarching(nn.Module):
                                                                                                                                             "intrinsic": intrinsic[batch_index:batch_index+1],"gt_image":gt_image[batch_index:batch_index+1], \
                                                                                                                                             "raydir":raydir[batch_index:batch_index+1], "id":id[batch_index:batch_index+1], 'vsize':self.opt.vsize, \
                                                                                                                                             "local_raydir":local_raydir[batch_index:batch_index+1], "seq_id":seq_id[batch_index:batch_index+1]})
-            lengths.append(sampled_conf_i.shape[1])
             sampled_conf.append(sampled_conf_i)
             sampled_embedding.append(sampled_embedding_i)
             sampled_xyz_pers.append(sampled_xyz_pers_i)
@@ -356,9 +358,30 @@ class NeuralPointsRayMarching(nn.Module):
             ray_mask_tensor.append(ray_mask_tensor_i)
             raypos_tensor.append(raypos_tensor_i)
             if self.opt.perceiver_io:
-                print (torch.min(self.neural_points.local_xyz), torch.max(self.neural_points.local_xyz), 'min max------')
-                lidar_pcd_xyz.append(self.neural_points.local_xyz)
-                lidar_pcd_fea.append(self.neural_points.points_embeding)
+#                print (torch.min(self.neural_points.local_xyz,-2)[0], torch.max(self.neural_points.local_xyz, -2)[0], 'min max------', self.neural_points.local_xyz.shape)
+                tmp = ray_mask_tensor_i.reshape(64,96)
+                #ray_inds_hole = torch.nonzero(tmp==0) # 336, 2
+                ray_inds_hole = torch.nonzero(tmp[32:,:]==0) # 336, 2
+                ray_inds_hole[:,0]+=32
+
+                query_points = raypos_tensor_i[:, ray_inds_hole[:,0]*96+ray_inds_hole[:,1], :]
+                query_points_local = trans_world2nerf(query_points.view(-1,3), c2w[batch_index])
+
+                query_points_local = positional_encoding(self.local_bound(query_points_local), self.opt.num_perceiver_io_freqs)[None,...]
+                lidar_points_local = positional_encoding(self.local_bound(self.neural_points.local_xyz), self.opt.num_perceiver_io_freqs)[None,...]
+
+                memory = self.perceiver_encoder(torch.cat((lidar_points_local, self.neural_points.points_embeding), dim=-1))
+
+                query_pcd_fea, query_pcd_alpha = self.perceiver_decoder(memory, query_points_local)
+
+                ray_dist = torch.cummax(query_points[..., 1], dim=-1)[0]
+                ray_dist = torch.cat([ray_dist[..., 1:] - ray_dist[..., :-1], torch.full((ray_dist.shape[0], ray_dist.shape[1], 1), vsize[2], device=ray_dist.device)], dim=-1)
+
+                perceiver_io_raycolor, *_ = ray_march(ray_dist, None, torch.cat((query_pcd_alpha, query_pcd_fea), dim=-1).view(1, ray_dist.shape[1], ray_dist.shape[2], 129), self.render_func, self.blend_func, None, query_pcd_fea.shape[-1])
+                perceiver_io_feature.append(perceiver_io_raycolor)
+                #query_pcd_xyz.append(query_points_local)
+                #lidar_pcd_xyz.append(self.neural_points.local_xyz)
+                #lidar_pcd_fea.append(self.neural_points.points_embeding)
 
         sampled_conf = torch.cat(sampled_conf, 1)
         sampled_embedding = torch.cat(sampled_embedding, 1)
@@ -371,6 +394,9 @@ class NeuralPointsRayMarching(nn.Module):
         sample_local_ray_dirs = torch.cat(sample_local_ray_dirs, 1)
         ray_mask_tensor = torch.cat(ray_mask_tensor)
         raypos_tensor = torch.cat(raypos_tensor)
+
+        if self.opt.perceiver_io:
+            perceiver_io_feature = torch.cat(perceiver_io_feature, 1)
 
         ray_valid = None
         img_h, img_w = h[0].item(), w[0].item()
@@ -448,7 +474,7 @@ class NeuralPointsRayMarching(nn.Module):
                 output["blend_weight"] = blend_weight.detach()
                 output["conf_coefficient"] = conf_coefficient
         if self.opt.proposal_nerf==False and (self.opt.unified==False or self.opt.only_nerf==False):
-            output = self.fill_invalid(output, bg_color, raypos_tensor, lidar_pcd_fea, lidar_pcd_xyz)
+            output = self.fill_invalid(output, bg_color, perceiver_io_feature)
         if self.opt.is_train:
             style_code = self.neural_points.stylecode[0][id]
         else:
@@ -482,34 +508,27 @@ class NeuralPointsRayMarching(nn.Module):
         return output
 
     def local_bound(self, raypos_tensor):
-        min_range = torch.tensor([[-6354.3286, 11983.5674,    80.7639]]).cuda()
-        max_range = torch.tensor([[-6196.0220, 12183.1436,   152.6400]]).cuda()
+        min_range = torch.tensor([[-50, -9,    -100.]]).cuda()
+        max_range = torch.tensor([[23, 6,  0]]).cuda()
         assert min_range.shape == (1, 3)
         assert max_range.shape == (1, 3)
         raypos_tensor = 3 * (raypos_tensor.view(-1,3) - min_range) / (max_range - min_range) - 1.5
         return raypos_tensor
 
-    def fill_invalid(self, output, bg_color, raypos_tensor, lidar_pcd_fea, lidar_pcd_xyz):
+    def fill_invalid(self, output, bg_color, perceiver_io_feature=None):
         ray_mask = output["ray_mask"]
         B, OR = ray_mask.shape
-        if self.opt.perceiver_io==False:
-            ray_inds = torch.nonzero(ray_mask) # 336, 2
+        ray_inds = torch.nonzero(ray_mask) # 336, 2
 
-            coarse_raycolor_tensor = self.tone_map(
-                torch.ones([B, OR, self.opt.shading_color_channel_num], dtype=output["coarse_raycolor"].dtype, device=output["coarse_raycolor"].device) * bg_color[None, ...])
-            coarse_raycolor_tensor[ray_inds[..., 0], ray_inds[..., 1], :] = output["coarse_raycolor"]
-            output["coarse_raycolor"] = coarse_raycolor_tensor
+        coarse_raycolor_tensor = self.tone_map(
+            torch.ones([B, OR, self.opt.shading_color_channel_num], dtype=output["coarse_raycolor"].dtype, device=output["coarse_raycolor"].device) * bg_color[None, ...])
+        coarse_raycolor_tensor[ray_inds[..., 0], ray_inds[..., 1], :] = output["coarse_raycolor"]
 
-            return output
-        #import pdb; pdb.set_trace()
-        #trans_world2nerf
-        #ray_mask = raymask.reshape(self.opt.batch_size, 64, 96)
-        #for batch_index in range(self.opt.batch_index):
+        if self.opt.perceiver_io:
+            ray_mask_new = ray_mask.reshape(ray_mask.shape[0], 64, 96)
+            ray_inds_hole = torch.nonzero(ray_mask_new[:, 32:, :]==0) # 336, 2
+            ray_inds_hole[:,1]+=32
+            coarse_raycolor_tensor[ray_inds_hole[..., 0], ray_inds_hole[..., 1]*96+ray_inds_hole[..., 2], :] = perceiver_io_feature
 
-        #lidar_points
-        #raypos_tensor
-
-        #memory = self.perceiver_encoder(lidar_points)
-        #feature, alpha = self.perceiver_decoder(memory, raypos_tensor)
-
-
+        output["coarse_raycolor"] = coarse_raycolor_tensor
+        return output

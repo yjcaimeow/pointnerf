@@ -54,11 +54,11 @@ class BaseOptions:
             action='store_true',
             help='if specified, print more debugging information')
         parser.add_argument('--N', type=int, default=512, help='name of the experiment')
-        parser.add_argument('--D', type=int, default=64, help='name of the experiment')
-        parser.add_argument('--E', type=int, default=64, help='name of the experiment')
+        parser.add_argument('--D', type=int, default=16, help='name of the experiment')
+        parser.add_argument('--E', type=int, default=24, help='name of the experiment')
         parser.add_argument('--C', type=int, default=56, help='name of the experiment')
-        parser.add_argument('--num_self_attention_heads', type=int, default=4, help='name of the experiment')
-        parser.add_argument('--num_self_attention_blocks', type=int, default=4, help='name of the experiment')
+        parser.add_argument('--num_self_attention_heads', type=int, default=2, help='name of the experiment')
+        parser.add_argument('--num_self_attention_blocks', type=int, default=2, help='name of the experiment')
         parser.add_argument('--num_self_attention_layers_per_block', type=int, default=2, help='name of the experiment')
 
         parser.add_argument(
@@ -105,12 +105,20 @@ class BaseOptions:
                             help='# threads for loading data')
         #================================ MVS ================================#
 
+        parser.add_argument('--num_perceiver_io_freqs',
+                            default=4,
+                            type=int,
+                            help='# threads for loading data')
         parser.add_argument('--geo_cnsst_num',
                             default=2,
                             type=int,
                             help='# threads for loading data')
 
         #================================ model ================================#
+        parser.add_argument('--ddp_train_type',
+                            default="normal",
+                            type=str,
+                            help='cnn | style | condition')
         parser.add_argument('--combination',
                             default="concat",
                             type=str,

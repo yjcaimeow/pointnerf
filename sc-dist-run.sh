@@ -1,6 +1,6 @@
 #!/bin/bash
 #filename='../waymo_fall_1006_vox100_res128-512.npz'
-filename='../'
+filename='./data/'
 #filename='/mnt/cache/caiyingjie/vox_res_all/waymo_fall_1006_vox100_res128-512.npz'
 #filename='/home/yjcai/tmp/'
 #filename=$1
@@ -105,10 +105,10 @@ num_viewdir_freqs=4 #6
 random_sample='full_image'
 random_sample_size=56 # 32 * 32 = 1024
 
-batch_size=4
+batch_size=1
 
-plr=0.0004
-lr=0.0004 # 0.0005 #0.00015
+plr=0.0002
+lr=0.0002 # 0.0005 #0.00015
 lr_policy="iter_exponential_decay"
 lr_decay_iters=1000000
 lr_decay_exp=0.1
@@ -117,7 +117,7 @@ lr_decay_exp=0.1
 checkpoints_dir=$1
 resume_dir="${checkpoints_dir}/waymo"
 
-save_iter_freq=200
+save_iter_freq=2000
 maximum_step=600000 # 3000 epoch
 
 niter=10000 #1000000
@@ -126,7 +126,7 @@ n_threads=0
 
 train_and_test=0 #1
 test_num=10
-test_freq=200
+test_freq=2000
 print_freq=100
 test_num_step=1
 
@@ -153,7 +153,7 @@ bg_color="white" #"0.0,0.0,0.0,1.0,1.0,1.0"
 split="train"
 seq_num=1
 
-GPUNUM=$3
+GPUNUM=1
 NODENUM=1
 JOBNAME=pointnerf
 PART=VA-Human
@@ -164,10 +164,10 @@ PART=VA-Human
 #--proposal_nerf \
 #--nerf_create_points \
 #--prune_points \
-TOOLS="srun --partition=$PART --gres=gpu:${GPUNUM} -n$NODENUM --ntasks-per-node=1 --cpus-per-task=8"
-$TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch --nnodes=$NODENUM --nproc_per_node=$GPUNUM --node_rank \$SLURM_PROCID --master_addr=\$(sinfo -Nh -n \$SLURM_NODELIST | head -n 1 | cut -d ' ' -f 1) --master_port $2 train_iter.py \
+#--perceiver_io \
+python -m torch.distributed.launch --nnodes=$NODENUM --nproc_per_node=$GPUNUM ./train_iter.py \
     --zoom_in_scale $zoom_in_scale \
-    --ddp_train --half_supervision \
+    --half_supervision \
     --perceiver_io \
     --seq_num ${seq_num} \
     --catWithLocaldir \
@@ -286,4 +286,4 @@ $TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch --nnodes=$N
     --prob_kernel_size $prob_kernel_size \
     --prob_tiers $prob_tiers \
     --query_size $query_size \
-    --debug"
+    --debug

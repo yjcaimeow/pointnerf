@@ -9,7 +9,10 @@ import matplotlib.pyplot as plt
 import torch.nn.utils.prune as prune_param
 import random
 from utils.kitti_object import get_lidar_in_image_fov, plot_points_on_image
+from utils.mask import get_irregular_mask
+from utils.visualizer import save_image
 import cv2
+import random
 class NeuralPoints(nn.Module):
 
     @staticmethod
@@ -962,7 +965,15 @@ class NeuralPoints(nn.Module):
         img_fea, img_fea_2h = None, None
         if self.opt.fov and use_middle==False:
             if "seq_id" in inputs:
-                self.xyz, self.local_xyz, fov_ids, pts_2d = get_lidar_in_image_fov(self.xyz_all[inputs["seq_id"]].squeeze(), c2w.squeeze(), intrinsic.squeeze(), xmin=0, ymin=0, xmax=int(w), ymax=int(h), return_more=True)
+                mask=None
+                if self.opt.perceiver_io:
+                    mask = get_irregular_mask()
+                self.xyz, self.local_xyz, fov_ids, pts_2d = get_lidar_in_image_fov(self.xyz_all[inputs["seq_id"]].squeeze(), c2w.squeeze(), intrinsic.squeeze(), xmin=0, ymin=0, xmax=int(w), ymax=int(h), return_more=True, mask=mask)
+
+                #name = str(inputs['id'].item())
+                #np.savetxt('./check_mask/'+name+'_mask_pcd.txt', self.xyz.cpu().numpy())
+                #save_image(mask.squeeze()*255, './check_mask/'+name+'_mask_img.png')
+
                 self.points_embeding = self.points_embeding_all[inputs["seq_id"]].squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
                 self.points_conf = self.points_conf_all[inputs["seq_id"]].squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
                 if "1" in list(self.opt.point_color_mode):

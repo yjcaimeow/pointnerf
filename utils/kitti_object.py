@@ -142,7 +142,7 @@ def trans_world2nerf(global_frame_points, pose_nerf2world):
     return point_at_nerf_frame.T.float()
 
 def get_lidar_in_image_fov(pc_velo, pose, calib, xmin, ymin, xmax, ymax,
-                           return_more=False, clip_distance=1.0, max_depth=100.0):
+                           return_more=False, clip_distance=1.0, max_depth=100.0, mask=None):
 
     ''' Filter lidar points, keep those in image FOV '''
 #    calib = torch.from_numpy(calib).cuda()
@@ -152,8 +152,18 @@ def get_lidar_in_image_fov(pc_velo, pose, calib, xmin, ymin, xmax, ymax,
     pts_2d = torch.einsum('ij,nj->ni',calib, camera_points)
     pts_2d[...,0] = pts_2d[...,0]/(pts_2d[...,-1] + 1e-10)
     pts_2d[...,1] = pts_2d[...,1]/(pts_2d[...,-1] + 1e-10)
-    fov_inds = (pts_2d[:,0]<xmax) & (pts_2d[:,0]>=xmin) & \
-        (pts_2d[:,1]<ymax) & (pts_2d[:,1]>=ymin)
+
+    if mask is not None:
+        src = torch.from_numpy(mask.reshape(-1)).cuda()
+        idx = pts_2d[:,1].long() * 96 + pts_2d[:,0].long()
+        idx = torch.clamp(idx, 0, 6143)
+        mask_flag = src[idx]
+
+        fov_inds = (pts_2d[:,0]<xmax) & (pts_2d[:,0]>=xmin) & \
+            (pts_2d[:,1]<ymax) & (pts_2d[:,1]>=ymin) & (mask_flag==0)
+    else:
+        fov_inds = (pts_2d[:,0]<xmax) & (pts_2d[:,0]>=xmin) & \
+            (pts_2d[:,1]<ymax) & (pts_2d[:,1]>=ymin)
     fov_inds_woDepthLimit = fov_inds & (camera_points[:,-1]>clip_distance)
     if max_depth>0:
         fov_inds = fov_inds_woDepthLimit & (camera_points[:,-1]<max_depth)
