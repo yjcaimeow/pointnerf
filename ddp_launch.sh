@@ -1,6 +1,7 @@
 #!/bin/bash
 #filename='../waymo_fall_1006_vox100_res128-512.npz'
-filename='../'
+filename='/mnt/lustre/caiyingjie/data/selected_waymo/'
+#filename='../'
 #filename='/mnt/cache/caiyingjie/vox_res_all/waymo_fall_1006_vox100_res128-512.npz'
 #filename='/home/yjcai/tmp/'
 #filename=$1
@@ -11,7 +12,7 @@ nrCheckpoint="../checkpoints"
 nrDataRoot="../data_src"
 name='waymo'
 
-resume_iter=$5
+resume_iter='none'
 
 data_root="${nrDataRoot}/scannet/scans/"
 scan="scene0241_01"
@@ -107,19 +108,21 @@ random_sample_size=56 # 32 * 32 = 1024
 
 batch_size=1
 
-plr=$6
-lr=$6 # 0.0005 #0.00015
+plr=0.0004
+lr=0.0004 #0.00015
 lr_policy="iter_exponential_decay"
-lr_decay_iters=1000000
+lr_decay_iters=100000000
+#lr_decay_iters=1000000
 lr_decay_exp=0.1
 
 #checkpoints_dir="/mnt/lustre/caiyingjie/pointnerf/unified.f30.nerf_4_128.shading_layers_2_2.create_points_0.7"
 checkpoints_dir=$1
 resume_dir="${checkpoints_dir}/waymo"
 
-save_iter_freq=4000
-test_freq=4000
-maximum_step=600000 # 3000 epoch
+save_iter_freq=200000 # 200*20
+test_freq=200000
+
+maximum_step=60000000 # 3000 epoch, 3000*200
 
 niter=10000 #1000000
 niter_decay=10000 #250000
@@ -128,7 +131,7 @@ n_threads=0
 train_and_test=0 #1
 test_num=10
 print_freq=100
-test_num_step=1
+test_num_step=100
 
 prob_freq=10000 #10001
 prob_num_step=100
@@ -151,13 +154,15 @@ test_color_loss_items='coarse_raycolor ray_miss_coarse_raycolor ray_masked_coars
 
 bg_color="white" #"0.0,0.0,0.0,1.0,1.0,1.0"
 split="train"
-seq_num=1
+seq_num=100
 
-GPUNUM=$4
-NODENUM=$3
+GPUNUM=8
+NODENUM=1
 JOBNAME=pointnerf
 PART=VA-Human
 
+optimizer_type=SGD
+#--optimizer_type ${optimizer_type} \
 #CUDA_LAUNCH_BLOCKING=1 python ./train.py \
 #--unified \
 #--half_supervision \

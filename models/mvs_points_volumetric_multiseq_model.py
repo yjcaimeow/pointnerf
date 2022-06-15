@@ -64,18 +64,21 @@ class MvsPointsVolumetricMultiseqModel(NeuralPointsVolumetricMultiseqModel):
         self.mvs_params = mvs_params
         mvs_lr = opt.lr
         #mvs_lr = opt.mvs_lr if opt.mvs_lr is not None else opt.lr
-
         if len(mvs_params) > 0:
             #print ('======', 2//0)
             self.mvs_optimizer = torch.optim.Adam(mvs_params,
                                               lr=mvs_lr,
                                               betas=(0.9, 0.999))
             self.optimizers.append(self.mvs_optimizer)
-
         if len(net_params) > 0:
-            self.optimizer = torch.optim.Adam(net_params,
-                                          lr=opt.lr,
-                                          betas=(0.9, 0.999))
+            if opt.optimizer_type=='SGD':
+                self.optimizer = torch.optim.SGD(net_params,
+                                              lr=opt.lr,
+                                              momentum=0.9)
+            else:
+                self.optimizer = torch.optim.Adam(net_params,
+                                              lr=opt.lr,
+                                              betas=(0.9, 0.999))
             self.optimizers.append(self.optimizer)
             #print("net_params", [(par[0], par[1].shape, par[1].requires_grad)  for par in param_lst if not par[0].startswith("module.neural_points")])
 
@@ -84,7 +87,10 @@ class MvsPointsVolumetricMultiseqModel(NeuralPointsVolumetricMultiseqModel):
             #    self.neural_point_optimizer = torch.optim.Adam(neural_params + [self.bg_color] + [self.stylecode], lr=opt.plr, betas=(0.9, 0.999))
             #else:
             #    self.neural_point_optimizer = torch.optim.Adam(neural_params + [self.bg_color], lr=opt.plr, betas=(0.9, 0.999))
-            self.neural_point_optimizer = torch.optim.Adam(neural_params, lr=opt.plr, betas=(0.9, 0.999))
+            if opt.optimizer_type=='SGD':
+                self.neural_point_optimizer = torch.optim.SGD(neural_params, lr=opt.plr, momentum=0.9)
+            else:
+                self.neural_point_optimizer = torch.optim.Adam(neural_params, lr=opt.plr, betas=(0.9, 0.999))
             #if opt.unified or opt.proposal_nerf:
             #    self.neural_point_optimizer = torch.optim.Adam(neural_params + [self.stylecode], lr=opt.plr, betas=(0.9, 0.999))
             #else:

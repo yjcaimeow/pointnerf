@@ -191,7 +191,7 @@ class NeuralPointsVolumetricMultiseqModel(BaseRenderingModel):
             This assumes network modules have been added to self.model_names
             By default, it uses an adam optimizer for all parameters.
         '''
-
+        import pdb; pdb.set_trace()
         net_params = []
         neural_params = []
         for name in self.model_names:
