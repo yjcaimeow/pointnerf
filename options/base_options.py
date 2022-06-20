@@ -49,6 +49,10 @@ class BaseOptions:
             help='if specified, print more debugging information')
 
         parser.add_argument(
+            '--knn_transform',
+            action='store_true',
+            help='if specified, print more debugging information')
+        parser.add_argument(
             '--perceiver_io',
             action='store_true',
             help='if specified, print more debugging information')
@@ -60,6 +64,10 @@ class BaseOptions:
         parser.add_argument('--num_self_attention_blocks', type=int, default=2, help='name of the experiment')
         parser.add_argument('--num_self_attention_layers_per_block', type=int, default=2, help='name of the experiment')
 
+        parser.add_argument(
+            '--eval_during_train',
+            action='store_true',
+            help='if specified, print more debugging information')
         parser.add_argument(
             '--fov',
             action='store_true',
@@ -82,6 +90,10 @@ class BaseOptions:
             help='suffix the experiment name with current timestamp')
 
         #================================ dataset ================================#
+        parser.add_argument('--optimizer_type',
+                            type=str,
+                            default=None,
+                            help='path to the dataset storage')
         parser.add_argument('--data_root',
                             type=str,
                             default=None,

@@ -95,9 +95,9 @@ class BaseModel:
             ret[name] = getattr(self, 'loss_' + name)
         return ret
 
-    def save_networks(self, epoch, other_states={}, back_gpu=True):
+    def save_networks(self, iteration, other_states={}, back_gpu=True):
         for name, net in zip(self.model_names, self.get_networks()):
-            save_filename = '{}_net_{}.pth'.format(self.local_rank, name)
+            save_filename = 'lr{}_{}_net_{}.pth'.format(self.local_rank, iteration, name)
             save_path = os.path.join(self.save_dir, save_filename)
 
             try:
@@ -110,7 +110,7 @@ class BaseModel:
             except Exception as e:
                 print("savenet:", e)
 
-        save_filename = '{}_states.pth'.format(self.local_rank)
+        save_filename = 'lr{}_{}_states.pth'.format(self.local_rank, iteration)
         save_path = os.path.join(self.save_dir, save_filename)
         torch.save(other_states, save_path)
 

@@ -9,7 +9,6 @@ from models.mvs import mvs_utils, filter_utils
 from utils.visualizer import Visualizer
 from utils import format as fmt
 from run.evaluate import report_metrics
-import lpips
 from PIL import Image
 from tqdm import tqdm
 from tensorboardX import SummaryWriter
@@ -18,15 +17,16 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import cv2
 
-try:
-    from skimage.measure import compare_ssim
-    from skimage.measure import compare_psnr
-except:
-    from skimage.metrics import structural_similarity
-    from skimage.metrics import peak_signal_noise_ratio as compare_psnr
-
-    def compare_ssim(gt, img, win_size, multichannel=True):
-        return structural_similarity(gt, img, win_size=win_size, multichannel=multichannel)
+#import lpips
+#try:
+#    from skimage.measure import compare_ssim
+#    from skimage.measure import compare_psnr
+#except:
+#    from skimage.metrics import structural_similarity
+#    from skimage.metrics import peak_signal_noise_ratio as compare_psnr
+#
+#    def compare_ssim(gt, img, win_size, multichannel=True):
+#        return structural_similarity(gt, img, win_size=win_size, multichannel=multichannel)
 
 def noise(n, latent_dim, device):
     return torch.randn(n, latent_dim).cuda(device)
@@ -95,7 +95,6 @@ def gen_points_filter_embeddings(dataset, visualizer, opt):
             w2cs_lst.append(w2cs)
             intrinsics_full_lst.append(intrinsics)
             near_fars_all.append(near_fars[0,0])
-        torch.cuda.empty_cache()
         if opt.manual_depth_view != 0:
             if gpu_filter:
                 _, xyz_world_all, confidence_filtered_all = filter_utils.filter_by_masks_gpu(cam_xyz_all, intrinsics_all, extrinsics_all, confidence_all, points_mask_all, opt, vis=True, return_w=True, cpu2gpu=cpu2gpu, near_fars_all=near_fars_all)
@@ -111,7 +110,6 @@ def gen_points_filter_embeddings(dataset, visualizer, opt):
             np.concatenate(xyz_world_all, axis=0), device="cuda", dtype=torch.float32)
         confidence_filtered_all = torch.cat(confidence_filtered_all, dim=0) if gpu_filter else torch.as_tensor(np.concatenate(confidence_filtered_all, axis=0), device="cuda", dtype=torch.float32)
         print("xyz_world_all", xyz_world_all.shape, points_vid.shape, confidence_filtered_all.shape)
-        torch.cuda.empty_cache()
 
         print("%%%%%%%%%%%%%  getattr(dataset, spacemin, None)", getattr(dataset, "spacemin", None))
         if getattr(dataset, "spacemin", None) is not None:
@@ -225,53 +223,45 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
 
     height = dataset.height*opt.zoom_in_scale
     width = dataset.width*opt.zoom_in_scale
-    #visualizer.reset()
 
     alllist_psnr_train, alllist_psnr_test = [],[]
-    alllist_ssim_train, alllist_ssim_test = [],[]
-    alllist_lpips_train, alllist_lpips_test = [],[]
+    #alllist_ssim_train, alllist_ssim_test = [],[]
+    #alllist_lpips_train, alllist_lpips_test = [],[]
 
     preds, gts, random_masks = [],[],[]
 
     train_psnr_half, test_psnr_half = [],[]
-    ssim_train_half, ssim_test_half = [],[]
-    lpips_train_half_vgg, lpips_test_half_vgg = [],[]
+    #ssim_train_half, ssim_test_half = [],[]
+    #lpips_train_half_vgg, lpips_test_half_vgg = [],[]
 
     seq_frame_index = 0
     seq_index = 0
     for i in range(total_num): # 1 if test_steps == 10000 else opt.test_num_step
-        if seq_frame_index%opt.test_num_step != 0 and seq_frame_index%opt.test_num_step != 1:
+        if opt.test_num_step>0 and (seq_frame_index%opt.test_num_step != 0 and seq_frame_index%opt.test_num_step != 1):
             seq_frame_index += 1
             if seq_frame_index>=sequence_length_list[seq_index]:
                 seq_frame_index = 0
                 seq_index = seq_index + 1
                 alllist_psnr_train.append(train_psnr_half)
                 alllist_psnr_test.append(test_psnr_half)
-                alllist_ssim_train.append(ssim_train_half)
-                alllist_ssim_test.append(ssim_test_half)
-                alllist_lpips_train.append(lpips_train_half_vgg)
-                alllist_lpips_test.append(lpips_test_half_vgg)
+#                alllist_ssim_train.append(ssim_train_half)
+#                alllist_ssim_test.append(ssim_test_half)
+#                alllist_lpips_train.append(lpips_train_half_vgg)
+#                alllist_lpips_test.append(lpips_test_half_vgg)
                 train_psnr_half, test_psnr_half = [],[]
-                ssim_train_half, ssim_test_half = [],[]
-                lpips_train_half_vgg, lpips_test_half_vgg = [],[]
+#                ssim_train_half, ssim_test_half = [],[]
+#                lpips_train_half_vgg, lpips_test_half_vgg = [],[]
             continue
         data = dataset.get_item(i)
-        pixel_idx = data['pixel_idx'].view(data['pixel_idx'].shape[0], -1, data['pixel_idx'].shape[3]).clone()
-        edge_mask = torch.zeros([height, width], dtype=torch.bool)
-        edge_mask[pixel_idx[0,...,1].to(torch.long), pixel_idx[0,...,0].to(torch.long)] = 1
-        edge_mask=edge_mask.reshape(-1) > 0
+#        pixel_idx = data['pixel_idx'].view(data['pixel_idx'].shape[0], -1, data['pixel_idx'].shape[3]).clone()
+#        edge_mask = torch.zeros([height, width], dtype=torch.bool)
+#        edge_mask[pixel_idx[0,...,1].to(torch.long), pixel_idx[0,...,0].to(torch.long)] = 1
+#        edge_mask=edge_mask.reshape(-1) > 0
         tmpgts = {}
         tmpgts["gt_image"] = data['gt_image'].clone()
-        tmpgts["gt_mask"] = data['gt_mask'].clone() if "gt_mask" in data else None
-        data.pop('gt_mask', None)
+#        tmpgts["gt_mask"] = data['gt_mask'].clone() if "gt_mask" in data else None
+#        data.pop('gt_mask', None)
 
-        #if seq_frame_index%10==0:
-        #    if seq_frame_index==0:
-        #        data['style_code'] = all_z_new[seq_index][1].unsqueeze(0).cuda()
-        #    else:
-        #        data['style_code'] = ((all_z_new[seq_index][seq_frame_index-1]+all_z_new[seq_index][seq_frame_index+1])/2).unsqueeze(0).cuda()
-        #else:
-        #    data['style_code'] = all_z_new[seq_index][seq_frame_index].unsqueeze(0).cuda()
         data['bg_color'] = bg_color
         data['train_sequence_length_list'] = train_sequence_length_list
         data['sequence_length_list'] = sequence_length_list
@@ -281,6 +271,14 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
         curr_visuals = model.get_current_visuals(data=data)
         pred = curr_visuals['final_coarse_raycolor'].cuda()
         gt = tmpgts['gt_image'].cuda()
+
+        preds.append(np.asarray(pred.detach().squeeze().cpu().reshape(height, width, 3)))
+        gts.append(np.asarray(gt.detach().squeeze().cpu().reshape(height, width,3)))
+
+        if opt.perceiver_io:
+            gt = torch.from_numpy(1-cv2.resize(output["random_masks"][0], (768, 512), interpolation=cv2.INTER_AREA)[...,None]).cuda() * gt.reshape(height, width, 3)
+            pred = torch.from_numpy(1-cv2.resize(output["random_masks"][0], (768, 512), interpolation=cv2.INTER_AREA)[...,None]).cuda() * pred.reshape(height, width, 3)
+            random_masks.append(output["random_masks"])
 
         if opt.half_supervision:
             pred_half = pred.reshape(height, width, 3)[height//2:, ...]
@@ -292,32 +290,27 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
         loss_half = torch.nn.MSELoss().to("cuda")(pred_half.cuda(), gt_half.cuda()).detach()
         psnr_half = mse2psnr(loss_half)
 
-        if opt.perceiver_io:
-            gt = torch.from_numpy(1-cv2.resize(output["random_masks"][0], (768, 512), interpolation=cv2.INTER_AREA)[...,None]).cuda() * gt.reshape(height, width, 3)
-            pred = torch.from_numpy(1-cv2.resize(output["random_masks"][0], (768, 512), interpolation=cv2.INTER_AREA)[...,None]).cuda() * pred.reshape(height, width, 3)
-            random_masks.append(output["random_masks"])
+        #img_tensor = pred.reshape(height, width, 3)[None].permute(0, 3, 1, 2).float() * 2 - 1.0
+        #gt_tensor = gt.reshape(height, width, 3)[None].permute(0, 3, 1, 2).float() * 2 - 1.0
 
-        img_tensor = pred.reshape(height, width, 3)[None].permute(0, 3, 1, 2).float() * 2 - 1.0
-        gt_tensor = gt.reshape(height, width, 3)[None].permute(0, 3, 1, 2).float() * 2 - 1.0
-
-        if opt.half_supervision:
-            ssim_half = compare_ssim(pred.reshape(height, width, 3).cpu().numpy()[height//2:,...], gt.reshape(height, width, 3).cpu().numpy()[height//2:,...],11, multichannel=True)
-            lpips_value_half_vgg = loss_fn_vgg(img_tensor[:,:,height//2:,:], gt_tensor.cuda()[:,:,height//2:,:]).detach().item()
-        else:
-            ssim_half = compare_ssim(pred.reshape(height, width, 3).cpu().numpy(), gt.reshape(height, width, 3).cpu().numpy(),11, multichannel=True)
-            lpips_value_half_vgg = loss_fn_vgg(img_tensor, gt_tensor.cuda()).detach().item()
+        #if opt.half_supervision:
+        #    ssim_half = compare_ssim(pred.reshape(height, width, 3).cpu().numpy()[height//2:,...], gt.reshape(height, width, 3).cpu().numpy()[height//2:,...],11, multichannel=True)
+        #    lpips_value_half_vgg = loss_fn_vgg(img_tensor[:,:,height//2:,:], gt_tensor.cuda()[:,:,height//2:,:]).detach().item()
+        #else:
+        #    ssim_half = compare_ssim(pred.reshape(height, width, 3).cpu().numpy(), gt.reshape(height, width, 3).cpu().numpy(),11, multichannel=True)
+        #    lpips_value_half_vgg = loss_fn_vgg(img_tensor, gt_tensor.cuda()).detach().item()
 
         if seq_frame_index%10==0:
             test_psnr_half.append(psnr_half.detach().cpu().item())
-            ssim_test_half.append(ssim_half)
-            lpips_test_half_vgg.append(lpips_value_half_vgg)
+        #    ssim_test_half.append(ssim_half)
+        #    lpips_test_half_vgg.append(lpips_value_half_vgg)
         else:
             train_psnr_half.append(psnr_half.detach().cpu().item())
-            ssim_train_half.append(ssim_half)
-            lpips_train_half_vgg.append(lpips_value_half_vgg)
+        #    ssim_train_half.append(ssim_half)
+        #    lpips_train_half_vgg.append(lpips_value_half_vgg)
 
-        preds.append(np.asarray(pred.detach().squeeze().cpu().reshape(height, width, 3)))
-        gts.append(np.asarray(gt.detach().squeeze().cpu().reshape(height, width,3)))
+        #preds.append(np.asarray(pred.detach().squeeze().cpu().reshape(height, width, 3)))
+        #gts.append(np.asarray(gt.detach().squeeze().cpu().reshape(height, width,3)))
         rootdir = os.path.join(opt.checkpoints_dir, 'results')
         if opt.only_test:
             now_time = time.strftime("%Y-%m-%d-%H:%M:%S", time.localtime())
@@ -330,43 +323,43 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
 
             alllist_psnr_train.append(train_psnr_half)
             alllist_psnr_test.append(test_psnr_half)
-            alllist_ssim_train.append(ssim_train_half)
-            alllist_ssim_test.append(ssim_test_half)
-            alllist_lpips_train.append(lpips_train_half_vgg)
-            alllist_lpips_test.append(lpips_test_half_vgg)
+        #    alllist_ssim_train.append(ssim_train_half)
+        #    alllist_ssim_test.append(ssim_test_half)
+        #    alllist_lpips_train.append(lpips_train_half_vgg)
+        #    alllist_lpips_test.append(lpips_test_half_vgg)
 
             train_psnr_half, test_psnr_half = [],[]
-            ssim_train_half, ssim_test_half = [],[]
-            lpips_train_half_vgg, lpips_test_half_vgg = [],[]
+        #    ssim_train_half, ssim_test_half = [],[]
+        #    lpips_train_half_vgg, lpips_test_half_vgg = [],[]
 
     psnr_train_list, pnsr_test_list = [],[]
-    ssim_train_list, ssim_test_list = [],[]
-    lpips_train_list, lpips_test_list = [],[]
+    #ssim_train_list, ssim_test_list = [],[]
+    #lpips_train_list, lpips_test_list = [],[]
 
     for seq_id in range(len(sequence_length_list)):
         test_psnr_half, train_psnr_half = alllist_psnr_test[seq_id], alllist_psnr_train[seq_id]
-        ssim_test_half, ssim_train_half = alllist_ssim_test[seq_id], alllist_ssim_train[seq_id]
-        lpips_test_half_vgg, lpips_train_half_vgg = alllist_lpips_test[seq_id], alllist_lpips_train[seq_id]
+        #ssim_test_half, ssim_train_half = alllist_ssim_test[seq_id], alllist_ssim_train[seq_id]
+        #lpips_test_half_vgg, lpips_train_half_vgg = alllist_lpips_test[seq_id], alllist_lpips_train[seq_id]
 
         test_psnr_value_half = (sum(test_psnr_half)/len(test_psnr_half))
         train_psnr_value_half =  (sum(train_psnr_half)/max(1,len(train_psnr_half)))
 
-        test_ssim_value_half = (sum(ssim_test_half)/len(ssim_test_half))
-        train_ssim_value_half =  sum(ssim_train_half)/max(1,len(ssim_train_half))
+        #test_ssim_value_half = (sum(ssim_test_half)/len(ssim_test_half))
+        #train_ssim_value_half =  sum(ssim_train_half)/max(1,len(ssim_train_half))
 
-        test_lpips_value_half_vgg = (sum(lpips_test_half_vgg)/len(lpips_test_half_vgg))
-        train_lpips_value_half_vgg =  (sum(lpips_train_half_vgg)/max(1,len(lpips_train_half_vgg)))
+        #test_lpips_value_half_vgg = (sum(lpips_test_half_vgg)/len(lpips_test_half_vgg))
+        #train_lpips_value_half_vgg =  (sum(lpips_train_half_vgg)/max(1,len(lpips_train_half_vgg)))
 
         psnr_train_list.append(train_psnr_value_half)
         pnsr_test_list.append(test_psnr_value_half)
-        ssim_train_list.append(train_ssim_value_half)
-        ssim_test_list.append(test_ssim_value_half)
-        lpips_train_list.append(train_lpips_value_half_vgg)
-        lpips_test_list.append(test_lpips_value_half_vgg)
+        #ssim_train_list.append(train_ssim_value_half)
+        #ssim_test_list.append(test_ssim_value_half)
+        #lpips_train_list.append(train_lpips_value_half_vgg)
+        #lpips_test_list.append(test_lpips_value_half_vgg)
 
     psnr_avg_value = (sum(pnsr_test_list)/len(pnsr_test_list))
 
-    if total_steps>0 and best_PSNR_half < psnr_avg_value:
+    if (total_steps>0 and best_PSNR_half < psnr_avg_value) or opt.only_test:
         if os.path.exists(rootdir)==False:
             os.makedirs(rootdir, exist_ok=True)
             for img_index, img in enumerate(gts):
@@ -386,7 +379,8 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
                 img = img[height//2:,:]
             save_image(np.asarray(img), filepath)
 
-    return psnr_train_list, pnsr_test_list, ssim_train_list, ssim_test_list, lpips_train_list, lpips_test_list
+    return psnr_train_list, pnsr_test_list
+    #return psnr_train_list, pnsr_test_list, ssim_train_list, ssim_test_list, lpips_train_list, lpips_test_list
 
 def update_pcds(model, data_loader, all_z, opt, opacity_thresh):
     print('-----------------------------------Probing Holes-----------------------------------')
@@ -671,7 +665,7 @@ def main():
             print ('========'+fmt.END)
 
             points_xyz_all_list.append(points_xyz_holder.cuda())
-            points_embedding_all.append(torch.randn((1, len(points_xyz_holder), 32)).cuda())
+            points_embedding_all.append(torch.randn((1, len(points_xyz_holder), opt.point_features_dim)).cuda())
             points_conf_all.append(torch.ones((1, len(points_xyz_holder), 1)).cuda())
 
             if "1" in list(opt.point_color_mode):
@@ -717,14 +711,15 @@ def main():
     test_opt.split = "test"
     test_dataset = WaymoFtDataset(test_opt)
 
-    loss_fn_vgg = lpips.LPIPS(net='vgg', version='0.1').cuda()
+#    loss_fn_vgg = lpips.LPIPS(net='vgg', version='0.1').cuda()
     if opt.only_test:
         model.opt.is_train = 0
         model.opt.no_loss = 1
         with torch.no_grad():
-            psnr_train_list, pnsr_test_list, ssim_train_list, ssim_test_list, lpips_train_list, lpips_test_list = \
+            #psnr_train_list, pnsr_test_list, ssim_train_list, ssim_test_list, lpips_train_list, lpips_test_list = \
+            psnr_train_list, pnsr_test_list = \
                 test(0, model, test_dataset, Visualizer(test_opt), opt, None, test_steps=total_steps, lpips=True, bg_color=bg_color, best_PSNR_half=best_PSNR_half, \
-                sequence_length_list=test_dataset.sequence_length_list, train_sequence_length_list=train_dataset.sequence_length_list, loss_fn_vgg=loss_fn_vgg)
+                sequence_length_list=test_dataset.sequence_length_list, train_sequence_length_list=train_dataset.sequence_length_list, loss_fn_vgg=None)
             test_psnr_half = (sum(pnsr_test_list)/len(pnsr_test_list))
             train_psnr_half = (sum(psnr_train_list)/len(psnr_train_list))
             print (train_psnr_half, '======train_psnr_half')
@@ -743,6 +738,7 @@ def main():
         if opt.ddp_train:
             sampler.set_epoch(epoch)
         for i, data in enumerate(data_loader):
+            model.train()
             if opt.maximum_step is not None and total_steps >= opt.maximum_step:
                 break
             total_steps += 1
@@ -774,45 +770,47 @@ def main():
             except Exception as e:
                 visualizer.print_details(e)
             #### test model
-            if total_steps % opt.test_freq == 0 or total_steps==1:
+            if (total_steps % opt.test_freq == 0 or total_steps==1) and opt.eval_during_train:
                 model.opt.is_train = 0
                 model.opt.no_loss = 1
                 #model.print_lr(opt=opt, total_steps=total_steps)
                 with torch.no_grad():
-                    psnr_train_list, pnsr_test_list, ssim_train_list, ssim_test_list, lpips_train_list, lpips_test_list = \
+                    #psnr_train_list, pnsr_test_list, ssim_train_list, ssim_test_list, lpips_train_list, lpips_test_list = \
+                    psnr_train_list, pnsr_test_list = \
                     test(epoch, model, test_dataset, Visualizer(test_opt), test_opt, None, test_steps=total_steps, lpips=True, bg_color=bg_color, best_PSNR_half=best_PSNR_half, \
-                        sequence_length_list=test_dataset.sequence_length_list, train_sequence_length_list=train_dataset.sequence_length_list, loss_fn_vgg=loss_fn_vgg)
+                        sequence_length_list=test_dataset.sequence_length_list, train_sequence_length_list=train_dataset.sequence_length_list, loss_fn_vgg=None)
                 model.opt.no_loss = 0
                 model.opt.is_train = 1
 
-                model.train()
+                test_psnr_half = (sum(pnsr_test_list)/len(pnsr_test_list))
+                train_psnr_half = (sum(psnr_train_list)/len(psnr_train_list))
+                #train_ssim_value_half = (sum(ssim_train_list)/len(ssim_train_list))
+                #test_ssim_value_half =(sum(ssim_test_list)/len(ssim_test_list))
+                #train_lpips_value_half_vgg = (sum(lpips_train_list)/len(lpips_train_list))
+                #test_lpips_value_half_vgg = (sum(lpips_test_list)/len(lpips_test_list))
+
+                best_epoch = epoch if test_psnr_half > best_PSNR_half else best_epoch
+                best_PSNR = max(train_psnr_half, best_PSNR)
+                best_PSNR_half = max(test_psnr_half, best_PSNR_half)
+
+                #best_SSIM = max(train_ssim_value_half, best_SSIM)
+                #best_SSIM_half = max(test_ssim_value_half, best_SSIM_half)
+
+                #best_LPIPS_VGG = min(train_lpips_value_half_vgg, best_LPIPS_VGG)
+                #best_LPIPS_half_VGG = min(test_lpips_value_half_vgg, best_LPIPS_half_VGG)
 
                 if local_rank==0:
-                    test_psnr_half = (sum(pnsr_test_list)/len(pnsr_test_list))
-                    train_psnr_half = (sum(psnr_train_list)/len(psnr_train_list))
-                    train_ssim_value_half = (sum(ssim_train_list)/len(ssim_train_list))
-                    test_ssim_value_half =(sum(ssim_test_list)/len(ssim_test_list))
-                    train_lpips_value_half_vgg = (sum(lpips_train_list)/len(lpips_train_list))
-                    test_lpips_value_half_vgg = (sum(lpips_test_list)/len(lpips_test_list))
-
-                    best_epoch = epoch if test_psnr_half > best_PSNR_half else best_epoch
-                    best_PSNR = max(train_psnr_half, best_PSNR)
-                    best_PSNR_half = max(test_psnr_half, best_PSNR_half)
-
-                    best_SSIM = max(train_ssim_value_half, best_SSIM)
-                    best_SSIM_half = max(test_ssim_value_half, best_SSIM_half)
-
-                    best_LPIPS_VGG = min(train_lpips_value_half_vgg, best_LPIPS_VGG)
-                    best_LPIPS_half_VGG = min(test_lpips_value_half_vgg, best_LPIPS_half_VGG)
+                    writer.add_scalar('epoch_PSNR_test', test_psnr_half, epoch)
+                    writer.add_scalar('epoch_PSNR_train', train_psnr_half, epoch)
 
                     writer.add_scalar('PSNR_test', test_psnr_half, total_steps)
                     writer.add_scalar('PSNR_train', train_psnr_half, total_steps)
 
-                    writer.add_scalar('SSIM_test', test_ssim_value_half, total_steps)
-                    writer.add_scalar('SSIM_train', train_ssim_value_half, total_steps)
+                    #writer.add_scalar('SSIM_test', test_ssim_value_half, total_steps)
+                    #writer.add_scalar('SSIM_train', train_ssim_value_half, total_steps)
 
-                    writer.add_scalar('LPIPS_test', test_lpips_value_half_vgg, total_steps)
-                    writer.add_scalar('LPIPS_train', train_lpips_value_half_vgg, total_steps)
+                    #writer.add_scalar('LPIPS_test', test_lpips_value_half_vgg, total_steps)
+                    #writer.add_scalar('LPIPS_train', train_lpips_value_half_vgg, total_steps)
 
                     print (fmt.GREEN+'========EVALUTION=====')
                     print (opt.checkpoints_dir)
@@ -822,18 +820,18 @@ def main():
                     visualizer.print_details(f"HALF : train & test: {train_psnr_half}, {test_psnr_half}")
                     visualizer.print_details(f"BEST : {best_PSNR}, {best_PSNR_half} {best_epoch}")
 
-                    visualizer.print_details(f"===== SSIM =====")
-                    visualizer.print_details(f"HALF : train & test: {train_ssim_value_half}, {test_ssim_value_half}")
-                    visualizer.print_details(f"BEST : {best_SSIM}, {best_SSIM_half} {best_epoch}")
+                    #visualizer.print_details(f"===== SSIM =====")
+                    #visualizer.print_details(f"HALF : train & test: {train_ssim_value_half}, {test_ssim_value_half}")
+                    #visualizer.print_details(f"BEST : {best_SSIM}, {best_SSIM_half} {best_epoch}")
 
-                    visualizer.print_details(f"===== LPIPS VGG =====")
-                    visualizer.print_details(f"HALF : train & test: {train_lpips_value_half_vgg}, {test_lpips_value_half_vgg}")
-                    visualizer.print_details(f"BEST : {best_LPIPS_VGG}, {best_LPIPS_half_VGG} {best_epoch}")
+                    #visualizer.print_details(f"===== LPIPS VGG =====")
+                    #visualizer.print_details(f"HALF : train & test: {train_lpips_value_half_vgg}, {test_lpips_value_half_vgg}")
+                    #visualizer.print_details(f"BEST : {best_LPIPS_VGG}, {best_LPIPS_half_VGG} {best_epoch}")
                     for seq_id in range(len(train_dataset.filenames)):
                         visualizer.print_details(f"====== {train_dataset.filenames[seq_id]} ======")
                         visualizer.print_details(f"psnr          train & test : {psnr_train_list[seq_id]}, {pnsr_test_list[seq_id]}")
-                        visualizer.print_details(f"ssim          train & test : {ssim_train_list[seq_id]}, {ssim_test_list[seq_id]}")
-                        visualizer.print_details(f"lpips         train & test : {lpips_train_list[seq_id]}, {lpips_test_list[seq_id]}")
+                        #visualizer.print_details(f"ssim          train & test : {ssim_train_list[seq_id]}, {ssim_test_list[seq_id]}")
+                        #visualizer.print_details(f"lpips         train & test : {lpips_train_list[seq_id]}, {lpips_test_list[seq_id]}")
                     print (fmt.END)
 
     writer.close()
@@ -845,7 +843,6 @@ def main():
     visualizer.print_details('saving model ({}, epoch {}, total_steps {})'.format(opt.name, epoch, total_steps))
     model.save_networks(epoch, other_states)
 
-    torch.cuda.empty_cache()
     model.opt.no_loss = 1
     model.opt.is_train = 0
 

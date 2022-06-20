@@ -6,6 +6,7 @@ from utils import format as fmt
 import random
 from utils.kitti_object import trans_world2nerf
 from .helpers.networks import init_seq, positional_encoding, effective_range
+from utils.ChamferDistancePytorch.chamfer_python import distChamfer
 
 class NeuralPointsVolumetricMultiseqModel(BaseRenderingModel):
 
@@ -357,6 +358,12 @@ class NeuralPointsRayMarching(nn.Module):
             sample_local_ray_dirs.append(sample_local_ray_dirs_i)
             ray_mask_tensor.append(ray_mask_tensor_i)
             raypos_tensor.append(raypos_tensor_i)
+
+#            if (self.opt.knn_transform) or True:
+#                import pdb; pdb.set_trace()
+#                ray_valid_i = torch.any(sample_pnt_mask_i, dim=-1).view(-1)
+#                dist_mat = distChamfer(sample_loc_w_i.reshape(1, -1, 3), self.neural_points.xyz[None, ...])
+#                val, indices = torch.topk(dist_mat, k=8, dim=2,largest=False)
             if self.opt.perceiver_io:
                 random_masks.append(mask_i)
                 tmp = ray_mask_tensor_i.reshape(64,96)
