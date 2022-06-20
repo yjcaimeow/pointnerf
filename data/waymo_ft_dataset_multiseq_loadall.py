@@ -105,35 +105,47 @@ class WaymoFtDataset(BaseDataset):
         self.define_transforms()
         import glob
         self.seq_id, self.images, self.images_4, self.poses, self.intrinsic, self.points_xyz_all, self.camposes, self.centerdirs = [],[],[],[],[],[],[],[]
-        self.id_in_seq_list=[]
-        with open('./data/waymo_video_list.txt') as file:
-            self.filenames = file.readlines()
-        file.close()
-        #self.filenames = glob.glob(os.path.join(opt.filename, '*.tfrecord'))[0:opt.seq_num]
+        if self.opt.is_train==False:
+            self.id_in_seq_list=[]
+        self.filenames = glob.glob(os.path.join(opt.filename, '*.npz'))[0:opt.seq_num]
         self.sequence_length_list = []
-        self.intrinsic = torch.tensor([[102.2254,   0.0000,  47.4787],
-                        [  0.0000, 102.2254,  31.6621],
-                        [  0.0000,   0.0000,   1.0000]])
-        self.filenames = self.filenames[0:opt.seq_num]
         print(self.filenames)
         for fidx, filename in enumerate(self.filenames):
-            pcd = np.load(os.path.join(self.opt.filename, filename.strip()[:-4].replace('tfrecord', 'folder'), 'pcd.npy'))
-            self.points_xyz_all.append(torch.from_numpy(pcd))
-            frames_length = len(glob.glob(os.path.join(self.opt.filename, filename.strip()[:-4].replace('tfrecord', 'folder'),'*.npz')))
+            waymo_data = np.load(filename)
+            frames_length = len(waymo_data['poses'])
             all_id_list = list(range(frames_length)) #000000
             train_id_list = [all_id_list[i] for i in all_id_list if i%10!=0]
+            if fidx==0:
+                self.intrinsic = torch.from_numpy(waymo_data['intrinsic'])
+                if opt.scale_factor==20:
+                    self.intrinsic = self.intrinsic/2
+                    self.intrinsic[-1,-1]=1
             #test_id_list = all_id_list[::self.step]
             id_list = train_id_list if self.split=="train" else all_id_list
+            self.images.append(torch.from_numpy(waymo_data['images'])[id_list])
+            self.poses.append(torch.from_numpy(waymo_data['poses'])[id_list])
+            #self.intrinsic.append(torch.from_numpy(waymo_data['intrinsic']))
+            self.points_xyz_all.append(torch.from_numpy(waymo_data['oints_xyz_all']))
+            self.camposes.append(torch.from_numpy(waymo_data['camposes'])[id_list])
+            self.centerdirs.append(torch.from_numpy(waymo_data['centerdirs'])[id_list])
             self.seq_id.append((torch.ones(len(id_list)) * fidx).long())
-
-            self.id_in_seq_list.append(id_list)
-
+            if self.opt.is_train==False:
+                self.id_in_seq_list.append(all_id_list)
             self.sequence_length_list.append(len(id_list))
+            self.images_4.append(torch.from_numpy(self.resize(waymo_data['images']))[id_list])
+        self.images = torch.cat(self.images)
+        self.images_4 = torch.cat(self.images_4)
+        self.poses = torch.cat(self.poses)
+        #self.intrinsic = torch.stack(self.intrinsic)
+        self.camposes = torch.cat(self.camposes)
+        self.centerdirs = torch.cat(self.centerdirs)
         self.seq_id = torch.cat(self.seq_id)
-        self.id_in_seq_list = np.concatenate(self.id_in_seq_list)
+        if self.opt.is_train==False:
+            self.id_in_seq_list = np.concatenate(self.id_in_seq_list)
 
         self.norm_w2c, self.norm_c2w = torch.eye(4, device="cuda", dtype=torch.float32), torch.eye(4, device="cuda", dtype=torch.float32)
-        self.total = len(self.seq_id)
+        self.total = len(self.images)
+        #print("dataset total: including (images, poses, camposes, centerdirs) \n", self.split, self.images.shape, self.poses.shape, self.camposes.shape, self.centerdirs.shape, self.images_4.shape)
 
     def resize(self, imgs, img_H=128, img_W=192):
         imgs_half_res = np.zeros((imgs.shape[0], img_H, img_W, 3))
@@ -143,18 +155,13 @@ class WaymoFtDataset(BaseDataset):
 
     def __getitem__(self, id, crop=False, full_img=False):
         item = {}
+        img = self.images[id]
+        c2w = self.poses[id]
         item["seq_id"] = self.seq_id[id]
-        item["filename"] = self.filenames[item["seq_id"]].strip()[:-4]
-        item['id_in_seq']=self.id_in_seq_list[id]
-
-        file_name = os.path.join(self.opt.filename, item["filename"].replace('tfrecord', 'folder') , str(item["id_in_seq"]).zfill(3)+'_info.npz')
-
-        data = np.load(file_name)
-        img = data['image']
-        c2w = data['pose']
         camrot = c2w[0:3, 0:3]
         campos = c2w[0:3, 3]
 
+        #item["intrinsic"] = self.intrinsic[item["seq_id"]]
         item["intrinsic"] = self.intrinsic
         item["campos"] = campos
         item["c2w"] = c2w
@@ -170,6 +177,8 @@ class WaymoFtDataset(BaseDataset):
         item['h'] = self.height
         item['w'] = self.width
         item['id'] = id
+        if self.opt.is_train==False:
+            item['id_in_seq']=self.id_in_seq_list[id]
         if full_img:
             item['images'] = img[None,...].clone()
         subsamplesize = self.opt.random_sample_size
@@ -188,12 +197,12 @@ class WaymoFtDataset(BaseDataset):
                         np.arange(0, self.height).astype(np.float32))
         pixelcoords = np.stack((px, py), axis=-1).astype(np.float32)  # H x W x 2
         item["pixel_idx"] = pixelcoords
-        local_dirs, raydir = get_blender_raydir(pixelcoords, self.height, self.width, item["intrinsic"][0][0], camrot, self.opt.dir_norm > 0)
-        #local_dirs, raydir = get_blender_raydir(pixelcoords, self.height, self.width, item["intrinsic"][0][0], camrot.numpy(), self.opt.dir_norm > 0)
+        local_dirs, raydir = get_blender_raydir(pixelcoords, self.height, self.width, item["intrinsic"][0][0], camrot.numpy(), self.opt.dir_norm > 0)
         raydir = np.reshape(raydir, (-1, 3))
         item['raydir'] = torch.from_numpy(raydir).float()
         item['local_raydir'] = torch.from_numpy(local_dirs).float().reshape(-1,3)
         item['gt_image'] = np.reshape(img, (-1, 3))
+        item['gt_image_4'] = np.reshape(self.images_4[id], (-1, 3))
         return item
 
     @staticmethod

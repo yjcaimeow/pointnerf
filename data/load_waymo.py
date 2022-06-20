@@ -321,5 +321,5 @@ from multiprocessing import Pool
 if __name__ == '__main__':
     import glob
     filenames = glob.glob('/mnt/lustre/caiyingjie/data/selected_waymo/*.tfrecord')
-    with Pool(150) as p:
+    with Pool(10) as p:
         print(p.map(main, filenames))

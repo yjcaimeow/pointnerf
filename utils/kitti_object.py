@@ -136,6 +136,7 @@ def show_image_with_boxes(img, objects, calib, show3d=True):
 
 
 def trans_world2nerf(global_frame_points, pose_nerf2world):
+#    import pdb; pdb.set_trace()
     pose_world2nerf = torch.linalg.inv(pose_nerf2world)
     #point_at_nerf_frame = pose_world2nerf[:3,:3] @ global_frame_points.T + pose_world2nerf[:3, 3][:, None]
     point_at_nerf_frame = pose_world2nerf[:3,:3].double() @ global_frame_points.T.double() + pose_world2nerf[:3, 3][:, None].double()
