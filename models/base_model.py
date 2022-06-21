@@ -99,22 +99,24 @@ class BaseModel:
         for name, net in zip(self.model_names, self.get_networks()):
             save_filename = 'lr{}_{}_net_{}.pth'.format(self.local_rank, iteration, name)
             save_path = os.path.join(self.save_dir, save_filename)
+            torch.save(net.state_dict(), save_path)
 
-            try:
-                if isinstance(net, nn.DataParallel):
-                    net = net.module
-                net.cpu()
-                torch.save(net.state_dict(), save_path)
-                if back_gpu:
-                    net.cuda()
-            except Exception as e:
-                print("savenet:", e)
-
+#            try:
+#                if isinstance(net, nn.DataParallel):
+#                    net = net.module
+#                net.cpu()
+#                torch.save(net.state_dict(), save_path)
+#                if back_gpu:
+#                    net.cuda()
+#            except Exception as e:
+#                print("savenet:", e)
+#
         save_filename = 'lr{}_{}_states.pth'.format(self.local_rank, iteration)
         save_path = os.path.join(self.save_dir, save_filename)
         torch.save(other_states, save_path)
 
     def load_networks(self, epoch):
+        import pdb; pdb.set_trace()
         for name, net in zip(self.model_names, self.get_networks()):
             print('loading', name)
             assert isinstance(name, str)
@@ -125,11 +127,11 @@ class BaseModel:
                 print('cannot load', load_path)
                 continue
 
-            state_dict = torch.load(load_path, map_location=self.device)
+            state_dict = torch.load(load_path, map_location='cpu')
             if isinstance(net, nn.DataParallel):
                 net = net.module
 
-            net.load_state_dict(state_dict, strict=False)
+            net.load_state_dict(state_dict, strict=True)
 
 
     def print_networks(self, verbose):

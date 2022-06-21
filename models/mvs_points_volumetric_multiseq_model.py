@@ -331,7 +331,7 @@ class MvsPointsVolumetricMultiseqModel(NeuralPointsVolumetricMultiseqModel):
             if not os.path.isfile(load_path):
                 print('cannot load', load_path)
                 continue
-            state_dict = torch.load(load_path, map_location=self.device)
+            state_dict = torch.load(load_path, map_location='cpu')
             if epoch=="best" and name == "ray_marching" and self.opt.default_conf > 0.0 and self.opt.default_conf <= 1.0 and self.neural_points.points_conf is not None:
                 assert "neural_points.points_conf" not in state_dict
                 state_dict["neural_points.points_conf"] = torch.ones_like(self.net_ray_marching.module.neural_points.points_conf) * self.opt.default_conf

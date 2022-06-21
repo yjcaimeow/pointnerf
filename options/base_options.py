@@ -56,6 +56,7 @@ class BaseOptions:
             '--perceiver_io',
             action='store_true',
             help='if specified, print more debugging information')
+        parser.add_argument('--radius', type=float, default=2.0, help='name of the experiment')
         parser.add_argument('--N', type=int, default=512, help='name of the experiment')
         parser.add_argument('--D', type=int, default=16, help='name of the experiment')
         parser.add_argument('--E', type=int, default=24, help='name of the experiment')

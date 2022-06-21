@@ -16,7 +16,7 @@ import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 import torch.multiprocessing as mp
 import cv2
-
+from cprint import *
 #import lpips
 #try:
 #    from skimage.measure import compare_ssim
@@ -159,59 +159,6 @@ def masking(mask, firstdim_lst, seconddim_lst):
     first_lst = [item[mask, ...] if item is not None else None for item in firstdim_lst]
     second_lst = [item[:, mask, ...] if item is not None else None for item in seconddim_lst]
     return first_lst, second_lst
-
-def render_vid(model, dataset, visualizer, opt, bg_info, steps=0, gen_vid=True):
-    print('-----------------------------------Rendering-----------------------------------')
-    model.eval()
-    total_num = dataset.total
-    print("test set size {}, interval {}".format(total_num, opt.test_num_step))
-    patch_size = opt.random_sample_size
-    chunk_size = patch_size * patch_size
-
-    height = dataset.height
-    width = dataset.width
-    visualizer.reset()
-    for i in range(0, total_num):
-        data = dataset.get_dummyrot_item(i)
-        raydir = data['raydir'].clone()
-        pixel_idx = data['pixel_idx'].view(data['pixel_idx'].shape[0], -1, data['pixel_idx'].shape[3]).clone()
-        visuals = None
-        stime = time.time()
-
-        for k in range(0, height * width, chunk_size):
-            start = k
-            end = min([k + chunk_size, height * width])
-            data['raydir'] = raydir[:, start:end, :]
-            data["pixel_idx"] = pixel_idx[:, start:end, :]
-            model.set_input(data)
-
-            model.test()
-            curr_visuals = model.get_current_visuals(data=data)
-            if visuals is None:
-                visuals = {}
-                for key, value in curr_visuals.items():
-                    if key == "gt_image": continue
-                    chunk = value.cpu().numpy()
-                    visuals[key] = np.zeros((height * width, 3)).astype(chunk.dtype)
-                    visuals[key][start:end, :] = chunk
-            else:
-                for key, value in curr_visuals.items():
-                    if key == "gt_image": continue
-                    visuals[key][start:end, :] = value.cpu().numpy()
-
-        for key, value in visuals.items():
-            visualizer.print_details("{}:{}".format(key, visuals[key].shape))
-            visuals[key] = visuals[key].reshape(height, width, 3)
-        print("num.{} in {} cases: time used: {} s".format(i, total_num // opt.test_num_step, time.time() - stime), " at ", visualizer.image_dir)
-        visualizer.display_current_results(visuals, i)
-
-    print('--------------------------------Finish Evaluation--------------------------------')
-    if gen_vid:
-        del dataset
-        visualizer.gen_video("coarse_raycolor", range(0, total_num), 0)
-        print('--------------------------------Finish generating vid--------------------------------')
-
-    return
 
 def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, gen_vid=False, lpips=True, max_test_psnr=0, \
          max_train_psnr=0, bg_color=None, all_z=None, best_PSNR_half=None, sequence_length_list=None, train_sequence_length_list=None, loss_fn_vgg=None):
@@ -684,15 +631,17 @@ def main():
             model.set_points(points_xyz_all_list, points_embedding_all, points_color=points_color_all, points_dir=points_dir_all, points_conf=points_conf_all,
                              Rw2c=None, bg_color=bg_color, stylecode=all_z)
         else:
-            model.set_points(points_xyz_all_list, points_embedding_all, points_color=None, points_dir=None, points_conf=points_conf_all,
-                             Rw2c=None, bg_color=bg_color, stylecode=all_z)
+            model.set_points(points_xyz_all_list, points_embedding_all, points_color=None, points_dir=None, points_conf=points_conf_all, Rw2c=None, bg_color=bg_color, stylecode=all_z)
         epoch_count = 1
         total_steps = 0
         del points_xyz_all_list, points_embedding_all, points_color_all, points_dir_all, points_conf_all, all_z
+
     if opt.ddp_train:
         model.set_ddp()
+
     model.setup(opt, train_len=train_dataset.total)
     model.train()
+
     if opt.resume_dir:
         load_path = os.path.join(opt.resume_dir, str(opt.resume_iter)+'_states.pth')
         if os.path.isfile(load_path):
@@ -733,7 +682,6 @@ def main():
         for scheduler in model.schedulers:
             for i in range(total_steps):
                 scheduler.step()
-
     for epoch in range(epoch_count, opt.niter + opt.niter_decay + 1):
         if opt.ddp_train:
             sampler.set_epoch(epoch)
@@ -757,20 +705,21 @@ def main():
                 model.print_lr(opt=opt, total_steps=total_steps)
 
             try:
-                if (total_steps % opt.save_iter_freq == 0 and total_steps) or total_steps==1:
+                if ((total_steps % opt.save_iter_freq == 0 and total_steps) or total_steps==1 ) and local_rank==0:
                     other_states = {
                         "best_PSNR": best_PSNR,
                         "best_epoch": best_epoch,
                         'epoch_count': epoch,
                         'total_steps': total_steps,
                     }
-                    visualizer.print_details('saving model ({}, epoch {}, total_steps {})'.format(opt.name, epoch, total_steps))
+                    cprint.warn('saving model!')
+                    print('saving model ({}, epoch {}, total_steps {})'.format(opt.name, epoch, total_steps))
                     model.save_networks(total_steps, other_states)
 
             except Exception as e:
                 visualizer.print_details(e)
             #### test model
-            if (total_steps % opt.test_freq == 0 or total_steps==1) and opt.eval_during_train:
+            if (total_steps % opt.test_freq == 0 or total_steps==1):
                 model.opt.is_train = 0
                 model.opt.no_loss = 1
                 #model.print_lr(opt=opt, total_steps=total_steps)

@@ -11,7 +11,8 @@ nrCheckpoint="../checkpoints"
 nrDataRoot="../data_src"
 name='waymo'
 
-resume_iter='lr0_latest'
+resume_iter=$4
+radius=1.0
 
 data_root="${nrDataRoot}/scannet/scans/"
 scan="scene0241_01"
@@ -83,7 +84,6 @@ dist_xyz_freq=5
 num_feat_freqs=3
 dist_xyz_deno=0
 
-
 raydist_mode_unit=1
 dataset_name='scannet_ft'
 pin_data_in_memory=1
@@ -153,14 +153,13 @@ test_color_loss_items='coarse_raycolor ray_miss_coarse_raycolor ray_masked_coars
 
 bg_color="white" #"0.0,0.0,0.0,1.0,1.0,1.0"
 split="train"
-seq_num=50
+seq_num=100
 
 GPUNUM=8
 NODENUM=1
 JOBNAME=pointnerf
 PART=$2
 
-optimizer_type=SGD
 #--optimizer_type ${optimizer_type} \
 #CUDA_LAUNCH_BLOCKING=1 python ./train.py \
 #--unified \
@@ -173,6 +172,7 @@ TOOLS="srun --partition=$PART --gres=gpu:${GPUNUM} -n$NODENUM --ntasks-per-node=
 $TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch --nnodes=$NODENUM --nproc_per_node=$GPUNUM --node_rank \$SLURM_PROCID --master_addr=\$(sinfo -Nh -n \$SLURM_NODELIST | head -n 1 | cut -d ' ' -f 1) --master_port $3 train_iter.py \
     --zoom_in_scale $zoom_in_scale --ddp_train \
     --half_supervision \
+    --radius ${radius} \
     --perceiver_io \
     --seq_num ${seq_num} \
     --catWithLocaldir \
@@ -290,5 +290,4 @@ $TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch --nnodes=$N
     --prob_mul $prob_mul \
     --prob_kernel_size $prob_kernel_size \
     --prob_tiers $prob_tiers \
-    --query_size $query_size \
-    --debug"
+    --query_size $query_size"
