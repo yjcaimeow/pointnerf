@@ -12,7 +12,7 @@ from utils import format as fmt
 from utils.spherical import SphericalHarm, SphericalHarm_table
 from utils.util import add_property2dict
 from torch.autograd import Variable
-
+import cv2
 from PIL import Image
 def mse2psnr(x): return -10.* torch.log(x)/np.log(10.)
 
@@ -617,7 +617,11 @@ class BaseRenderingModel(BaseModel):
 #                if name.split('_')[-1]=="half":
                     height, width = 512,768
                     batch_size = self.output[name].shape[0]
-                    loss = self.l2loss(self.output[name].reshape(batch_size, height, width, 3)[:,height//2:,...], self.gt_image.reshape(batch_size, height, width, 3)[:,height//2:,...])
+                    if self.opt.fix_net:
+                        mask = torch.from_numpy(1-cv2.resize(self.output["random_masks"][0], (768, 512), interpolation=cv2.INTER_AREA).reshape(batch_size, height, width)[:,height//2:,...][...,None]).cuda()
+                        loss = self.l2loss(self.output[name].reshape(batch_size, height, width, 3)[:,height//2:,...].mul(mask), self.gt_image.reshape(batch_size, height, width, 3)[:,height//2:,...].mul(mask))
+                    else:
+                        loss = self.l2loss(self.output[name].reshape(batch_size, height, width, 3)[:,height//2:,...], self.gt_image.reshape(batch_size, height, width, 3)[:,height//2:,...])
                 else:
                     loss = self.l2loss(self.output[name], self.gt_image)
                 # print("loss", name, torch.max(torch.abs(loss)))

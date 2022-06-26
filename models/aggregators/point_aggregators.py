@@ -132,7 +132,7 @@ class PointAggregator(torch.nn.Module):
         parser.add_argument(
             '--shading_color_channel_num',
             type=int,
-            default=128,
+            default=56,
             help='color channel num')
 
         parser.add_argument(
@@ -311,15 +311,10 @@ class PointAggregator(torch.nn.Module):
             out_channels = opt.shading_feature_num
             block3 = []
             for i in range(opt.shading_feature_mlp_layer3):
-                if i==opt.shading_feature_mlp_layer3-1:
-                    out_channels=out_channels//2
-                if opt.context_weight and i==opt.shading_feature_mlp_layer3-1:
-                    out_channels=out_channels+1
-                    block3.append(nn.Linear(in_channels, out_channels))
-                    block3.append(torch.nn.ReLU())
-                else:
-                    block3.append(nn.Linear(in_channels, out_channels))
-                    block3.append(self.act(inplace=True))
+                #if i==opt.shading_feature_mlp_layer3-1:
+                #    out_channels=out_channels//2
+                block3.append(nn.Linear(in_channels, out_channels))
+                block3.append(self.act(inplace=True))
                 in_channels = out_channels
             self.block3 = nn.Sequential(*block3)
             block_init_lst.append(self.block3)
@@ -361,8 +356,8 @@ class PointAggregator(torch.nn.Module):
                     self.down_channel = nn.Linear(128, 32)
 
         alpha_block = []
-        #in_channels = opt.shading_feature_num + (0 if opt.agg_alpha_xyz_mode == "None" else self.pnt_channels)
-        in_channels = int(opt.shading_feature_num / 2)
+        in_channels = opt.shading_feature_num + (0 if opt.agg_alpha_xyz_mode == "None" else self.pnt_channels)
+        #in_channels = int(opt.shading_feature_num / 2)
         out_channels = int(opt.shading_feature_num / 2)
         for i in range(opt.shading_alpha_mlp_layer - 1):
             alpha_block.append(nn.Linear(in_channels, out_channels))
@@ -373,17 +368,19 @@ class PointAggregator(torch.nn.Module):
         block_init_lst.append(self.alpha_branch)
 
         color_block = []
-        #in_channels = opt.shading_feature_num + self.viewdir_channels + (
-        #    0 if opt.agg_color_xyz_mode == "None" else self.pnt_channels)
-        in_channels = 152
-        out_channels = int(opt.shading_feature_num / 2)
+        in_channels = opt.shading_feature_num + self.viewdir_channels + (
+            0 if opt.agg_color_xyz_mode == "None" else self.pnt_channels)
+        #in_channels = 152
+        out_channels = int(opt.shading_feature_num)
+        #out_channels = int(opt.shading_feature_num / 2)
         for i in range(opt.shading_color_mlp_layer - 1):
             color_block.append(nn.Linear(in_channels, out_channels))
             color_block.append(self.act(inplace=True))
             in_channels = out_channels
             #out_channels = out_channels//2
         #color_block.append(nn.Linear(in_channels, 3))
-        color_block.append(nn.Linear(out_channels, out_channels))
+        color_block.append(nn.Linear(out_channels, self.opt.shading_color_channel_num))
+        #color_block.append(nn.Linear(out_channels, out_channels))
         self.color_branch = nn.Sequential(*color_block)
         block_init_lst.append(self.color_branch)
 
@@ -609,9 +606,6 @@ class PointAggregator(torch.nn.Module):
                     ori_viewdirs = ori_viewdirs[pnt_mask_flat, :]
                 feat = torch.cat([feat, sampled_dir - ori_viewdirs, torch.sum(sampled_dir*ori_viewdirs, dim=-1, keepdim=True)], dim=-1)
             feat = self.block3(feat)
-            if self.opt.context_weight:
-                weight_context = feat[...,-1]
-                feat   = feat[...,:-1]
 
         if self.opt.agg_intrp_order == 1:
 

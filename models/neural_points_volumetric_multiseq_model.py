@@ -6,6 +6,14 @@ from utils import format as fmt
 import random
 from utils.kitti_object import trans_world2nerf
 from .helpers.networks import init_seq, positional_encoding, effective_range
+import faiss
+import time
+
+def to_column_major_torch(x):
+    if hasattr(torch, 'contiguous_format'):
+        return x.t().clone(memory_format=torch.contiguous_format).t()
+    else:
+        return x.t().clone().t()
 
 class NeuralPointsVolumetricMultiseqModel(BaseRenderingModel):
 
@@ -285,18 +293,25 @@ class NeuralPointsRayMarching(nn.Module):
                                                       num_output_query_channels=self.opt.E, \
                                                       num_cross_attention_heads=1,
                                                       dropout=0.0,
+                                                      perceiver_io_type=self.opt.perceiver_io_type,
                                                       )
         if self.opt.debug:
-            from Pointnet2_PyTorch.pointnet2_ops_lib.pointnet2_ops.pointnet2_modules import PointnetSAModule
-            self.SA_modules = PointnetSAModule(
-                npoint=32,
-                radius=self.opt.radius,
-                nsample=8,
-                mlp=[32, 128],
-                use_xyz=True)
-            self.get_density = nn.Linear(128, 1)
+        #    from Pointnet2_PyTorch.pointnet2_ops_lib.pointnet2_ops.pointnet2_modules import PointnetSAModule
+        #    self.SA_modules = PointnetSAModule(
+        #        npoint=32,
+        #        radius=self.opt.radius,
+        #        nsample=8,
+        #        mlp=[32, 128],
+        #        use_xyz=True)
+        #    self.get_density = nn.Linear(128, 1)
+        #    self.density_super_act = torch.nn.Softplus()
+        #if self.opt.attention_weight:
+            from perceiver.model.core.modules import SelfAttentionLayer
+            self.self_attention = SelfAttentionLayer(num_heads=self.opt.self_attention_num_heads, num_channels=56)
+            self.weight_layer = nn.Linear(56, 1)
+            self.softmax = nn.Softmax(dim=1)
+            self.get_density = nn.Linear(56, 1)
             self.density_super_act = torch.nn.Softplus()
-
 
     def latent_to_w(self, style_vectorizer, latent_descr):
         return [(style_vectorizer(latent_descr.cuda()), 8)]
@@ -367,15 +382,65 @@ class NeuralPointsRayMarching(nn.Module):
             sample_local_ray_dirs.append(sample_local_ray_dirs_i)
             ray_mask_tensor.append(ray_mask_tensor_i)
             raypos_tensor.append(raypos_tensor_i)
+            if self.opt.perceiver_io: ### has hole
+                random_masks.append(mask_i)
+
+            #if self.opt.debug:
+            #    ray_valid_i = torch.any(sample_pnt_mask_i, dim=-1)
+            #    features = self.SA_modules(self.neural_points.xyz[None, ...].contiguous(), self.neural_points.points_embeding.permute(0, 2, 1).contiguous(), sample_loc_w_i[ray_valid_i][None,...].contiguous()).permute(0, 2, 1)
+            #    density = self.density_super_act(self.get_density(features))
+            #    B, valid_R, SR, _ = sample_pnt_mask_i.shape
+
+            #    features_all = torch.zeros([B * valid_R * SR , features.shape[-1]], dtype=torch.float32, device=features.device)
+            #    density_all = torch.zeros([B * valid_R * SR , 1], dtype=torch.float32, device=features.device)
+
+            #    features_all[ray_valid_i.view(-1)] = features
+            #    density_all[ray_valid_i.view(-1)] = density
+
+            #    in_shape = sample_loc_w_i.shape
+            #    ray_valid_i = ray_valid_i.reshape(in_shape[:-1])
+
+            #    ray_dist = torch.cummax(sample_loc_i[..., 2], dim=-1)[0]
+            #    ray_dist = torch.cat([ray_dist[..., 1:] - ray_dist[..., :-1], torch.full((ray_dist.shape[0], ray_dist.shape[1], 1), vsize[2], device=ray_dist.device)], dim=-1)
+
+            #    mask = ray_dist < 1e-8
+            #    if self.opt.raydist_mode_unit > 0:
+            #        mask = torch.logical_or(mask, ray_dist > 2 * vsize[2])
+            #    mask = mask.to(torch.float32)
+            #    ray_dist = ray_dist * (1.0 - mask) + mask * vsize[2]
+
+            #    ray_dist *= ray_valid_i.float()
+
+            #    knn_pointnet_feature, *_ = ray_march(ray_dist, ray_valid_i, torch.cat((density_all, features_all), dim=-1).view(1, ray_dist.shape[1], ray_dist.shape[2], features_all.shape[-1]+1), self.render_func, self.blend_func, bg_color, self.opt.shading_color_channel_num)
+            #    output['coarse_raycolor'] = knn_pointnet_feature
 
             if self.opt.debug:
+                local_rank = int(os.environ["LOCAL_RANK"])
+                cfg = faiss.GpuIndexFlatConfig()
+                cfg.useFloat16 = False
+                cfg.device = local_rank
+                flat_config = [cfg]
+                resources = [faiss.StandardGpuResources()]
+                gpu_index = faiss.GpuIndexFlatL2(resources[0], 3, flat_config[0])
+                gpu_index.add(self.neural_points.xyz.squeeze().cpu().numpy())
+
                 ray_valid_i = torch.any(sample_pnt_mask_i, dim=-1)
-#                from external.ChamferDistancePytorch.chamfer_python import distChamfer, distChamfer_raw
-                #import pdb; pdb.set_trace()
-                #dist_mat = distChamfer_raw(sample_loc_w_i[ray_valid_i][None,...], self.neural_points.xyz[None, ...])
-                #val, indices = torch.topk(dist_mat, k=8, dim=2,largest=False) ### indices = b * 2048 * 5
-                #features = self.neural_points.points_embeding[indices]
-                features = self.SA_modules(self.neural_points.xyz[None, ...].contiguous(), self.neural_points.points_embeding.permute(0, 2, 1).contiguous(), sample_loc_w_i[ray_valid_i][None,...].contiguous()).permute(0, 2, 1)
+                query_points = sample_loc_w_i[ray_valid_i][None,...].contiguous()
+                query_points_local = trans_world2nerf(query_points.view(-1,3), c2w[batch_index])
+
+                gt_D, gt_I = gpu_index.search(query_points.squeeze().view(-1,3).cpu().numpy(), 8)
+
+                ref_xyz = self.neural_points.local_xyz.squeeze()[gt_I.reshape(-1)].reshape(-1, 8, 3)
+                ref_fea = self.neural_points.points_embeding.squeeze()[gt_I.reshape(-1)].reshape(-1, 8, self.neural_points.points_embeding.shape[-1])
+                ref_xyz_residual = ref_xyz - query_points_local[:,None,:]
+
+                nq, k, _ = ref_xyz_residual.shape
+                lidar_points_local = positional_encoding(ref_xyz_residual.view(-1,3), self.opt.num_perceiver_io_freqs).reshape(nq,k,-1)
+
+                ref_fea_updated = self.self_attention(torch.cat((lidar_points_local, ref_fea), -1))
+                att_weight = self.softmax(self.weight_layer(ref_fea_updated))
+
+                features = torch.sum(ref_fea_updated * att_weight, dim=-2)
                 density = self.density_super_act(self.get_density(features))
                 B, valid_R, SR, _ = sample_pnt_mask_i.shape
 
@@ -399,30 +464,102 @@ class NeuralPointsRayMarching(nn.Module):
 
                 ray_dist *= ray_valid_i.float()
 
-                knn_pointnet_feature, *_ = ray_march(ray_dist, ray_valid_i, torch.cat((density_all, features_all), dim=-1).view(1, ray_dist.shape[1], ray_dist.shape[2], 129), self.render_func, self.blend_func, bg_color, self.opt.shading_color_channel_num)
+                knn_pointnet_feature, *_ = ray_march(ray_dist, ray_valid_i, torch.cat((density_all, features_all), dim=-1).view(1, ray_dist.shape[1], ray_dist.shape[2], features_all.shape[-1]+1), self.render_func, self.blend_func, bg_color, self.opt.shading_color_channel_num)
                 output['coarse_raycolor'] = knn_pointnet_feature
 
-            if self.opt.perceiver_io:
-                random_masks.append(mask_i)
+            if self.opt.perceiver_io and (self.opt.fix_net==False or self.opt.only_test):
                 tmp = ray_mask_tensor_i.reshape(64,96)
                 ray_inds_hole = torch.nonzero(tmp[32:,:]==0) # 336, 2
                 ray_inds_hole[:,0]+=32
-
                 query_points = raypos_tensor_i[:, ray_inds_hole[:,0]*96+ray_inds_hole[:,1], :]
-                query_points_local = trans_world2nerf(query_points.view(-1,3), c2w[batch_index])
 
-                query_points_local = positional_encoding(self.local_bound(query_points_local), self.opt.num_perceiver_io_freqs)[None,...]
-                lidar_points_local = positional_encoding(self.local_bound(self.neural_points.local_xyz), self.opt.num_perceiver_io_freqs)[None,...]
+                if self.opt.perceiver_io_type == 'all_lidar_pcd':
+                    query_points_local = trans_world2nerf(query_points.view(-1,3), c2w[batch_index])
+                    query_points_local = positional_encoding(self.local_bound(query_points_local), self.opt.num_perceiver_io_freqs)[None,...]
+                    lidar_points_local = positional_encoding(self.local_bound(self.neural_points.local_xyz), self.opt.num_perceiver_io_freqs)[None,...]
 
-                memory = self.perceiver_encoder(torch.cat((lidar_points_local, self.neural_points.points_embeding), dim=-1))
+                    memory = self.perceiver_encoder(torch.cat((lidar_points_local, self.neural_points.points_embeding), dim=-1))
 
-                query_pcd_fea, query_pcd_alpha = self.perceiver_decoder(memory, query_points_local)
+                    query_pcd_fea, query_pcd_alpha = self.perceiver_decoder(memory, query_points_local)
 
-                ray_dist = torch.cummax(query_points[..., 1], dim=-1)[0]
-                ray_dist = torch.cat([ray_dist[..., 1:] - ray_dist[..., :-1], torch.full((ray_dist.shape[0], ray_dist.shape[1], 1), vsize[2], device=ray_dist.device)], dim=-1)
+                    ray_dist = torch.cummax(query_points[..., 1], dim=-1)[0]
+                    ray_dist = torch.cat([ray_dist[..., 1:] - ray_dist[..., :-1], torch.full((ray_dist.shape[0], ray_dist.shape[1], 1), vsize[2], device=ray_dist.device)], dim=-1)
 
-                perceiver_io_raycolor, *_ = ray_march(ray_dist, None, torch.cat((query_pcd_alpha, query_pcd_fea), dim=-1).view(1, ray_dist.shape[1], ray_dist.shape[2], 129), self.render_func, self.blend_func, None, query_pcd_fea.shape[-1])
-                perceiver_io_feature.append(perceiver_io_raycolor)
+                    perceiver_io_raycolor, *_ = ray_march(ray_dist, None, torch.cat((query_pcd_alpha, query_pcd_fea), dim=-1).view(1, ray_dist.shape[1], ray_dist.shape[2], features_all.shape[-1]+1), self.render_func, self.blend_func, None, query_pcd_fea.shape[-1])
+                    perceiver_io_feature.append(perceiver_io_raycolor)
+
+                elif self.opt.perceiver_io_type == 'local_lidar_pcd':
+                    local_rank = int(os.environ["LOCAL_RANK"])
+                    cfg = faiss.GpuIndexFlatConfig()
+                    cfg.useFloat16 = False
+                    cfg.device = local_rank
+                    flat_config = [cfg]
+                    resources = [faiss.StandardGpuResources()]
+                    gpu_index = faiss.GpuIndexFlatL2(resources[0], 3, flat_config[0])
+
+                    #cpu_index = faiss.IndexFlatL2(3)
+                    #gpu_index = faiss.index_cpu_to_all_gpus(cpu_index)
+
+                    gpu_index.add(self.neural_points.xyz.squeeze().cpu().numpy())
+                    gt_D, gt_I = gpu_index.search(query_points.squeeze().view(-1,3).cpu().numpy(), 8)
+#                    print ('---knn index time----', time.time()-time1)
+
+                    #print (gt_I.shape, query_points.squeeze().view(-1,3).shape, self.neural_points.xyz.squeeze().shape)
+                    unique_I = torch.unique(torch.tensor(gt_I, dtype=torch.long).view(-1))
+                    #print (unique_I.shape)
+                    local_context_pcd_xyz = self.neural_points.local_xyz.squeeze()[unique_I]
+                    local_context_pcd_fea = self.neural_points.points_embeding.squeeze()[unique_I][None,...]
+                    center_xyz = torch.mean(local_context_pcd_xyz, dim=0)
+                    local_context_pcd_xyz_residual = local_context_pcd_xyz - center_xyz
+                    #print (center_xyz.shape, center_xyz, local_context_pcd_xyz_residual.shape, local_context_pcd_xyz_residual)
+                    lidar_points_local = positional_encoding(local_context_pcd_xyz_residual, self.opt.num_perceiver_io_freqs)[None,...]
+
+                    query_points_local = trans_world2nerf(query_points.view(-1,3), c2w[batch_index])
+                    query_points_local = positional_encoding(query_points_local.squeeze().view(-1,3)-center_xyz, self.opt.num_perceiver_io_freqs)[None,...]
+
+                    memory = self.perceiver_encoder(torch.cat((lidar_points_local, local_context_pcd_fea), dim=-1))
+
+                    query_pcd_fea, query_pcd_alpha = self.perceiver_decoder(memory, query_points_local)
+
+                    ray_dist = torch.cummax(query_points[..., 1], dim=-1)[0]
+                    ray_dist = torch.cat([ray_dist[..., 1:] - ray_dist[..., :-1], torch.full((ray_dist.shape[0], ray_dist.shape[1], 1), vsize[2], device=ray_dist.device)], dim=-1)
+
+                    perceiver_io_raycolor, *_ = ray_march(ray_dist, None, torch.cat((query_pcd_alpha, query_pcd_fea), dim=-1).view(1, ray_dist.shape[1], ray_dist.shape[2], features_all.shape[-1]+1), self.render_func, self.blend_func, None, query_pcd_fea.shape[-1])
+                    perceiver_io_feature.append(perceiver_io_raycolor)
+                elif self.opt.perceiver_io_type == 'each_sample_loc':
+                    local_rank = int(os.environ["LOCAL_RANK"])
+                    cfg = faiss.GpuIndexFlatConfig()
+                    cfg.useFloat16 = False
+                    cfg.device = local_rank
+                    flat_config = [cfg]
+                    resources = [faiss.StandardGpuResources()]
+                    gpu_index = faiss.GpuIndexFlatL2(resources[0], 3, flat_config[0])
+                    gpu_index.add(self.neural_points.xyz.squeeze().cpu().numpy())
+                    gt_D, gt_I = gpu_index.search(query_points.squeeze().view(-1,3).cpu().numpy(), 8) # nq*k
+                    #print (gt_D.shape, gt_I.shape, gt_I.reshape(-1).shape)
+                    ref_xyz = self.neural_points.local_xyz.squeeze()[gt_I.reshape(-1)].reshape(-1, 8, 3)
+                    ref_fea = self.neural_points.points_embeding.squeeze()[gt_I.reshape(-1)].reshape(-1, 8, self.neural_points.points_embeding.shape[-1])
+
+                    #print (ref_xyz.shape, ref_fea.shape, query_points.squeeze().view(-1,3).shape)
+                    query_points_local = trans_world2nerf(query_points.view(-1,3), c2w[batch_index])
+                    ref_xyz_residual = ref_xyz - query_points_local[:,None,:]
+                    #ref_xyz_residual = ref_xyz - query_points.squeeze().view(-1,3)[:,None,:]
+
+                    nq, k, _ = ref_xyz_residual.shape
+                    lidar_points_local = positional_encoding(ref_xyz_residual.view(-1,3), self.opt.num_perceiver_io_freqs).reshape(nq,k,-1)
+                    #query_points_local = positional_encoding(query_points.squeeze().view(-1,3)-query_points.squeeze().view(-1,3), self.opt.num_perceiver_io_freqs)[:, None, :]
+                    #print (lidar_points_local.shape, ref_fea.shape, '-----encoder input shape')
+                    memory = self.perceiver_encoder(torch.cat((lidar_points_local, ref_fea), dim=-1))
+                    #print (memory.shape, '----menmory shape')
+                    query_pcd_fea, query_pcd_alpha = self.perceiver_decoder(memory, nq)
+                    #print ('----query_pcd_fea shape', query_pcd_fea.shape, query_pcd_alpha.shape)
+                    #print ('----query_points shape', query_points.shape)
+                    ray_dist = torch.cummax(query_points[..., 1], dim=-1)[0]
+                    ray_dist = torch.cat([ray_dist[..., 1:] - ray_dist[..., :-1], torch.full((ray_dist.shape[0], ray_dist.shape[1], 1), vsize[2], device=ray_dist.device)], dim=-1)
+                    #print (ray_dist.shape, query_pcd_alpha.squeeze().shape, query_pcd_fea.squeeze().shape, torch.cat((query_pcd_alpha.squeeze(1), query_pcd_fea.squeeze(1)), dim=-1).view(1, ray_dist.shape[1], ray_dist.shape[2], 129).shape)
+                    perceiver_io_raycolor, *_ = ray_march(ray_dist, None, torch.cat((query_pcd_alpha.squeeze(1), query_pcd_fea.squeeze(1)), dim=-1).view(1, ray_dist.shape[1], ray_dist.shape[2],  query_pcd_fea.shape[-1]+1), self.render_func, self.blend_func, None, query_pcd_fea.shape[-1])
+                    #print (perceiver_io_raycolor.shape)
+                    perceiver_io_feature.append(perceiver_io_raycolor)
 
         sampled_conf = torch.cat(sampled_conf, 1)
         sampled_embedding = torch.cat(sampled_embedding, 1)
@@ -437,8 +574,9 @@ class NeuralPointsRayMarching(nn.Module):
         raypos_tensor = torch.cat(raypos_tensor)
 
         if self.opt.perceiver_io:
-            perceiver_io_feature = torch.cat(perceiver_io_feature, 1)
             output["random_masks"]= random_masks
+            if self.opt.fix_net==False or self.opt.only_test:
+                perceiver_io_feature = torch.cat(perceiver_io_feature, 1)
         ray_valid, weight = None, None
         img_h, img_w = h[0].item(), w[0].item()
 
@@ -470,6 +608,7 @@ class NeuralPointsRayMarching(nn.Module):
                         blend_weight,
                         background_transmission,
                         sigma,
+
                     ) = ray_march(ray_dist, ray_valid, decoded_features, self.render_func, self.blend_func, bg_color, self.opt.shading_color_channel_num, self.opt.unified)
                     ray_color = self.tone_map(ray_color)
 
@@ -551,7 +690,7 @@ class NeuralPointsRayMarching(nn.Module):
             torch.ones([B, OR, self.opt.shading_color_channel_num], dtype=output["coarse_raycolor"].dtype, device=output["coarse_raycolor"].device) * bg_color[None, ...])
         coarse_raycolor_tensor[ray_inds[..., 0], ray_inds[..., 1], :] = output["coarse_raycolor"]
 
-        if self.opt.perceiver_io:
+        if self.opt.perceiver_io and (self.opt.fix_net==False or self.opt.only_test):
             ray_mask_new = ray_mask.reshape(ray_mask.shape[0], 64, 96)
             ray_inds_hole = torch.nonzero(ray_mask_new[:, 32:, :]==0) # 336, 2
             ray_inds_hole[:,1]+=32

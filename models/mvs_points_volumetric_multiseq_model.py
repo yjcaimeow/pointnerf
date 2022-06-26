@@ -70,7 +70,7 @@ class MvsPointsVolumetricMultiseqModel(NeuralPointsVolumetricMultiseqModel):
                                               lr=mvs_lr,
                                               betas=(0.9, 0.999))
             self.optimizers.append(self.mvs_optimizer)
-        if len(net_params) > 0:
+        if len(net_params) > 0 and opt.fix_net==False:
             if opt.optimizer_type=='SGD':
                 self.optimizer = torch.optim.SGD(net_params,
                                               lr=opt.lr,
@@ -120,7 +120,7 @@ class MvsPointsVolumetricMultiseqModel(NeuralPointsVolumetricMultiseqModel):
                 if self.opt.alter_step == 0 or int(iters / self.opt.alter_step) % 2 == 1:
                     self.mvs_optimizer.step()
             else:
-                if self.opt.alter_step == 0 or int(iters / self.opt.alter_step) % 2 == 0:
+                if (self.opt.alter_step == 0 or int(iters / self.opt.alter_step) % 2 == 0) and self.opt.fix_net==False:
                     self.optimizer.step()
                 if self.opt.alter_step == 0 or int(iters / self.opt.alter_step) % 2 == 1:
                     self.neural_point_optimizer.step()
@@ -337,7 +337,17 @@ class MvsPointsVolumetricMultiseqModel(NeuralPointsVolumetricMultiseqModel):
                 state_dict["neural_points.points_conf"] = torch.ones_like(self.net_ray_marching.module.neural_points.points_conf) * self.opt.default_conf
             if isinstance(net, nn.DataParallel):
                 net = net.module
-            net.load_state_dict(state_dict, strict=True)
+
+            if self.opt.fix_net:
+                keys=[]
+                for k,v in state_dict.items():
+                    if k.startswith('module.neural_points'):
+                        continue
+                    keys.append(k)
+                new_dict = {k:state_dict[k] for k in keys}
+                net.load_state_dict(new_dict, strict=False)
+            else:
+                net.load_state_dict(state_dict, strict=True)
 
     def test(self, gen_points=False):
         with torch.no_grad():

@@ -567,7 +567,8 @@ class Generator(nn.Module):
         if use_guide and self.combination=='concat':
             in_out_pairs = zip([128, 128, 256, 64], [128, 128, 64, 32])
         else:
-            in_out_pairs = zip([128, 128, 128, 64], [128, 128, 64, 32])
+            #in_out_pairs = zip([128, 128, 128, 64], [128, 128, 64, 32])
+            in_out_pairs = zip([init_channels, 128, 128, 64], [128, 128, 64, 32])
         #in_out_pairs = zip([128, 128, 96], [128, 64, 32])
         #in_out_pairs = zip(filters[:-1], filters[1:])
         self.no_const = no_const

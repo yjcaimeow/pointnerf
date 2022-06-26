@@ -306,9 +306,10 @@ def get_irregular_mask(img_shape=(64,96), area_ratio_range=(0.08, 0.35)):
         numpy.ndarray: Mask in the shape of (h, w, 1).
     """
     mask_config = dict(
-        num_vertices=(4, 10),
+        num_vertices=(1, 2),
         max_angle=6.0,
-        length_range=(10, 30),
+        length_range=(5, 15),
+        #length_range=(10, 30),
         brush_width=(3, 10))
     mask = random_irregular_mask(img_shape, **mask_config)
     min_ratio, max_ratio = area_ratio_range

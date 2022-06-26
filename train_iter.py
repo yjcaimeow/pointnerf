@@ -184,7 +184,7 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
     seq_frame_index = 0
     seq_index = 0
     for i in range(total_num): # 1 if test_steps == 10000 else opt.test_num_step
-        if opt.test_num_step>0 and (seq_frame_index%opt.test_num_step != 0 and seq_frame_index%opt.test_num_step != 1):
+        if opt.only_test==False and (opt.test_num_step>0 and (seq_frame_index%opt.test_num_step != 0 and seq_frame_index%opt.test_num_step != 1)):
             seq_frame_index += 1
             if seq_frame_index>=sequence_length_list[seq_index]:
                 seq_frame_index = 0
@@ -222,7 +222,7 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
         preds.append(np.asarray(pred.detach().squeeze().cpu().reshape(height, width, 3)))
         gts.append(np.asarray(gt.detach().squeeze().cpu().reshape(height, width,3)))
 
-        if opt.perceiver_io:
+        if opt.perceiver_io and opt.mask_type=='2d':
             gt = torch.from_numpy(1-cv2.resize(output["random_masks"][0], (768, 512), interpolation=cv2.INTER_AREA)[...,None]).cuda() * gt.reshape(height, width, 3)
             pred = torch.from_numpy(1-cv2.resize(output["random_masks"][0], (768, 512), interpolation=cv2.INTER_AREA)[...,None]).cuda() * pred.reshape(height, width, 3)
             random_masks.append(output["random_masks"])
@@ -315,7 +315,7 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
                     img = img[height//2:,:]
                 save_image(np.asarray(img), filepath)
         for img_index, img in enumerate(preds):
-            if opt.perceiver_io:
+            if opt.perceiver_io and opt.mask_type=='2d':
                 masked_img = (1-cv2.resize(random_masks[img_index][0], (768, 512), interpolation=cv2.INTER_AREA)[...,None]) * gts[img_index]
                 filepath = os.path.join(rootdir, str(img_index).zfill(4)+'_masked.png')
                 if opt.half_supervision:
@@ -592,7 +592,6 @@ def main():
     best_SSIM, best_SSIM_half=-100.0, -100.0
     best_LPIPS_VGG, best_LPIPS_half_VGG=1.0, 1.0
     best_epoch=0
-    opt.vox_res = 400
     with torch.no_grad():
         opt.mode = 2
         print (fmt.RED+'========')
@@ -638,11 +637,12 @@ def main():
 
     if opt.ddp_train:
         model.set_ddp()
-
     model.setup(opt, train_len=train_dataset.total)
     model.train()
 
-    if opt.resume_dir:
+    cprint.warn(model.get_networks())
+
+    if opt.resume_dir and opt.fix_net==False:
         load_path = os.path.join(opt.resume_dir, str(opt.resume_iter)+'_states.pth')
         if os.path.isfile(load_path):
             print ('LOADING HISTORY TOTAL STEPS!')

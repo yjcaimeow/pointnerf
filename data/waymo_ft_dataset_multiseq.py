@@ -26,6 +26,15 @@ from .data_utils import get_blender_raydir
 from plyfile import PlyData, PlyElement
 from utils.kitti_object import get_lidar_in_image_fov
 from cprint import *
+
+import io
+from petrel_client.client import Client
+conf_path = '~/petreloss.conf'
+client = Client(conf_path)
+
+import logging
+LOG = logging.getLogger('petrel_client.test')
+
 FLIP_Z = np.asarray([
     [1,0,0],
     [0,1,0],
@@ -107,19 +116,35 @@ class WaymoFtDataset(BaseDataset):
         self.seq_id, self.images, self.images_4, self.poses, self.intrinsic, self.points_xyz_all, self.camposes, self.centerdirs = [],[],[],[],[],[],[],[]
         self.id_in_seq_list=[]
         with open('./data/waymo_video_list.txt') as file:
-            self.filenames = file.readlines()
+            filenames = file.readlines()
         file.close()
+        self.filenames = []
+        for filename in filenames:
+            self.filenames.append(filename.strip())
+#        self.filenames = ['segment-11017034898130016754_697_830_717_830_with_camera_labels.tfrecord']
+#        self.filenames = ['segment-10247954040621004675_2180_000_2200_000_with_camera_labels.tfrecord']
+#        self.filenames = ['segment-10689101165701914459_2072_300_2092_300_with_camera_labels.tfrecord']
         #self.filenames = glob.glob(os.path.join(opt.filename, '*.tfrecord'))[0:opt.seq_num]
         self.sequence_length_list = []
         self.intrinsic = torch.tensor([[102.2254,   0.0000,  47.4787],
                         [  0.0000, 102.2254,  31.6621],
                         [  0.0000,   0.0000,   1.0000]])
-        self.filenames = self.filenames[0:opt.seq_num]
+        self.filenames = self.filenames[4:5]
+        #self.filenames = self.filenames[0:opt.seq_num]
         print(self.filenames)
         for fidx, filename in enumerate(self.filenames):
-            pcd = np.load(os.path.join(self.opt.filename, filename.strip()[:-4].replace('tfrecord', 'folder'), 'pcd.npy'))
-            self.points_xyz_all.append(torch.from_numpy(pcd))
-            frames_length = len(glob.glob(os.path.join(self.opt.filename, filename.strip()[:-4].replace('tfrecord', 'folder'),'*.npz')))
+            if opt.load_data == 'ceph':
+                f_url = 's3://caiyingjie/'+os.path.basename(filename)[:-9]+'/pcd.npy'
+                body = client.get(f_url, update_cache=True)
+                if not body:
+                    LOG.warn('can not get content from %s', f_url)
+                f = io.BytesIO(body)
+                pcd = torch.from_numpy(np.load(f).astype(np.float32))[:,0:3]
+                frames_length = 197
+            else:
+                pcd = torch.from_numpy(np.load(os.path.join(self.opt.filename, filename.strip()[:-4].replace('tfrecord', 'folder'), 'pcd.npy')))
+                frames_length = len(glob.glob(os.path.join(self.opt.filename, filename.strip()[:-4].replace('tfrecord', 'folder'),'*.npz')))
+            self.points_xyz_all.append(pcd)
             all_id_list = list(range(frames_length)) #000000
             train_id_list = [all_id_list[i] for i in all_id_list if i%10!=0]
             #test_id_list = all_id_list[::self.step]
@@ -144,12 +169,21 @@ class WaymoFtDataset(BaseDataset):
     def __getitem__(self, id, crop=False, full_img=False):
         item = {}
         item["seq_id"] = self.seq_id[id]
-        item["filename"] = self.filenames[item["seq_id"]].strip()[:-4]
         item['id_in_seq']=self.id_in_seq_list[id]
 
-        file_name = os.path.join(self.opt.filename, item["filename"].replace('tfrecord', 'folder') , str(item["id_in_seq"]).zfill(3)+'_info.npz')
-
-        data = np.load(file_name)
+        if self.opt.load_data == 'ceph':
+            item["filename"] = self.filenames[item["seq_id"]].strip()
+            file_name = os.path.join(item["filename"][:-9] , str(item["id_in_seq"]).zfill(4)+'info.npz')
+            f_url = 's3://caiyingjie/'+file_name
+            body = client.get(f_url, update_cache=True)
+            if not body:
+                LOG.warn('can not get content from %s', f_url)
+            f = io.BytesIO(body)
+            data = np.load(f)
+        else:
+            item["filename"] = self.filenames[item["seq_id"]].strip()[:-4]
+            file_name = os.path.join(self.opt.filename, item["filename"].replace('tfrecord', 'folder') , str(item["id_in_seq"]).zfill(3)+'_info.npz')
+            data = np.load(file_name)
         img = data['image']
         c2w = data['pose']
         camrot = c2w[0:3, 0:3]

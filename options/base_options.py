@@ -23,10 +23,18 @@ class BaseOptions:
                             type=str,
                             required=True,
                             help='name of the experiment')
+        parser.add_argument('--load_data',
+                            type=str,
+                            default='ceph',
+                            help='name of the experiment')
         parser.add_argument('--name',
                             type=str,
                             required=True,
                             help='name of the experiment')
+        parser.add_argument(
+            '--fix_net',
+            action='store_true',
+            help='if specified, print more debugging information')
         parser.add_argument(
             '--context_weight_norm',
             action='store_true',
@@ -57,6 +65,8 @@ class BaseOptions:
             action='store_true',
             help='if specified, print more debugging information')
         parser.add_argument('--radius', type=float, default=2.0, help='name of the experiment')
+
+        parser.add_argument('--vox_res', type=int, default=512, help='name of the experiment')
         parser.add_argument('--N', type=int, default=512, help='name of the experiment')
         parser.add_argument('--D', type=int, default=16, help='name of the experiment')
         parser.add_argument('--E', type=int, default=24, help='name of the experiment')
@@ -65,6 +75,22 @@ class BaseOptions:
         parser.add_argument('--num_self_attention_blocks', type=int, default=2, help='name of the experiment')
         parser.add_argument('--num_self_attention_layers_per_block', type=int, default=2, help='name of the experiment')
 
+        parser.add_argument('--mask_type', type=str, default='3d', help='name of the experiment')
+        parser.add_argument('--mask_region_r', type=float, default=5.0, help='name of the experiment')
+        parser.add_argument('--self_attention_num_heads', type=int, default=4, help='name of the experiment')
+
+        #parser.add_argument('--N', type=int, default=8, help='name of the experiment')
+        #parser.add_argument('--D', type=int, default=16, help='name of the experiment')
+        #parser.add_argument('--E', type=int, default=24, help='name of the experiment')
+        #parser.add_argument('--C', type=int, default=56, help='name of the experiment')
+        #parser.add_argument('--num_self_attention_heads', type=int, default=2, help='name of the experiment')
+        #parser.add_argument('--num_self_attention_blocks', type=int, default=1, help='name of the experiment')
+        #parser.add_argument('--num_self_attention_layers_per_block', type=int, default=2, help='name of the experiment')
+
+        parser.add_argument(
+            '--attention_weight',
+            action='store_true',
+            help='if specified, print more debugging information')
         parser.add_argument(
             '--eval_during_train',
             action='store_true',
@@ -186,6 +212,10 @@ class BaseOptions:
         parser.add_argument('--N_importance',
                             type=int,
                             default=128,
+                            help='input batch size')
+        parser.add_argument('--perceiver_io_type',
+                            type=str,
+                            default='local_lidar_pcd',
                             help='input batch size')
         parser.add_argument('--N_samples',
                             type=int,

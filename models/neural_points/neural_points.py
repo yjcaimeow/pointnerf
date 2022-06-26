@@ -12,7 +12,6 @@ from utils.kitti_object import get_lidar_in_image_fov, plot_points_on_image
 from utils.mask import get_irregular_mask
 from utils.visualizer import save_image
 import cv2
-import random
 class NeuralPoints(nn.Module):
 
     @staticmethod
@@ -966,23 +965,26 @@ class NeuralPoints(nn.Module):
         if self.opt.fov and use_middle==False:
             if "seq_id" in inputs:
                 mask=None
-                if self.opt.perceiver_io:
+                if self.opt.mask_type=='2d' and self.opt.perceiver_io:
                     mask = get_irregular_mask()
-                    #zeros = torch.ones(mask.shape)
-                    #mask = torch.cat((zeros, torch.from_numpy(mask))).numpy()
                 self.xyz, self.local_xyz, fov_ids, pts_2d = get_lidar_in_image_fov(self.xyz_all[inputs["seq_id"]].squeeze(), c2w.squeeze(), intrinsic.squeeze(), xmin=0, ymin=0, xmax=int(w), ymax=int(h), return_more=True, mask=mask)
 
-#                name = str(inputs['id'].item())
-#                np.savetxt('./check_mask/'+name+'_mask_pcd.txt', self.xyz.cpu().numpy())
-#                save_image(mask.squeeze()*255, './check_mask/'+name+'_mask_img.png')
-
-                self.points_embeding = self.points_embeding_all[inputs["seq_id"]].squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
-                self.points_conf = self.points_conf_all[inputs["seq_id"]].squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
-                if "1" in list(self.opt.point_color_mode):
-                    self.points_dir = self.points_dir_all[inputs["seq_id"]].squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
-                    self.points_color = self.points_color_all[inputs["seq_id"]].squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
+                if self.opt.mask_type=='3d' and self.opt.perceiver_io:
+                    idx = torch.multinomial(torch.ones(len(self.xyz)), 1, replacement=True)
+                    centers_pcd = self.xyz[idx]
+                    centers_x, centers_y = centers_pcd[:,0], centers_pcd[:,1]
+                    mask = (self.xyz[:,0] >= (centers_x[0]-self.opt.mask_region_r)) * (self.xyz[:,0] <= (centers_x[0]+self.opt.mask_region_r)) * (self.xyz[:,1] >= (centers_y[0]-self.opt.mask_region_r)) * (self.xyz[:,1] <= (centers_y[0]+self.opt.mask_region_r))
+                    self.xyz = self.xyz[mask==False]
+                    self.local_xyz = self.local_xyz[mask==False]
+                    self.points_embeding = self.points_embeding_all[inputs["seq_id"]].squeeze(0).squeeze(0)[fov_ids][mask==False].unsqueeze(0)
+                    self.points_conf = self.points_conf_all[inputs["seq_id"]].squeeze(0).squeeze(0)[fov_ids][mask==False].unsqueeze(0)
                 else:
-                    self.points_dir, self.points_color=None, None
+                    self.points_embeding = self.points_embeding_all[inputs["seq_id"]].squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
+                    self.points_conf = self.points_conf_all[inputs["seq_id"]].squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
+                #name = str(inputs['id'].item())
+                #np.savetxt('./check_mask/'+name+'_mask_pcd.txt', self.xyz.cpu().numpy())
+                #save_image(mask.squeeze()*255, './check_mask/'+name+'_mask_img.png')
+                self.points_dir, self.points_color=None, None
             else:
                 self.xyz, _, fov_ids, pts_2d = get_lidar_in_image_fov(self.xyz_all, c2w.squeeze(), intrinsic.squeeze(), xmin=0, ymin=0, xmax=int(w), ymax=int(h), return_more=True)
                 self.points_color = self.points_color_all.squeeze(0)[fov_ids].unsqueeze(0)

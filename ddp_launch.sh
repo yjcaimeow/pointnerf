@@ -11,7 +11,7 @@ nrCheckpoint="../checkpoints"
 nrDataRoot="../data_src"
 name='waymo'
 
-resume_iter=$4
+resume_iter=$2
 radius=1.0
 
 data_root="${nrDataRoot}/scannet/scans/"
@@ -74,12 +74,12 @@ shpnt_jitter="passfunc" #"uniform" # uniform gaussian
 which_agg_model="viewmlp"
 apply_pnt_mask=1
 shading_feature_mlp_layer0=0 #2
-shading_feature_mlp_layer1=1 #2
+shading_feature_mlp_layer1=2 #2
 shading_feature_mlp_layer2=0 #1
 shading_feature_mlp_layer3=4 #1
 shading_alpha_mlp_layer=1
 shading_color_mlp_layer=4
-shading_feature_num=256
+shading_feature_num=512
 dist_xyz_freq=5
 num_feat_freqs=3
 dist_xyz_deno=0
@@ -153,12 +153,15 @@ test_color_loss_items='coarse_raycolor ray_miss_coarse_raycolor ray_masked_coars
 
 bg_color="white" #"0.0,0.0,0.0,1.0,1.0,1.0"
 split="train"
-seq_num=100
+seq_num=1
+#perceiver_io_type='each_sample_loc'
+#perceiver_io_type='all_lidar_pcd'
+perceiver_io_type='local_lidar_pcd'
 
-GPUNUM=8
+GPUNUM=1
 NODENUM=1
 JOBNAME=pointnerf
-PART=$2
+PART=pat_taurus
 
 #--optimizer_type ${optimizer_type} \
 #CUDA_LAUNCH_BLOCKING=1 python ./train.py \
@@ -167,13 +170,12 @@ PART=$2
 #--proposal_nerf \
 #--nerf_create_points \
 #--prune_points \
-#--perceiver_io \
-TOOLS="srun --partition=$PART --gres=gpu:${GPUNUM} -n$NODENUM --ntasks-per-node=1 --cpus-per-task=8"
+#--perceiver_io_type ${perceiver_io_type} \
+
+TOOLS="srun --partition=$PART --quotatype=auto --gres=gpu:${GPUNUM} -n$NODENUM --ntasks-per-node=1 --cpus-per-task=8"
 $TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch --nnodes=$NODENUM --nproc_per_node=$GPUNUM --node_rank \$SLURM_PROCID --master_addr=\$(sinfo -Nh -n \$SLURM_NODELIST | head -n 1 | cut -d ' ' -f 1) --master_port $3 train_iter.py \
     --zoom_in_scale $zoom_in_scale --ddp_train \
     --half_supervision \
-    --radius ${radius} \
-    --perceiver_io \
     --seq_num ${seq_num} \
     --catWithLocaldir \
     --iter_pg ${iter_pg} \

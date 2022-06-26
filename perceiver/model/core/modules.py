@@ -454,6 +454,7 @@ class PerceiverDecoder(nn.Module):
         self,
         #output_adapter: OutputAdapter,
         num_latent_channels: int,
+        perceiver_io_type: str,
         num_output_query_channels: int,
         num_cross_attention_heads: int = 4,
         num_cross_attention_qk_channels: Optional[int] = None,
@@ -495,12 +496,22 @@ class PerceiverDecoder(nn.Module):
 
         self.cross_attn = cross_attn
         #self.output_adapter = output_adapter
+        self.perceiver_io_type = perceiver_io_type
+        if self.perceiver_io_type=='each_sample_loc':
+            self.embedding = nn.Embedding(1, num_output_query_channels).cuda()
+        else:
+            self.initial_linear = nn.Linear(num_output_query_channels, num_output_query_channels)
         self.feature_linear = nn.Linear(num_output_query_channels, 128)
         self.alpha_linear = nn.Linear(num_output_query_channels, 1)
         self.density_super_act = torch.nn.Softplus()
 
-    def forward(self, x, output_query):
+    def forward(self, x, output_query=None):
         #output_query = self.output_adapter.output_query(x)
+        if self.perceiver_io_type=='each_sample_loc':
+            indexs = torch.zeros(output_query).long().cuda()
+            output_query = self.embedding(indexs)[:,None,:]
+        else:
+            output_query = self.initial_linear(output_query)
         output = self.cross_attn(output_query, x)
         feature = self.feature_linear(output)
         alpha = self.density_super_act(self.alpha_linear(output)-1)
