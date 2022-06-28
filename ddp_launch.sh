@@ -107,7 +107,7 @@ random_sample_size=56 # 32 * 32 = 1024
 
 batch_size=1
 
-plr=0.0002
+plr=0.002
 lr=0.0002 #0.00015
 lr_policy="iter_exponential_decay"
 lr_decay_iters=1000000
@@ -145,31 +145,32 @@ zero_one_loss_weights=" 0.0001 "
 sparse_loss_weight=0
 iter_pg=200
 
-color_loss_weights=" 1.0 1.0 "
-color_loss_items='ray_miss_final_coarse_raycolor ray_masked_final_coarse_raycolor'
+color_loss_weights=" 1.0 "
+color_loss_items='final_coarse_raycolor '
+#color_loss_weights=" 1.0 1.0 "
+#color_loss_items='ray_miss_final_coarse_raycolor ray_masked_final_coarse_raycolor'
 test_color_loss_items='coarse_raycolor ray_miss_coarse_raycolor ray_masked_coarse_raycolor final_coarse_raycolor'
 
 bg_color="white" #"0.0,0.0,0.0,1.0,1.0,1.0"
 split="train"
-seq_num=100
+seq_num=1
 #perceiver_io_type='each_sample_loc'
 #perceiver_io_type='all_lidar_pcd'
 perceiver_io_type='local_lidar_pcd'
 
-GPUNUM=8
+GPUNUM=1
 NODENUM=1
 JOBNAME=pointnerf
 PART=pat_taurus
 
 #--perceiver_io_type ${perceiver_io_type} \
 #--perceiver_io \
-basic_agg='mlp'
+basic_agg='attention'
 
 TOOLS="srun --partition=$PART --quotatype=auto --gres=gpu:${GPUNUM} -n$NODENUM --ntasks-per-node=1 --cpus-per-task=8"
 $TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch --nnodes=$NODENUM --nproc_per_node=$GPUNUM --node_rank \$SLURM_PROCID --master_addr=\$(sinfo -Nh -n \$SLURM_NODELIST | head -n 1 | cut -d ' ' -f 1) --master_port $3 train_iter.py \
     --zoom_in_scale $zoom_in_scale --ddp_train \
     --half_supervision \
-    --perceiver_io \
     --basic_agg ${basic_agg} \
     --seq_num ${seq_num} \
     --catWithLocaldir \

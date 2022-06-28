@@ -129,8 +129,8 @@ class WaymoFtDataset(BaseDataset):
         self.intrinsic = torch.tensor([[102.2254,   0.0000,  47.4787],
                         [  0.0000, 102.2254,  31.6621],
                         [  0.0000,   0.0000,   1.0000]])
-        self.filenames = self.filenames[4:5]
-        #self.filenames = self.filenames[0:opt.seq_num]
+        #self.filenames = self.filenames[4:5]
+        self.filenames = self.filenames[0:opt.seq_num]
         print(self.filenames)
         for fidx, filename in enumerate(self.filenames):
             if opt.load_data == 'ceph':

@@ -161,7 +161,6 @@ class Visualizer:
         m = 'End of epoch {} \t iteration {} \t Number of batches {} \t Time taken: {:.2f}s\n'.format(
             epoch, total_steps, self.acc_iterations, (time.time() - self.start_time))
         m += '[Average Loss] '
-
         for k, v in self.acc_losses.items():
             m += '{}: {:.10f}   '.format(k, v / self.acc_iterations)
             if writer is not None:

@@ -132,7 +132,7 @@ class PointAggregator(torch.nn.Module):
         parser.add_argument(
             '--shading_color_channel_num',
             type=int,
-            default=96,
+            default=128, ### need
             help='color channel num')
 
         parser.add_argument(
@@ -546,7 +546,6 @@ class PointAggregator(torch.nn.Module):
         viewdirs = viewdirs @ sampled_Rw2c if uni_w2c else (viewdirs[..., None, :] @ sampled_Rw2c_ray).squeeze(-2)
         if self.num_viewdir_freqs > 0:
             viewdirs = positional_encoding(viewdirs, self.num_viewdir_freqs, ori=True)
-            ori_viewdirs, viewdirs = viewdirs[..., :3], viewdirs[..., 3:]
             local_viewdirs = positional_encoding(local_viewdirs, self.num_viewdir_freqs, ori=True)[..., 3:]
             if self.opt.unified or self.opt.proposal_nerf:
                 local_raydir = positional_encoding(local_raydir, self.num_viewdir_freqs, ori=True)[..., 3:]

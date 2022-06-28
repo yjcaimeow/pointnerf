@@ -296,8 +296,8 @@ class NeuralPointsRayMarching(nn.Module):
             from perceiver.model.core.modules import PerceiverEncoder, PerceiverDecoder
             self.perceiver_encoder = PerceiverEncoder(num_latents=self.opt.light_N, \
                                                       num_latent_channels=self.opt.light_D, \
-                                                      num_cross_attention_qk_channels=self.opt.C, \
-                                                      num_input_channels=self.opt.C, \
+                                                      num_cross_attention_qk_channels=self.opt.light_C, \
+                                                      num_input_channels=self.opt.light_C, \
                                                       num_cross_attention_heads=1,
                                                       num_self_attention_heads=self.opt.light_num_self_attention_heads,
                                                       num_self_attention_layers_per_block=self.opt.light_num_self_attention_layers_per_block,
@@ -395,25 +395,39 @@ class NeuralPointsRayMarching(nn.Module):
                 # --- knn search for each sample loc ----#
                 ray_valid_i = torch.any(sample_pnt_mask_i, dim=-1)
                 query_points = sample_loc_w_i[ray_valid_i][None,...].contiguous()
-                query_points_local = trans_world2nerf(query_points.view(-1,3), c2w[batch_index])
+                query_points_local = sample_loc_i[ray_valid_i][None, ...].contiguous()
+                #query_points_local = trans_world2nerf(query_points.view(-1,3), c2w[batch_index])
                 gt_D, gt_I = gpu_index.search(query_points.squeeze().view(-1,3).cpu().numpy(), 8) # nq*k
 
                 # --- get the pcd and feature for each sample loc and knn pcd
-                ref_xyz = self.neural_points.local_xyz.squeeze()[gt_I.reshape(-1)].reshape(-1, 8, 3)
+                ref_xyz = self.neural_points.xyz.squeeze()[gt_I.reshape(-1)].reshape(1, -1, 8, 3)
                 ref_fea = self.neural_points.points_embeding.squeeze()[gt_I.reshape(-1)].reshape(-1, 8, self.neural_points.points_embeding.shape[-1])
-                ref_xyz_residual = ref_xyz - query_points_local[:,None,:]
-                nq, k, _ = ref_xyz_residual.shape
+                ref_xyz_pers = self.w2pers(ref_xyz.view(-1,3), camrotc2w[batch_index:batch_index+1], campos[batch_index:batch_index+1]).reshape(1, -1, 8, 3)
+                # old
+                #ref_xyz_residual = ref_xyz - query_points_local[:,None,:]
+                # new
+                xdist = ref_xyz_pers[..., 0] * ref_xyz_pers[..., 2] - query_points_local[:, :, None, 0] * query_points_local[:, :, None, 2]
+                ydist = ref_xyz_pers[..., 1] * ref_xyz_pers[..., 2] - query_points_local[:, :, None, 1] * query_points_local[:, :, None, 2]
+                zdist = ref_xyz_pers[..., 2] - query_points_local[:, :, None, 2]
+                dists = torch.stack([xdist, ydist, zdist], dim=-1)
+                dists = torch.cat([ref_xyz - query_points[..., None, :], dists], dim=-1)
+                B, nq, k, _ = dists.shape
                 B, valid_R, SR, _ = sample_pnt_mask_i.shape
 
-                # --- memory position encoding for the neighbors ----#
-                ref_xyz_embed = positional_encoding(ref_xyz_residual.view(-1,3), self.opt.num_perceiver_io_freqs).reshape(nq,k,-1)
-                memory = self.perceiver_encoder(torch.cat((ref_xyz_embed, ref_fea), dim=-1))
+                dists_flat = dists.view(-1, dists.shape[-1])
+                dists_flat /= (1.0 if self.opt.dist_xyz_deno == 0. else float(self.opt.dist_xyz_deno * np.linalg.norm(vsize)))
 
+                uni_w2c = sampled_Rw2c.dim() == 2
+                dists_flat[..., :3] = dists_flat[..., :3] @ sampled_Rw2c if uni_w2c else (dists_flat[..., None, :3] @ sampled_Rw2c).squeeze(-2)
+                dists_flat = positional_encoding(dists_flat, self.opt.dist_xyz_freq)
+                # --- memory position encoding for the neighbors ----#
+                ref_fea= torch.cat([ref_fea, positional_encoding(ref_fea, self.opt.num_feat_freqs)], dim=-1)
+                memory = self.perceiver_encoder(torch.cat((ref_fea, dists_flat.view(nq, k, dists_flat.shape[-1])), dim=-1))
                 # --- obtain the feature for sample loc ---#
                 tmp_ray_dir = sample_local_ray_dirs_i[ray_valid_i]
-                if self.opt.cat_raydir:
-                    tmp_ray_dir = positional_encoding(tmp_ray_dir, self.opt.num_perceiver_io_freqs)[:,None,:]
+                tmp_ray_dir = positional_encoding(tmp_ray_dir, self.opt.num_perceiver_io_freqs)[:,None,:]
                 query_pcd_fea, query_pcd_alpha = self.perceiver_decoder(memory, nq, tmp_ray_dir)
+
                 query_pcd_fea_all = torch.zeros([B * valid_R * SR , query_pcd_fea.shape[-1]], dtype=torch.float32, device=query_pcd_fea.device)
                 query_pcd_alpha_all = torch.zeros([B * valid_R * SR , 1], dtype=torch.float32, device=query_pcd_fea.device)
 
@@ -657,3 +671,12 @@ class NeuralPointsRayMarching(nn.Module):
 
         output["coarse_raycolor"] = coarse_raycolor_tensor
         return output
+
+    def w2pers(self, point_xyz, camrotc2w, campos):
+        #----- torch.Size([105261, 3]) torch.Size([1, 3, 3]) torch.Size([1, 3])
+        point_xyz_shift = point_xyz[None, ...] - campos[:, None, :]
+        xyz = torch.sum(camrotc2w[:, None, :, :] * point_xyz_shift[:, :, :, None], dim=-2)
+        # print(xyz.shape, (point_xyz_shift[:, None, :] * camrot.T).shape)
+        xper = xyz[:, :, 0] / xyz[:, :, 2]
+        yper = xyz[:, :, 1] / xyz[:, :, 2]
+        return torch.stack([xper, yper, xyz[:, :, 2]], dim=-1)

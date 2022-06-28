@@ -294,7 +294,7 @@ def random_irregular_mask(img_shape,
     return mask
 
 
-def get_irregular_mask(img_shape=(64,96), area_ratio_range=(0.08, 0.35)):
+def get_irregular_mask(img_shape=(32,96), area_ratio_range=(0.02, 0.35)):
     """Get irregular mask with the constraints in mask ratio
 
     Args:
@@ -308,7 +308,7 @@ def get_irregular_mask(img_shape=(64,96), area_ratio_range=(0.08, 0.35)):
     mask_config = dict(
         num_vertices=(1, 2),
         max_angle=6.0,
-        length_range=(5, 15),
+        length_range=(5, 13),
         #length_range=(10, 30),
         brush_width=(3, 10))
     mask = random_irregular_mask(img_shape, **mask_config)
