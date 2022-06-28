@@ -132,7 +132,7 @@ class PointAggregator(torch.nn.Module):
         parser.add_argument(
             '--shading_color_channel_num',
             type=int,
-            default=56,
+            default=96,
             help='color channel num')
 
         parser.add_argument(

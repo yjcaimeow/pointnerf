@@ -544,29 +544,31 @@ class BaseRenderingModel(BaseModel):
         self.loss_total = 0
         opt = self.opt
         #color losses
+        ray_mask = torch.from_numpy(cv2.resize(np.asarray(self.output['ray_mask'].reshape(64, 96).cpu(), dtype='uint8'), (768, 512), \
+                                               interpolation=cv2.INTER_AREA)).cuda()[512//2:,...]
+        height, width = 512,768
         for i, name in enumerate(opt.color_loss_items):
             if name.startswith("ray_masked"):
                 unmasked_name = name[len("ray_masked")+1:]
-                #masked_output = torch.masked_select(self.output[unmasked_name], (self.output["ray_mask"] > 0)[..., None].expand(-1, -1, 3)).reshape(1, -1, 3)
-                masked_gt = torch.masked_select(self.gt_image_4, (self.output["ray_mask"] > 0)[..., None].expand(-1, -1, 3)).reshape(1, -1, 3).float()
-                loss = self.l2loss(self.output[unmasked_name], masked_gt)
-                #if masked_output.shape[1] > 0:
-                #    loss = self.l2loss(self.output[unmasked_name], masked_gt)
-                    #loss = self.l2loss(masked_output, masked_gt)
-                #else:
-                #    loss = torch.tensor(0.0, dtype=torch.float32, device=masked_output.device)
+
+                masked_gt = torch.masked_select(self.gt_image.reshape(-1,height, width, 3)[:, height//2:,...],(ray_mask > 0)[None, ..., None].expand(-1, -1, -1, 3)).reshape(1, -1, 3)
+                masked_output = torch.masked_select(self.output[unmasked_name][:,height//2:,...],(ray_mask > 0)[None,..., None].expand(-1,-1, -1, 3)).reshape(1, -1, 3)
+
+                if masked_output.shape[1] > 0:
+                    loss = self.l2loss(masked_output, masked_gt)
+                else:
+                    loss = torch.tensor(0.0, dtype=torch.float32, device=masked_output.device)
                 # print("loss", name, torch.max(torch.abs(loss)))
             elif name.startswith("ray_miss"):
                 unmasked_name = name[len("ray_miss") + 1:]
-                masked_output = torch.masked_select(self.output[unmasked_name],
-                                                    (self.output["ray_mask"] == 0)[..., None].expand(-1, -1, 3)).reshape(
-                    1, -1, 3)
-                masked_gt = torch.masked_select(self.gt_image,(self.output["ray_mask"] == 0)[..., None].expand(-1, -1, 3)).reshape(1, -1, 3)
+
+                masked_output = torch.masked_select(self.output[unmasked_name][:,height//2:,...],(ray_mask == 0)[None,..., None].expand(-1,-1, -1, 3)).reshape(1, -1, 3)
+                masked_gt = torch.masked_select(self.gt_image.reshape(-1,height, width, 3)[:, height//2:,...],(ray_mask == 0)[None, ..., None].expand(-1, -1, -1, 3)).reshape(1, -1, 3)
 
                 if masked_output.shape[1] > 0:
-                    loss = self.l2loss(masked_output, masked_gt) * masked_gt.shape[1]
+                    loss = self.l2loss(masked_output, masked_gt)
                 else:
-                    loss = torch.tensor(0.0, dtype=torch.float32, device=masked_output.device)
+                    loss = torch.tensor(0.0000000000001, dtype=torch.float32, device=masked_output.device)
 
             elif name.startswith("ray_depth_masked"):
                 pixel_xy = self.input["pixel_idx"][0].long()

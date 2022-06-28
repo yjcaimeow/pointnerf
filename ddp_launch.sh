@@ -22,7 +22,7 @@ feat_grad=1
 conf_grad=1
 dir_grad=0
 color_grad=0
-vox_res=400
+vox_res=1000
 vox_res_middle=100
 normview=0
 prune_thresh=0.1
@@ -74,9 +74,9 @@ shpnt_jitter="passfunc" #"uniform" # uniform gaussian
 which_agg_model="viewmlp"
 apply_pnt_mask=1
 shading_feature_mlp_layer0=0 #2
-shading_feature_mlp_layer1=2 #2
+shading_feature_mlp_layer1=4 #2
 shading_feature_mlp_layer2=0 #1
-shading_feature_mlp_layer3=4 #1
+shading_feature_mlp_layer3=8 #1
 shading_alpha_mlp_layer=1
 shading_color_mlp_layer=4
 shading_feature_num=512
@@ -110,11 +110,9 @@ batch_size=1
 plr=0.0002
 lr=0.0002 #0.00015
 lr_policy="iter_exponential_decay"
-#lr_decay_iters=100000000
 lr_decay_iters=1000000
 lr_decay_exp=0.1
 
-#checkpoints_dir="/mnt/lustre/caiyingjie/pointnerf/unified.f30.nerf_4_128.shading_layers_2_2.create_points_0.7"
 checkpoints_dir=$1
 resume_dir="${checkpoints_dir}/waymo"
 
@@ -147,35 +145,32 @@ zero_one_loss_weights=" 0.0001 "
 sparse_loss_weight=0
 iter_pg=200
 
-color_loss_weights=" 1.0 "
-color_loss_items='final_coarse_raycolor '
+color_loss_weights=" 1.0 1.0 "
+color_loss_items='ray_miss_final_coarse_raycolor ray_masked_final_coarse_raycolor'
 test_color_loss_items='coarse_raycolor ray_miss_coarse_raycolor ray_masked_coarse_raycolor final_coarse_raycolor'
 
 bg_color="white" #"0.0,0.0,0.0,1.0,1.0,1.0"
 split="train"
-seq_num=1
+seq_num=100
 #perceiver_io_type='each_sample_loc'
 #perceiver_io_type='all_lidar_pcd'
 perceiver_io_type='local_lidar_pcd'
 
-GPUNUM=1
+GPUNUM=8
 NODENUM=1
 JOBNAME=pointnerf
 PART=pat_taurus
 
-#--optimizer_type ${optimizer_type} \
-#CUDA_LAUNCH_BLOCKING=1 python ./train.py \
-#--unified \
-#--half_supervision \
-#--proposal_nerf \
-#--nerf_create_points \
-#--prune_points \
 #--perceiver_io_type ${perceiver_io_type} \
+#--perceiver_io \
+basic_agg='mlp'
 
 TOOLS="srun --partition=$PART --quotatype=auto --gres=gpu:${GPUNUM} -n$NODENUM --ntasks-per-node=1 --cpus-per-task=8"
 $TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch --nnodes=$NODENUM --nproc_per_node=$GPUNUM --node_rank \$SLURM_PROCID --master_addr=\$(sinfo -Nh -n \$SLURM_NODELIST | head -n 1 | cut -d ' ' -f 1) --master_port $3 train_iter.py \
     --zoom_in_scale $zoom_in_scale --ddp_train \
     --half_supervision \
+    --perceiver_io \
+    --basic_agg ${basic_agg} \
     --seq_num ${seq_num} \
     --catWithLocaldir \
     --iter_pg ${iter_pg} \

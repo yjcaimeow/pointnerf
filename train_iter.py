@@ -175,7 +175,7 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
     #alllist_ssim_train, alllist_ssim_test = [],[]
     #alllist_lpips_train, alllist_lpips_test = [],[]
 
-    preds, gts, random_masks = [],[],[]
+    masked_imgs, preds, gts, random_masks = [],[],[],[]
 
     train_psnr_half, test_psnr_half = [],[]
     #ssim_train_half, ssim_test_half = [],[]
@@ -214,13 +214,20 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
         data['sequence_length_list'] = sequence_length_list
         model.set_input(data)
         output = model.test()
+        ray_mask = torch.from_numpy(cv2.resize(np.asarray(output['ray_mask'].reshape(64, 96).cpu(), dtype='uint8'), (768, 512), interpolation=cv2.INTER_AREA)).cuda()
 
         curr_visuals = model.get_current_visuals(data=data)
-        pred = curr_visuals['final_coarse_raycolor'].cuda()
-        gt = tmpgts['gt_image'].cuda()
+        pred = curr_visuals['final_coarse_raycolor'].cuda().reshape(height, width, 3)
+        gt = tmpgts['gt_image'].cuda().reshape(height, width, 3)
 
         preds.append(np.asarray(pred.detach().squeeze().cpu().reshape(height, width, 3)))
         gts.append(np.asarray(gt.detach().squeeze().cpu().reshape(height, width,3)))
+
+        gt[ray_mask==0]=0
+        pred[ray_mask==0]=0
+        #gt = ray_mask * gt.reshape(height, width, 3)
+        #pred = ray_mask* pred.reshape(height, width, 3)
+        masked_imgs.append(np.asarray(gt.detach().squeeze().cpu().reshape(height, width,3)))
 
         if opt.perceiver_io and opt.mask_type=='2d':
             gt = torch.from_numpy(1-cv2.resize(output["random_masks"][0], (768, 512), interpolation=cv2.INTER_AREA)[...,None]).cuda() * gt.reshape(height, width, 3)
@@ -321,6 +328,12 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
                 if opt.half_supervision:
                     masked_img = masked_img[height//2:,:]
                 save_image(masked_img, filepath)
+            ### save masked image
+            filepath = os.path.join(rootdir, str(img_index).zfill(4)+'_ray_mask.png')
+            if opt.half_supervision:
+                masked_img = masked_imgs[img_index][height//2:,:]
+            save_image(np.asarray(masked_img), filepath)
+
             filepath = os.path.join(rootdir, str(img_index).zfill(4)+'_pred.png')
             if opt.half_supervision:
                 img = img[height//2:,:]

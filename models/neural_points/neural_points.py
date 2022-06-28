@@ -967,6 +967,8 @@ class NeuralPoints(nn.Module):
                 mask=None
                 if self.opt.mask_type=='2d' and self.opt.perceiver_io:
                     mask = get_irregular_mask()
+                    top_mask = np.ones(mask.shape)
+                    mask = np.concatenate((top_mask, mask), 0)
                 self.xyz, self.local_xyz, fov_ids, pts_2d = get_lidar_in_image_fov(self.xyz_all[inputs["seq_id"]].squeeze(), c2w.squeeze(), intrinsic.squeeze(), xmin=0, ymin=0, xmax=int(w), ymax=int(h), return_more=True, mask=mask)
 
                 if self.opt.mask_type=='3d' and self.opt.perceiver_io:

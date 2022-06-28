@@ -425,11 +425,21 @@ class PerceiverEncoder(nn.Module):
         self.latent = nn.Parameter(torch.empty(num_latents, num_latent_channels))
         self._init_parameters()
 
+        #in_channels = num_input_channels
+        #out_channels = in_channels
+        #block1 = []
+        #for i in range(2):
+        #    block1.append(nn.Linear(in_channels, out_channels))
+        #    block1.append(nn.LeakyReLU(0.01))
+        #    in_channels = out_channels
+        #self.init_block = nn.Sequential(*block1)
+
     def _init_parameters(self):
         with torch.no_grad():
             self.latent.normal_(0.0, 0.02).clamp_(-2.0, 2.0)
 
     def forward(self, x, pad_mask=None):
+        #x = self.init_block(x)
         b, *_ = x.shape
 
         # encode task-specific input
@@ -456,6 +466,7 @@ class PerceiverDecoder(nn.Module):
         num_latent_channels: int,
         perceiver_io_type: str,
         num_output_query_channels: int,
+        cat_raydir: bool = False,
         num_cross_attention_heads: int = 4,
         num_cross_attention_qk_channels: Optional[int] = None,
         num_cross_attention_v_channels: Optional[int] = None,
@@ -501,11 +512,24 @@ class PerceiverDecoder(nn.Module):
             self.embedding = nn.Embedding(1, num_output_query_channels).cuda()
         else:
             self.initial_linear = nn.Linear(num_output_query_channels, num_output_query_channels)
-        self.feature_linear = nn.Linear(num_output_query_channels, 128)
+        #self.feature_linear = nn.Linear(num_output_query_channels, 128)
+
+        self.cat_raydir = cat_raydir
         self.alpha_linear = nn.Linear(num_output_query_channels, 1)
         self.density_super_act = torch.nn.Softplus()
 
-    def forward(self, x, output_query=None):
+        if self.cat_raydir:
+            color_block = []
+            in_channels = num_output_query_channels+24
+            out_channels = num_output_query_channels
+            for i in range(4 - 1):
+                color_block.append(nn.Linear(in_channels, out_channels))
+                color_block.append(nn.LeakyReLU(0.01))
+                in_channels = out_channels
+            color_block.append(nn.Linear(out_channels, num_output_query_channels))
+            self.color_branch = nn.Sequential(*color_block)
+
+    def forward(self, x, output_query=None, local_dir=None):
         #output_query = self.output_adapter.output_query(x)
         if self.perceiver_io_type=='each_sample_loc':
             indexs = torch.zeros(output_query).long().cuda()
@@ -513,9 +537,13 @@ class PerceiverDecoder(nn.Module):
         else:
             output_query = self.initial_linear(output_query)
         output = self.cross_attn(output_query, x)
-        feature = self.feature_linear(output)
         alpha = self.density_super_act(self.alpha_linear(output)-1)
-        return feature, alpha
+        if self.cat_raydir:
+            feature = self.color_branch(torch.cat((output, local_dir), -1))
+            return feature, alpha
+        #else:
+        #    feature = self.feature_linear(output)
+        return output, alpha
 
 
 class PerceiverIO(Sequential):
