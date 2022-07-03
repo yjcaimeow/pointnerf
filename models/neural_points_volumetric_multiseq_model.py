@@ -357,32 +357,18 @@ class NeuralPointsRayMarching(nn.Module):
                 **kargs):
         output = {}
         batch_size = gt_image.shape[0]
-        sampled_conf, sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, sample_local_ray_dirs, ray_mask_tensor, raypos_tensor, lidar_pcd_fea, lidar_pcd_xyz = [], [],[],[],[],[],[],[],[],[],[], None, None
         perceiver_io_feature=None
         if self.opt.perceiver_io:
             perceiver_io_feature, random_masks = [],[]
         for batch_index in range(batch_size):
-            _, sampled_Rw2c, _, sampled_conf_i, sampled_embedding_i, sampled_xyz_pers_i, sampled_xyz_i, sample_pnt_mask_i, sample_loc_i, sample_loc_w_i, \
-                sample_ray_dirs_i, sample_local_ray_dirs_i, ray_mask_tensor_i, vsize, grid_vox_sz, raypos_tensor_i, _, mask_i = self.neural_points({"pixel_idx": pixel_idx[batch_index:batch_index+1], \
-                                                                                                                                            "camrotc2w": camrotc2w[batch_index:batch_index+1],
-                                                                                                                                            "campos": campos[batch_index:batch_index+1], "near": near[batch_index:batch_index+1], "far": far[batch_index:batch_index+1], \
-                                                                                                                                            "focal": focal, "h": h[batch_index:batch_index+1], "w": w[batch_index:batch_index+1], "c2w":c2w[batch_index:batch_index+1], \
-                                                                                                                                            "intrinsic": intrinsic[batch_index:batch_index+1],"gt_image":gt_image[batch_index:batch_index+1], \
-                                                                                                                                            "raydir":raydir[batch_index:batch_index+1], "id":id[batch_index:batch_index+1], 'vsize':self.opt.vsize, \
-                                                                                                                                            "local_raydir":local_raydir[batch_index:batch_index+1], "seq_id":seq_id[batch_index:batch_index+1]})
-            sampled_conf.append(sampled_conf_i)
-            sampled_embedding.append(sampled_embedding_i)
-            sampled_xyz_pers.append(sampled_xyz_pers_i)
-            sampled_xyz.append(sampled_xyz_i)
-            sample_pnt_mask.append(sample_pnt_mask_i)
-            sample_loc.append(sample_loc_i)
-            sample_loc_w.append(sample_loc_w_i)
-            sample_ray_dirs.append(sample_ray_dirs_i)
-            sample_local_ray_dirs.append(sample_local_ray_dirs_i)
-            ray_mask_tensor.append(ray_mask_tensor_i)
+            raypos_tensor_i = self.neural_points({"pixel_idx": pixel_idx[batch_index:batch_index+1], \
+                                                  "camrotc2w": camrotc2w[batch_index:batch_index+1],
+                                                  "campos": campos[batch_index:batch_index+1], "near": near[batch_index:batch_index+1], "far": far[batch_index:batch_index+1], \
+                                                  "focal": focal, "h": h[batch_index:batch_index+1], "w": w[batch_index:batch_index+1], "c2w":c2w[batch_index:batch_index+1], \
+                                                  "intrinsic": intrinsic[batch_index:batch_index+1],"gt_image":gt_image[batch_index:batch_index+1], \
+                                                  "raydir":raydir[batch_index:batch_index+1], "id":id[batch_index:batch_index+1], 'vsize':self.opt.vsize, \
+                                                  "local_raydir":local_raydir[batch_index:batch_index+1], "seq_id":seq_id[batch_index:batch_index+1]})
             raypos_tensor.append(raypos_tensor_i)
-            if self.opt.perceiver_io: ### has hole
-                random_masks.append(mask_i)
             if self.opt.basic_agg == 'attention':
                 cfg = faiss.GpuIndexFlatConfig()
                 cfg.useFloat16 = False
@@ -393,26 +379,24 @@ class NeuralPointsRayMarching(nn.Module):
                 # --- add lidar pcd in world coordinate in bank ---#
                 gpu_index.add(self.neural_points.xyz.squeeze().cpu().numpy())
                 # --- knn search for each sample loc ----#
-                ray_valid_i = torch.any(sample_pnt_mask_i, dim=-1)
-                query_points = sample_loc_w_i[ray_valid_i][None,...].contiguous()
-                query_points_local = sample_loc_i[ray_valid_i][None, ...].contiguous()
-                #query_points_local = trans_world2nerf(query_points.view(-1,3), c2w[batch_index])
+                #ray_valid_i = torch.any(sample_pnt_mask_i, dim=-1)
+                #query_points = sample_loc_w_i[ray_valid_i][None,...].contiguous()
+                #query_points_local = sample_loc_i[ray_valid_i][None, ...].contiguous()
+                query_points = raypos_tensor_i
+                query_points_local = self.w2pers(query_points, camrotc2w[batch_index:batch_index+1], campos[batch_index:batch_index+1]).reshape(1, -1, 8, 3)
                 gt_D, gt_I = gpu_index.search(query_points.squeeze().view(-1,3).cpu().numpy(), 8) # nq*k
 
                 # --- get the pcd and feature for each sample loc and knn pcd
                 ref_xyz = self.neural_points.xyz.squeeze()[gt_I.reshape(-1)].reshape(1, -1, 8, 3)
                 ref_fea = self.neural_points.points_embeding.squeeze()[gt_I.reshape(-1)].reshape(-1, 8, self.neural_points.points_embeding.shape[-1])
                 ref_xyz_pers = self.w2pers(ref_xyz.view(-1,3), camrotc2w[batch_index:batch_index+1], campos[batch_index:batch_index+1]).reshape(1, -1, 8, 3)
-                # old
-                #ref_xyz_residual = ref_xyz - query_points_local[:,None,:]
-                # new
+
                 xdist = ref_xyz_pers[..., 0] * ref_xyz_pers[..., 2] - query_points_local[:, :, None, 0] * query_points_local[:, :, None, 2]
                 ydist = ref_xyz_pers[..., 1] * ref_xyz_pers[..., 2] - query_points_local[:, :, None, 1] * query_points_local[:, :, None, 2]
                 zdist = ref_xyz_pers[..., 2] - query_points_local[:, :, None, 2]
                 dists = torch.stack([xdist, ydist, zdist], dim=-1)
                 dists = torch.cat([ref_xyz - query_points[..., None, :], dists], dim=-1)
                 B, nq, k, _ = dists.shape
-                B, valid_R, SR, _ = sample_pnt_mask_i.shape
 
                 dists_flat = dists.view(-1, dists.shape[-1])
                 dists_flat /= (1.0 if self.opt.dist_xyz_deno == 0. else float(self.opt.dist_xyz_deno * np.linalg.norm(vsize)))
@@ -424,35 +408,14 @@ class NeuralPointsRayMarching(nn.Module):
                 ref_fea= torch.cat([ref_fea, positional_encoding(ref_fea, self.opt.num_feat_freqs)], dim=-1)
                 memory = self.perceiver_encoder(torch.cat((ref_fea, dists_flat.view(nq, k, dists_flat.shape[-1])), dim=-1))
                 # --- obtain the feature for sample loc ---#
-                tmp_ray_dir = sample_local_ray_dirs_i[ray_valid_i]
-                tmp_ray_dir = positional_encoding(tmp_ray_dir, self.opt.num_perceiver_io_freqs)[:,None,:]
-                query_pcd_fea, query_pcd_alpha = self.perceiver_decoder(memory, nq, tmp_ray_dir)
-
-                query_pcd_fea_all = torch.zeros([B * valid_R * SR , query_pcd_fea.shape[-1]], dtype=torch.float32, device=query_pcd_fea.device)
-                query_pcd_alpha_all = torch.zeros([B * valid_R * SR , 1], dtype=torch.float32, device=query_pcd_fea.device)
-
-                query_pcd_fea_all[ray_valid_i.view(-1)] = query_pcd_fea.squeeze(1)
-                query_pcd_alpha_all[ray_valid_i.view(-1)] = query_pcd_alpha.squeeze(1)
-
-                query_pcd_fea_all = query_pcd_fea_all.reshape(B, valid_R, SR, -1)
-                query_pcd_alpha_all = query_pcd_alpha_all.reshape(B, valid_R, SR, -1)
+                query_pcd_fea, query_pcd_alpha = self.perceiver_decoder(memory, nq)
 
                 # --- prepare ray dist ---#
-                in_shape = sample_loc_w_i.shape
-                ray_valid_i = ray_valid_i.reshape(in_shape[:-1])
-
-                ray_dist = torch.cummax(sample_loc_i[..., 2], dim=-1)[0]
+                ray_dist = torch.cummax(query_points[..., 1], dim=-1)[0]
                 ray_dist = torch.cat([ray_dist[..., 1:] - ray_dist[..., :-1], torch.full((ray_dist.shape[0], ray_dist.shape[1], 1), vsize[2], device=ray_dist.device)], dim=-1)
 
-                mask = ray_dist < 1e-8
-                if self.opt.raydist_mode_unit > 0:
-                    mask = torch.logical_or(mask, ray_dist > 2 * vsize[2])
-                mask = mask.to(torch.float32)
-                ray_dist = ray_dist * (1.0 - mask) + mask * vsize[2]
-                ray_dist *= ray_valid_i.float()
-
                 # --- volume rendering ---#
-                coarse_raycolor, *_ = ray_march(ray_dist, ray_valid_i, torch.cat((query_pcd_alpha_all, query_pcd_fea_all), dim=-1).view(1, ray_dist.shape[1], ray_dist.shape[2], query_pcd_fea_all.shape[-1]+1), \
+                coarse_raycolor, *_ = ray_march(ray_dist, None, torch.cat((query_pcd_alpha, query_pcd_fea), dim=-1).view(1, ray_dist.shape[1], ray_dist.shape[2], query_pcd_fea.shape[-1]+1), \
                                                       self.render_func, self.blend_func, None, query_pcd_fea.shape[-1])
                 output["coarse_raycolor"] = coarse_raycolor
 

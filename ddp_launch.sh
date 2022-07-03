@@ -11,7 +11,7 @@ nrCheckpoint="../checkpoints"
 nrDataRoot="../data_src"
 name='waymo'
 
-resume_iter=$2
+resume_iter='none'
 radius=1.0
 
 data_root="${nrDataRoot}/scannet/scans/"
@@ -113,7 +113,7 @@ lr_policy="iter_exponential_decay"
 lr_decay_iters=1000000
 lr_decay_exp=0.1
 
-checkpoints_dir=$1
+checkpoints_dir='debug'
 resume_dir="${checkpoints_dir}/waymo"
 
 save_iter_freq=10000 # 200*20
@@ -167,8 +167,9 @@ PART=pat_taurus
 #--perceiver_io \
 basic_agg='attention'
 
-TOOLS="srun --partition=$PART --quotatype=auto --gres=gpu:${GPUNUM} -n$NODENUM --ntasks-per-node=1 --cpus-per-task=8"
-$TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch --nnodes=$NODENUM --nproc_per_node=$GPUNUM --node_rank \$SLURM_PROCID --master_addr=\$(sinfo -Nh -n \$SLURM_NODELIST | head -n 1 | cut -d ' ' -f 1) --master_port $3 train_iter.py \
+#TOOLS="srun --partition=$PART --quotatype=auto --gres=gpu:${GPUNUM} -n$NODENUM --ntasks-per-node=1 --cpus-per-task=8"
+#$TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch --nnodes=$NODENUM --nproc_per_node=$GPUNUM --node_rank \$SLURM_PROCID --master_addr=\$(sinfo -Nh -n \$SLURM_NODELIST | head -n 1 | cut -d ' ' -f 1) --master_port $3 train_iter.py \
+python -m torch.distributed.launch --nnodes=$NODENUM --nproc_per_node=$GPUNUM train_iter.py \
     --zoom_in_scale $zoom_in_scale --ddp_train \
     --half_supervision \
     --basic_agg ${basic_agg} \
@@ -288,4 +289,4 @@ $TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch --nnodes=$N
     --prob_mul $prob_mul \
     --prob_kernel_size $prob_kernel_size \
     --prob_tiers $prob_tiers \
-    --query_size $query_size"
+    --query_size $query_size
