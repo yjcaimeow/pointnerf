@@ -339,6 +339,7 @@ class MvsPointsVolumetricMultiseqModel(NeuralPointsVolumetricMultiseqModel):
                 net = net.module
 
             if self.opt.fix_net:
+#            if True:
                 keys=[]
                 for k,v in state_dict.items():
                     if k.startswith('module.neural_points'):
@@ -347,6 +348,18 @@ class MvsPointsVolumetricMultiseqModel(NeuralPointsVolumetricMultiseqModel):
                 new_dict = {k:state_dict[k] for k in keys}
                 net.load_state_dict(new_dict, strict=False)
             else:
+                #per_io_load_path = '/mnt/lustre/caiyingjie/pointnerf/inpainting/inference/segment-12102100359426069856_3931_470_3951_470_with_camera_labels_nohole_training_learnNet/waymo/init_net_ray_marching.pth'
+                #per_io_state_dict = torch.load(per_io_load_path, map_location='cpu')
+
+                #keys=[]
+                #for k,v in per_io_state_dict.items():
+                #    if k.startswith('module.neural_points'):
+                #        continue
+                #    keys.append(k)
+                #per_io_state_dict = {k:per_io_state_dict[k] for k in keys}
+                #net.load_state_dict(per_io_state_dict, strict=False)
+                #print (net)
+                #exit()
                 net.load_state_dict(state_dict, strict=True)
 
     def test(self, gen_points=False):

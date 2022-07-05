@@ -378,7 +378,7 @@ class PointAggregator(torch.nn.Module):
             color_block.append(self.act(inplace=True))
             in_channels = out_channels
             #out_channels = out_channels//2
-        #color_block.append(nn.Linear(in_channels, 3))
+        #color_block.append(nn.Linear(out_channels, 3))
         color_block.append(nn.Linear(out_channels, self.opt.shading_color_channel_num))
         #color_block.append(nn.Linear(out_channels, out_channels))
         self.color_branch = nn.Sequential(*color_block)

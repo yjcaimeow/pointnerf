@@ -544,9 +544,10 @@ class BaseRenderingModel(BaseModel):
         self.loss_total = 0
         opt = self.opt
         #color losses
-        ray_mask = torch.from_numpy(cv2.resize(np.asarray(self.output['ray_mask'].reshape(64, 96).cpu(), dtype='uint8'), (768, 512), \
-                                               interpolation=cv2.INTER_AREA)).cuda()[512//2:,...]
+        #height, width = 64,96
         height, width = 512,768
+        ray_mask = torch.from_numpy(cv2.resize(np.asarray(self.output['ray_mask'].reshape(64, 96).cpu(), dtype='uint8'), (width, height), \
+                                               interpolation=cv2.INTER_AREA)).cuda()[height//2:,...]
         for i, name in enumerate(opt.color_loss_items):
             if name.startswith("ray_masked"):
                 unmasked_name = name[len("ray_masked")+1:]
@@ -617,10 +618,9 @@ class BaseRenderingModel(BaseModel):
                 #          fmt.END)
                 if self.opt.half_supervision:
 #                if name.split('_')[-1]=="half":
-                    height, width = 512,768
                     batch_size = self.output[name].shape[0]
-                    if self.opt.fix_net:
-                        mask = torch.from_numpy(1-cv2.resize(self.output["random_masks"][0], (768, 512), interpolation=cv2.INTER_AREA).reshape(batch_size, height, width)[:,height//2:,...][...,None]).cuda()
+                    if self.opt.fix_net and self.opt.perceiver_io:
+                        mask = torch.from_numpy(1-cv2.resize(self.output["random_masks"][0], (width, height), interpolation=cv2.INTER_AREA).reshape(batch_size, height, width)[:,height//2:,...][...,None]).cuda()
                         loss = self.l2loss(self.output[name].reshape(batch_size, height, width, 3)[:,height//2:,...].mul(mask), self.gt_image.reshape(batch_size, height, width, 3)[:,height//2:,...].mul(mask))
                     else:
                         loss = self.l2loss(self.output[name].reshape(batch_size, height, width, 3)[:,height//2:,...], self.gt_image.reshape(batch_size, height, width, 3)[:,height//2:,...])

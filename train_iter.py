@@ -214,7 +214,7 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
         data['sequence_length_list'] = sequence_length_list
         model.set_input(data)
         output = model.test()
-        ray_mask = torch.from_numpy(cv2.resize(np.asarray(output['ray_mask'].reshape(64, 96).cpu(), dtype='uint8'), (768, 512), interpolation=cv2.INTER_AREA)).cuda()
+        ray_mask = torch.from_numpy(cv2.resize(np.asarray(output['ray_mask'].reshape(64, 96).cpu(), dtype='uint8'), (width, height), interpolation=cv2.INTER_AREA)).cuda()
 
         curr_visuals = model.get_current_visuals(data=data)
         pred = curr_visuals['final_coarse_raycolor'].cuda().reshape(height, width, 3)
@@ -230,8 +230,8 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
         masked_imgs.append(np.asarray(gt.detach().squeeze().cpu().reshape(height, width,3)))
 
         if opt.perceiver_io and opt.mask_type=='2d':
-            gt = torch.from_numpy(1-cv2.resize(output["random_masks"][0], (768, 512), interpolation=cv2.INTER_AREA)[...,None]).cuda() * gt.reshape(height, width, 3)
-            pred = torch.from_numpy(1-cv2.resize(output["random_masks"][0], (768, 512), interpolation=cv2.INTER_AREA)[...,None]).cuda() * pred.reshape(height, width, 3)
+            gt = torch.from_numpy(1-cv2.resize(output["random_masks"][0], (width, height), interpolation=cv2.INTER_AREA)[...,None]).cuda() * gt.reshape(height, width, 3)
+            pred = torch.from_numpy(1-cv2.resize(output["random_masks"][0], (width, height), interpolation=cv2.INTER_AREA)[...,None]).cuda() * pred.reshape(height, width, 3)
             random_masks.append(output["random_masks"])
 
         if opt.half_supervision:
@@ -323,7 +323,7 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
                 save_image(np.asarray(img), filepath)
         for img_index, img in enumerate(preds):
             if opt.perceiver_io and opt.mask_type=='2d':
-                masked_img = (1-cv2.resize(random_masks[img_index][0], (768, 512), interpolation=cv2.INTER_AREA)[...,None]) * gts[img_index]
+                masked_img = (1-cv2.resize(random_masks[img_index][0], (width, height), interpolation=cv2.INTER_AREA)[...,None]) * gts[img_index]
                 filepath = os.path.join(rootdir, str(img_index).zfill(4)+'_masked.png')
                 if opt.half_supervision:
                     masked_img = masked_img[height//2:,:]
@@ -613,6 +613,7 @@ def main():
         for seq_index, points_xyz_all in enumerate(train_dataset.points_xyz_all):
             points_xyz_all = [points_xyz_all] if not isinstance(points_xyz_all, list) else points_xyz_all
             points_xyz_holder = torch.zeros([0,3], dtype=torch.float32).cpu()
+            print (points_xyz_all[0].shape, ':D ----- Before VOXLIZED')
             for i in range(len(points_xyz_all)):
                 points_xyz = points_xyz_all[i]
                 vox_res = opt.vox_res // (1.5**i)
@@ -622,7 +623,6 @@ def main():
 
             print (points_xyz_holder.shape, ':D ----- AFTER VOXLIZED')
             print ('========'+fmt.END)
-
             points_xyz_all_list.append(points_xyz_holder.cuda())
             points_embedding_all.append(torch.randn((1, len(points_xyz_holder), opt.point_features_dim)).cuda())
             points_conf_all.append(torch.ones((1, len(points_xyz_holder), 1)).cuda())
@@ -706,9 +706,9 @@ def main():
             data['bg_color'] = bg_color
             model.set_input(data)
             model.optimize_parameters(total_steps=total_steps)
+            #model.grad_norm()
             losses = model.get_current_losses()
             visualizer.accumulate_losses(losses)
-
             if opt.lr_policy.startswith("iter"):
                 model.update_learning_rate(opt=opt, total_steps=total_steps)
 
@@ -726,8 +726,8 @@ def main():
                         'total_steps': total_steps,
                     }
                     cprint.warn('saving model!')
-                    print('saving model ({}, epoch {}, total_steps {})'.format(opt.name, epoch, total_steps))
                     model.save_networks(total_steps, other_states)
+                    print('DONE saving model ({}, epoch {}, total_steps {})'.format(opt.name, epoch, total_steps))
 
             except Exception as e:
                 visualizer.print_details(e)
@@ -738,6 +738,8 @@ def main():
                 #model.print_lr(opt=opt, total_steps=total_steps)
                 with torch.no_grad():
                     #psnr_train_list, pnsr_test_list, ssim_train_list, ssim_test_list, lpips_train_list, lpips_test_list = \
+                    #cprint.info(test_opt)
+                    #exit()
                     psnr_train_list, pnsr_test_list = \
                     test(epoch, model, test_dataset, Visualizer(test_opt), test_opt, None, test_steps=total_steps, lpips=True, bg_color=bg_color, best_PSNR_half=best_PSNR_half, \
                         sequence_length_list=test_dataset.sequence_length_list, train_sequence_length_list=train_dataset.sequence_length_list, loss_fn_vgg=None)

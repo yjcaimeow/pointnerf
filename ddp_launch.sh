@@ -23,7 +23,6 @@ conf_grad=1
 dir_grad=0
 color_grad=0
 vox_res=1000
-vox_res_middle=100
 normview=0
 prune_thresh=0.1
 prune_iter=-1
@@ -147,8 +146,9 @@ iter_pg=200
 
 color_loss_weights=" 1.0 "
 color_loss_items='final_coarse_raycolor '
-#color_loss_weights=" 1.0 1.0 "
+#color_loss_weights=" 0.0 1.0 "
 #color_loss_items='ray_miss_final_coarse_raycolor ray_masked_final_coarse_raycolor'
+#color_loss_items='ray_masked_final_coarse_raycolor '
 test_color_loss_items='coarse_raycolor ray_miss_coarse_raycolor ray_masked_coarse_raycolor final_coarse_raycolor'
 
 bg_color="white" #"0.0,0.0,0.0,1.0,1.0,1.0"
@@ -156,7 +156,7 @@ split="train"
 seq_num=1
 #perceiver_io_type='each_sample_loc'
 #perceiver_io_type='all_lidar_pcd'
-perceiver_io_type='local_lidar_pcd'
+#perceiver_io_type='local_lidar_pcd'
 
 GPUNUM=1
 NODENUM=1
@@ -167,7 +167,7 @@ PART=pat_taurus
 #--perceiver_io \
 basic_agg='attention'
 
-TOOLS="srun --partition=$PART --quotatype=auto --gres=gpu:${GPUNUM} -n$NODENUM --ntasks-per-node=1 --cpus-per-task=8"
+TOOLS="srun --partition=$PART --quotatype=auto --preempt --gres=gpu:${GPUNUM} -n$NODENUM --ntasks-per-node=1 --cpus-per-task=8"
 $TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch --nnodes=$NODENUM --nproc_per_node=$GPUNUM --node_rank \$SLURM_PROCID --master_addr=\$(sinfo -Nh -n \$SLURM_NODELIST | head -n 1 | cut -d ' ' -f 1) --master_port $3 train_iter.py \
     --zoom_in_scale $zoom_in_scale --ddp_train \
     --half_supervision \
@@ -266,7 +266,6 @@ $TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch --nnodes=$N
     --color_grad $color_grad \
     --bgmodel $bgmodel \
     --vox_res $vox_res \
-    --vox_res_middle $vox_res_middle \
     --act_type $act_type \
     --geo_cnsst_num $geo_cnsst_num \
     --point_conf_mode $point_conf_mode \

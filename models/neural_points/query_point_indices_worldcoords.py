@@ -2,11 +2,11 @@ import os
 import numpy as np
 from numpy import dot
 from math import sqrt
-#import pycuda
-#import pycuda.autoinit
-#from pycuda.compiler import SourceModule
-##import pycuda.driver as drv
-#import pycuda.gpuarray as gpuarray
+import pycuda
+import pycuda.autoinit
+from pycuda.compiler import SourceModule
+#import pycuda.driver as drv
+import pycuda.gpuarray as gpuarray
 import matplotlib.pyplot as plt
 import torch
 import pickle
@@ -46,7 +46,7 @@ class lighting_fast_querier():
         #ctx.pop()
 
 #        self.ctx = drv.Device(self.gpu).make_context()
-        #self.claim_occ, self.map_coor2occ, self.fill_occ2pnts, self.mask_raypos, self.get_shadingloc, self.query_along_ray = self.build_cuda()
+        self.claim_occ, self.map_coor2occ, self.fill_occ2pnts, self.mask_raypos, self.get_shadingloc, self.query_along_ray = self.build_cuda()
         self.inverse = self.opt.inverse
         self.count=0
 
@@ -101,7 +101,6 @@ class lighting_fast_querier():
         else:
             raypos_tensor, _, _, _ = near_far_linear_ray_generation(cam_pos_tensor, ray_dirs_tensor, self.opt.z_depth_dim, near=near_depth, far=far_depth, \
                                                                     jitter=0.3 if self.opt.is_train > 0 else 0.)
-        return raypos_tensor
         sample_pidx_tensor, sample_loc_w_tensor, ray_mask_tensor, index_tensor = self.query_grid_point_index(h, w, pixel_idx_tensor, raypos_tensor, point_xyz_w_tensor, actual_numpoints_tensor, kernel_size_gpu, query_size_gpu, self.opt.SR, self.opt.K, ranges_np, scaled_vsize_np, scaled_vdim_np, vscale_np, self.opt.max_o, self.opt.P, radius_limit_np, depth_limit_np, range_gpu, scaled_vsize_gpu, scaled_vdim_gpu, vscale_gpu, ray_dirs_tensor, cam_pos_tensor, kMaxThreadsPerBlock=self.opt.gpu_maxthr)
 
         sample_ray_dirs_tensor = torch.masked_select(ray_dirs_tensor, ray_mask_tensor[..., None]>0).reshape(ray_dirs_tensor.shape[0],-1,3)[...,None,:].expand(-1, -1, self.opt.SR, -1).contiguous()

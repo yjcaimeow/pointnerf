@@ -7,6 +7,10 @@ from data import find_dataset_class_by_name
 class BaseOptions:
     def initialize(self, parser: argparse.ArgumentParser):
         #================================ global ================================#
+        parser.add_argument('--clip_value',
+                            type=float,
+                            default=5.0,
+                            help='feed batches in order without shuffling')
         parser.add_argument('--point_number',
                             type=int,
                             default=1000,
@@ -70,7 +74,7 @@ class BaseOptions:
         parser.add_argument('--N', type=int, default=512, help='name of the experiment')
         parser.add_argument('--D', type=int, default=96, help='name of the experiment')
         parser.add_argument('--E', type=int, default=96, help='name of the experiment')
-        parser.add_argument('--C', type=int, default=54, help='name of the experiment')
+        parser.add_argument('--C', type=int, default=56, help='name of the experiment')
         parser.add_argument('--num_self_attention_heads', type=int, default=2, help='name of the experiment')
         parser.add_argument('--num_self_attention_blocks', type=int, default=3, help='name of the experiment')
         parser.add_argument('--num_self_attention_layers_per_block', type=int, default=2, help='name of the experiment')
@@ -82,7 +86,7 @@ class BaseOptions:
         parser.add_argument('--light_N', type=int, default=8, help='name of the experiment')
         parser.add_argument('--light_D', type=int, default=284, help='name of the experiment')
         parser.add_argument('--light_C', type=int, default=284, help='name of the experiment')
-        parser.add_argument('--light_E', type=int, default=128, help='name of the experiment')
+        #parser.add_argument('--light_E', type=int, default=128, help='name of the experiment')
         parser.add_argument('--light_num_self_attention_heads', type=int, default=2, help='name of the experiment')
         parser.add_argument('--light_num_self_attention_blocks', type=int, default=1, help='name of the experiment')
         parser.add_argument('--light_num_self_attention_layers_per_block', type=int, default=2, help='name of the experiment')
