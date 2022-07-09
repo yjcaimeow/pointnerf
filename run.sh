@@ -1,28 +1,23 @@
-#!/bin/bash
 #filename='../waymo_fall_1006_vox100_res128-512.npz'
 filename='/mnt/lustre/caiyingjie/data/selected_waymo/'
-#filename='../'
-#filename='/mnt/cache/caiyingjie/vox_res_all/waymo_fall_1006_vox100_res128-512.npz'
-#filename='/home/yjcai/tmp/'
 scale_factor=20
 frames_length=30
 zoom_in_scale=8
 nrCheckpoint="../checkpoints"
-nrDataRoot="../data_src"
+nrDataRoot="/mnt/cache/caiyingjie/code/data_src"
 name='waymo'
 
 resume_iter=$2
-radius=1.0
 
-data_root="${nrDataRoot}/scannet/scans/"
-scan="scene0241_01"
+data_root="${nrDataRoot}/scans/"
+scan="scene0006_00"
 
 load_points=2
 feat_grad=1
 conf_grad=1
 dir_grad=0
 color_grad=0
-vox_res=1000
+vox_res=900
 normview=0
 prune_thresh=0.1
 prune_iter=-1
@@ -51,12 +46,13 @@ depth_limit_scale=0
 vscale=" 2 2 2 "
 kernel_size=" 3 3 3 "
 query_size=" 3 3 3 "
-vsize=" 0.08 0.08 0.08 " 
+vsize=" 0.008 0.008 0.008 " 
 wcoord_query=1
 z_depth_dim=300
 max_o=610000
-ranges=" 20.0 -10.0 -10.0 10.0 10.0 10.0 "
-SR=12
+#ranges=" 20.0 -10.0 -10.0 10.0 10.0 10.0 "
+ranges=" -10.0 -10.0 -10.0 10.0 10.0 10.0 "
+SR=24
 K=8
 P=26
 NN=2
@@ -87,8 +83,8 @@ raydist_mode_unit=1
 dataset_name='scannet_ft'
 pin_data_in_memory=1
 model='mvs_points_volumetric_multiseq'
-near_plane=0
-far_plane=100
+near_plane=0.1
+far_plane=8.0
 which_ray_generation='near_far_linear' #'nerf_near_far_linear' #
 domain_size='1'
 dir_norm=1
@@ -107,7 +103,7 @@ random_sample_size=56 # 32 * 32 = 1024
 batch_size=1
 
 plr=0.002
-lr=0.0002 #0.00015
+lr=0.0005 #0.00015
 lr_policy="iter_exponential_decay"
 lr_decay_iters=1000000
 lr_decay_exp=0.1
@@ -168,9 +164,8 @@ PART=pat_taurus
 basic_agg='attention'
 
 TOOLS="srun --partition=$PART --quotatype=auto --preempt --gres=gpu:${GPUNUM} -n$NODENUM --ntasks-per-node=1 --cpus-per-task=8"
-$TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch --nnodes=$NODENUM --nproc_per_node=$GPUNUM --node_rank \$SLURM_PROCID --master_addr=\$(sinfo -Nh -n \$SLURM_NODELIST | head -n 1 | cut -d ' ' -f 1) --master_port $3 train_iter.py \
+$TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch --nnodes=$NODENUM --nproc_per_node=$GPUNUM --node_rank \$SLURM_PROCID --master_addr=\$(sinfo -Nh -n \$SLURM_NODELIST | head -n 1 | cut -d ' ' -f 1) --master_port $3 train_scannet.py \
     --zoom_in_scale $zoom_in_scale --ddp_train \
-    --half_supervision \
     --basic_agg ${basic_agg} \
     --seq_num ${seq_num} \
     --catWithLocaldir \

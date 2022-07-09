@@ -515,10 +515,12 @@ def ray_march(ray_dist,
     #point_color = render_func(ray_features)
 
     # we are essentially predicting predict 1 - e^-sigma
-    if unified or ray_valid is None:
-        sigma = ray_features[..., 0]
-    else:
-        sigma = ray_features[..., 0] * ray_valid.float()
+    #if unified or ray_valid is None:
+    #    sigma = ray_features[..., 0]
+    #else:
+    #    sigma = ray_features[..., 0] * ray_valid.float()
+    point_color = render_func(ray_features)
+    sigma = ray_features[..., 0] * ray_valid.float()
     opacity = 1 - torch.exp(-sigma * ray_dist)
 
     # cumprod exclusive
@@ -531,12 +533,13 @@ def ray_march(ray_dist,
 
     blend_weight = blend_func(opacity, acc_transmission)[..., None]
 
-    point_color = render_func(ray_features)
+#    point_color = render_func(ray_features)
     ray_color = torch.sum(point_color * blend_weight, dim=-2, keepdim=False)
 
     if bg_color is not None and unified==False:
         ray_color += bg_color.to(opacity.device).float().view(
-            background_transmission.shape[0], 1, shading_color_channel_num) * background_transmission
+            background_transmission.shape[0], 1, 3) * background_transmission
+            #background_transmission.shape[0], 1, shading_color_channel_num) * background_transmission
     background_blend_weight = blend_func(1, background_transmission)
     return ray_color, point_color, opacity, acc_transmission, blend_weight, background_transmission, background_blend_weight
 

@@ -69,6 +69,13 @@ class BaseModel:
             net = DDP(net, device_ids=[self.local_rank], output_device=self.local_rank, find_unused_parameters=True)
             setattr(self, 'net_{}'.format(name), net)
 
+    def grad_norm(self):
+        for name in self.model_names:
+            assert isinstance(name, str)
+            net = getattr(self, 'net_{}'.format(name))
+            assert isinstance(net, nn.Module)
+            torch.nn.utils.clip_grad_norm_(net.parameters(), self.opt.clip_value, norm_type=2.0, error_if_nonfinite=False)
+
     def get_networks(self) -> [nn.Module]:
         ret = []
         for name in self.model_names:

@@ -1,5 +1,5 @@
 from .base_rendering_model import *
-from .neural_points_volumetric_multiseq_model import NeuralPointsVolumetricMultiseqModel
+from .neural_points_volumetric_distill_model import NeuralPointsVolumetricDistillModel
 from .neural_points.neural_points import NeuralPoints
 #from .mvs.mvs_points_model import MvsPointsModel
 from .mvs import mvs_utils
@@ -10,7 +10,7 @@ import torch.nn.functional as F
 import time
 from utils import format as fmt
 
-class MvsPointsVolumetricMultiseqModel(NeuralPointsVolumetricMultiseqModel):
+class MvsPointsVolumetricDistillModel(NeuralPointsVolumetricDistillModel):
 
     def __init__(self,):
         super().__init__()
@@ -19,7 +19,7 @@ class MvsPointsVolumetricMultiseqModel(NeuralPointsVolumetricMultiseqModel):
     @staticmethod
     def modify_commandline_options(parser, is_train=True):
         #MvsPointsModel.modify_commandline_options(parser, is_train)
-        NeuralPointsVolumetricMultiseqModel.modify_commandline_options(parser, is_train=is_train)
+        NeuralPointsVolumetricDistillModel.modify_commandline_options(parser, is_train=is_train)
         parser.add_argument(
             '--mode',
             type=int,
@@ -37,7 +37,7 @@ class MvsPointsVolumetricMultiseqModel(NeuralPointsVolumetricMultiseqModel):
             self.model_names = ['mvs']
 
         if opt.mode != 1:
-            super(MvsPointsVolumetricMultiseqModel, self).create_network_models(opt)
+            super(MvsPointsVolumetricDistillModel, self).create_network_models(opt)
 
     def setup_optimizer(self, opt):
         '''
@@ -161,7 +161,7 @@ class MvsPointsVolumetricMultiseqModel(NeuralPointsVolumetricMultiseqModel):
             return losses, inds
 
     def setup(self, opt, train_len=None):
-        super(MvsPointsVolumetricMultiseqModel, self).setup(opt)
+        super(MvsPointsVolumetricDistillModel, self).setup(opt)
         if opt.prob_freq > 0 and train_len is not None and opt.prob_num_step > 1:
             self.num_probe = train_len // opt.prob_num_step
             self.reset_ray_miss_ranking()

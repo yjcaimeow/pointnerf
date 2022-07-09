@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 import torch.nn.utils.prune as prune_param
 import random
 from utils.kitti_object import get_lidar_in_image_fov, plot_points_on_image
+from utils.mask import get_irregular_mask
+from utils.visualizer import save_image
 import cv2
 class NeuralPoints(nn.Module):
 
@@ -347,6 +349,23 @@ class NeuralPoints(nn.Module):
     #             print("point_xyz shape after jittering: ", point_xyz.shape)
     #     print('Loaded blender cloud ', self.opt.cloud_path, self.opt.num_point, point_xyz.shape)
 
+    def prune_point(self, thresh):
+        for index in range(len(self.xyz_all)):
+            points_conf = self.points_conf_all[index]
+            mask = points_conf[0,...,0] >= thresh
+
+            self.xyz_all[index] = nn.Parameter(self.xyz_all[index][mask, :])
+            self.xyz_all[index].requires_grad = self.opt.xyz_grad > 0
+
+            self.points_embeding_all[index] = nn.Parameter(self.points_embeding_all[index][:, mask, :])
+            self.points_embeding_all[index].requires_grad = self.opt.feat_grad > 0
+
+            self.points_conf_all[index] = nn.Parameter(points_conf[:, mask, :])
+            self.points_conf_all[index].requires_grad = self.opt.conf_grad > 0
+            print("@@@@@@@@@  pruned {}/{}".format(torch.sum(mask==0), mask.shape[0]))
+        self.xyz_all             = nn.ParameterList(self.xyz_all)
+        self.points_embeding_all = nn.ParameterList(self.points_embeding_all)
+        self.points_conf_all     = nn.ParameterList(self.points_conf_all)
 
     def prune(self, thresh):
         mask = self.points_conf[0,...,0] >= thresh
@@ -376,16 +395,21 @@ class NeuralPoints(nn.Module):
 
     def grow_points(self, add_xyz=None, add_embedding=None, add_color=None, add_dir=None, add_conf=None, add_eulers=None, add_Rw2c=None):
         # print(self.xyz.shape, self.points_conf.shape, self.points_embeding.shape, self.points_dir.shape, self.points_color.shape)
-        self.xyz = nn.Parameter(torch.cat([self.xyz, add_xyz], dim=0))
-        self.xyz.requires_grad = self.opt.xyz_grad > 0
+        for index in range(len(self.xyz_all)):
+            self.xyz_all[index] = nn.Parameter(torch.cat([self.xyz_all[index], add_xyz], dim=0))
+            self.xyz_all[index].requires_grad = self.opt.xyz_grad > 0
+        self.xyz_all = nn.ParameterList(self.xyz_all)
 
-        if self.points_embeding is not None:
-            self.points_embeding = nn.Parameter(torch.cat([self.points_embeding, add_embedding[None, ...]], dim=1))
-            self.points_embeding.requires_grad = self.opt.feat_grad > 0
+        for index in range(len(self.xyz_all)):
+            self.points_embeding_all[index] = nn.Parameter(torch.cat([self.points_embeding_all[index], add_embedding[None, ...]], dim=1))
+            self.points_embeding_all[index].requires_grad = self.opt.feat_grad > 0
+        self.points_embeding_all = nn.ParameterList(self.points_embeding_all)
 
-        if self.points_conf is not None:
-            self.points_conf = nn.Parameter(torch.cat([self.points_conf, add_conf[None, ...]], dim=1))
-            self.points_conf.requires_grad = self.opt.conf_grad > 0
+        for index in range(len(self.xyz_all)):
+            self.points_conf_all[index] = nn.Parameter(torch.cat([self.points_conf_all[index], add_conf[None, ...]], dim=1))
+            self.points_conf_all[index].requires_grad = self.opt.conf_grad > 0
+        self.points_conf_all = nn.ParameterList(self.points_conf_all)
+
         if self.points_dir is not None:
             self.points_dir = nn.Parameter(torch.cat([self.points_dir, add_dir[None, ...]], dim=1))
             self.points_dir.requires_grad = self.opt.dir_grad > 0
@@ -401,8 +425,6 @@ class NeuralPoints(nn.Module):
         if self.Rw2c is not None and self.Rw2c.dim() > 2:
             self.Rw2c = nn.Parameter(torch.cat([self.Rw2c, add_Rw2c[None,...]], dim=1))
             self.Rw2c.requires_grad = False
-
-
 
     # def set_points(self, points_xyz, points_embeding, points_color=None, points_dir=None, points_conf=None, parameter=False, Rw2c=None, eulers=None):
     #     if self.opt.default_conf > 0.0 and self.opt.default_conf <= 1.0 and points_conf is not None:
@@ -479,7 +501,7 @@ class NeuralPoints(nn.Module):
     #         self.Rw2c.requires_grad = False
 
     def set_points(self, points_xyz, points_embeding, points_color=None, points_dir=None, points_conf=None, parameter=False, Rw2c=None, eulers=None, fov=False, \
-                   points_xyz_middle=None, points_embeding_middle=None, points_color_middle=None, points_dir_middle=None, points_conf_middle=None):
+                   points_xyz_middle=None, points_embeding_middle=None, points_color_middle=None, points_dir_middle=None, points_conf_middle=None, stylecode=None):
         #if points_embeding.shape[-1] > self.opt.point_features_dim:
         #    points_embeding = points_embeding[..., :self.opt.point_features_dim]
         if self.opt.default_conf > 0.0 and self.opt.default_conf <= 1.0 and points_conf is not None:
@@ -547,9 +569,14 @@ class NeuralPoints(nn.Module):
                 points_embeding_middle.requires_grad = self.opt.feat_grad > 0
                 self.points_embeding_middle = points_embeding_middle
         elif parameter and fov:
-            self.points_dir_all, self.points_conf_all, self.points_color_all, self.points_embeding_all, self.xyz_all = [],[],[],[],[]
+            self.points_dir_all, self.points_conf_all, self.points_color_all, self.points_embeding_all, self.xyz_all, self.stylecode = [],[],[],[],[],[]
             if type(points_xyz).__name__=='list':
                 for index in range(len(points_xyz)):
+                    if index==0 and stylecode is not None:
+                        stylecode = nn.Parameter(stylecode)
+                        stylecode.requires_grad = True
+                        self.stylecode.append(stylecode)
+                        self.stylecode = nn.ParameterList(self.stylecode)
                     points_embeding_i = points_embeding[index]
                     xyz_all = nn.Parameter(points_xyz[index])
                     xyz_all.requires_grad = self.opt.xyz_grad > 0
@@ -937,14 +964,29 @@ class NeuralPoints(nn.Module):
         img_fea, img_fea_2h = None, None
         if self.opt.fov and use_middle==False:
             if "seq_id" in inputs:
-                self.xyz, _, fov_ids, pts_2d = get_lidar_in_image_fov(self.xyz_all[inputs["seq_id"]].squeeze(), c2w.squeeze(), intrinsic.squeeze(), xmin=0, ymin=0, xmax=int(w), ymax=int(h), return_more=True)
-                self.points_embeding = self.points_embeding_all[inputs["seq_id"]].squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
-                self.points_conf = self.points_conf_all[inputs["seq_id"]].squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
-                if "1" in list(self.opt.point_color_mode):
-                    self.points_dir = self.points_dir_all[inputs["seq_id"]].squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
-                    self.points_color = self.points_color_all[inputs["seq_id"]].squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
+                mask=None
+                if self.opt.mask_type=='2d' and self.opt.perceiver_io:
+                    mask = get_irregular_mask()
+                    top_mask = np.ones(mask.shape)
+                    mask = np.concatenate((top_mask, mask), 0)
+                self.xyz, self.local_xyz, fov_ids, pts_2d = get_lidar_in_image_fov(self.xyz_all[inputs["seq_id"]].squeeze(), c2w.squeeze(), intrinsic.squeeze(), xmin=0, ymin=0, xmax=int(w), ymax=int(h), return_more=True, mask=mask)
+
+                if self.opt.mask_type=='3d' and self.opt.perceiver_io:
+                    idx = torch.multinomial(torch.ones(len(self.xyz)), 1, replacement=True)
+                    centers_pcd = self.xyz[idx]
+                    centers_x, centers_y = centers_pcd[:,0], centers_pcd[:,1]
+                    mask = (self.xyz[:,0] >= (centers_x[0]-self.opt.mask_region_r)) * (self.xyz[:,0] <= (centers_x[0]+self.opt.mask_region_r)) * (self.xyz[:,1] >= (centers_y[0]-self.opt.mask_region_r)) * (self.xyz[:,1] <= (centers_y[0]+self.opt.mask_region_r))
+                    self.xyz = self.xyz[mask==False]
+                    self.local_xyz = self.local_xyz[mask==False]
+                    self.points_embeding = self.points_embeding_all[inputs["seq_id"]].squeeze(0).squeeze(0)[fov_ids][mask==False].unsqueeze(0)
+                    self.points_conf = self.points_conf_all[inputs["seq_id"]].squeeze(0).squeeze(0)[fov_ids][mask==False].unsqueeze(0)
                 else:
-                    self.points_dir, self.points_color=None, None
+                    self.points_embeding = self.points_embeding_all[inputs["seq_id"]].squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
+                    self.points_conf = self.points_conf_all[inputs["seq_id"]].squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
+                #name = str(inputs['id'].item())
+                #np.savetxt('./check_mask/'+name+'_mask_pcd.txt', self.xyz.cpu().numpy())
+                #save_image(mask.squeeze()*255, './check_mask/'+name+'_mask_img.png')
+                self.points_dir, self.points_color=None, None
             else:
                 self.xyz, _, fov_ids, pts_2d = get_lidar_in_image_fov(self.xyz_all, c2w.squeeze(), intrinsic.squeeze(), xmin=0, ymin=0, xmax=int(w), ymax=int(h), return_more=True)
                 self.points_color = self.points_color_all.squeeze(0)[fov_ids].unsqueeze(0)
@@ -978,4 +1020,4 @@ class NeuralPoints(nn.Module):
 
         sampled_Rw2c = self.Rw2c if self.Rw2c.dim() == 2 else torch.index_select(self.Rw2c, 0, sample_pidx).view(B, R, SR, K, self.Rw2c.shape[1], self.Rw2c.shape[2])
 
-        return sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding[..., 6:], sampled_embedding[..., 3:6], sampled_embedding[..., :3], sample_pnt_mask, sample_loc, sample_loc_w_tensor, sample_ray_dirs_tensor, sample_local_ray_dirs_tensor, ray_mask_tensor, vsize, self.grid_vox_sz, raypos_tensor, index_tensor
+        return sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding[..., 6:], sampled_embedding[..., 3:6], sampled_embedding[..., :3], sample_pnt_mask, sample_loc, sample_loc_w_tensor, sample_ray_dirs_tensor, sample_local_ray_dirs_tensor, ray_mask_tensor, vsize, self.grid_vox_sz, raypos_tensor, index_tensor, mask

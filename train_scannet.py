@@ -209,7 +209,7 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
 #        tmpgts["gt_mask"] = data['gt_mask'].clone() if "gt_mask" in data else None
 #        data.pop('gt_mask', None)
 
-        data['bg_color'] = bg_color
+#        data['bg_color'] = bg_color
         data['train_sequence_length_list'] = train_sequence_length_list
         data['sequence_length_list'] = sequence_length_list
         model.set_input(data)
@@ -585,8 +585,8 @@ def main():
     if local_rank==0:
         writer = SummaryWriter(os.path.join(basedir, 'summaries', opt.checkpoints_dir.split('/')[-1]))
 
-    from data.waymo_ft_dataset_multiseq import WaymoFtDataset
-    train_dataset = WaymoFtDataset(opt)
+    from data.scannet_distill_dataset import ScannetFtDataset
+    train_dataset = ScannetFtDataset(opt)
     sampler = torch.utils.data.distributed.DistributedSampler(train_dataset) if opt.ddp_train else None
     data_loader = torch.utils.data.DataLoader(train_dataset, \
         sampler=sampler, \
@@ -607,29 +607,48 @@ def main():
     best_epoch=0
     with torch.no_grad():
         opt.mode = 2
-        print (fmt.RED+'========')
-        print ('VOXLIZED POINT CLOUD')
         points_xyz_all_list, points_embedding_all, points_color_all, points_dir_all, points_conf_all = [],[],[],[],[]
-        for seq_index, points_xyz_all in enumerate(train_dataset.points_xyz_all):
+        points_xyz_all = train_dataset.load_init_depth_points(device="cuda", vox_res=100)
+        opt.vox_res = 900
+        if opt.ranges[0] > -99.0:
+            ranges = torch.as_tensor(opt.ranges, device=points_xyz_all.device, dtype=torch.float32)
+            mask = torch.prod(
+            torch.logical_and(points_xyz_all[..., :3] >= ranges[None, :3], points_xyz_all[..., :3] <= ranges[None, 3:]),
+                    dim=-1) > 0
+            points_xyz_all = points_xyz_all[mask]
+        if opt.vox_res > 0:
             points_xyz_all = [points_xyz_all] if not isinstance(points_xyz_all, list) else points_xyz_all
-            points_xyz_holder = torch.zeros([0,3], dtype=torch.float32).cpu()
-            print (points_xyz_all[0].shape, ':D ----- Before VOXLIZED')
+            points_xyz_holder = torch.zeros([0,3], dtype=points_xyz_all[0].dtype, device="cuda")
             for i in range(len(points_xyz_all)):
                 points_xyz = points_xyz_all[i]
                 vox_res = opt.vox_res // (1.5**i)
-                _, _, sampled_pnt_idx = mvs_utils.construct_vox_points_closest(points_xyz.cuda() if len(points_xyz) < 80000000 else points_xyz[::(len(points_xyz) // 80000000 + 1), ...].cuda(), vox_res)
+                print("load points_xyz", points_xyz.shape)
+                _, sparse_grid_idx, sampled_pnt_idx = mvs_utils.construct_vox_points_closest(points_xyz.cuda() if len(points_xyz) < 80000000 else points_xyz[::(len(points_xyz) // 80000000 + 1), ...].cuda(), vox_res)
                 points_xyz = points_xyz[sampled_pnt_idx, :]
+                print("after voxelize:", points_xyz.shape)
                 points_xyz_holder = torch.cat([points_xyz_holder, points_xyz], dim=0)
+            points_xyz_all = points_xyz_holder
 
-            print (points_xyz_holder.shape, ':D ----- AFTER VOXLIZED')
-            print ('========'+fmt.END)
-            points_xyz_all_list.append(points_xyz_holder.cuda())
-            points_embedding_all.append(torch.randn((1, len(points_xyz_holder), opt.point_features_dim)).cuda())
-            points_conf_all.append(torch.ones((1, len(points_xyz_holder), 1)).cuda())
+        #for sea_index, points_xyz_all in enumerate(train_dataset.points_xyz_all):
+        #    points_xyz_all = [points_xyz_all] if not isinstance(points_xyz_all, list) else points_xyz_all
+        #    points_xyz_holder = torch.zeros([0,3], dtype=torch.float32).cpu()
+        #    print (points_xyz_all[0].shape, ':D ----- Before VOXLIZED')
+        #    for i in range(len(points_xyz_all)):
+        #        points_xyz = points_xyz_all[i]
+        #        vox_res = opt.vox_res // (1.5**i)
+        #        _, _, sampled_pnt_idx = mvs_utils.construct_vox_points_closest(points_xyz.cuda() if len(points_xyz) < 80000000 else points_xyz[::(len(points_xyz) // 80000000 + 1), ...].cuda(), vox_res)
+        #        points_xyz = points_xyz[sampled_pnt_idx, :]
+        #        points_xyz_holder = torch.cat([points_xyz_holder, points_xyz], dim=0)
 
-            if "1" in list(opt.point_color_mode):
-                points_color_all.append(torch.randn((1, len(points_xyz_holder), 3)).cuda())
-                points_dir_all.append(torch.randn((1, len(points_xyz_holder), 3)).cuda())
+        #    print (points_xyz_holder.shape, ':D ----- AFTER VOXLIZED')
+        #    print ('========'+fmt.END)
+        #    points_xyz_all_list.append(points_xyz_holder.cuda())
+        #    points_embedding_all.append(torch.randn((1, len(points_xyz_holder), opt.point_features_dim)).cuda())
+        #    points_conf_all.append(torch.ones((1, len(points_xyz_holder), 1)).cuda())
+
+        #    if "1" in list(opt.point_color_mode):
+        #        points_color_all.append(torch.randn((1, len(points_xyz_holder), 3)).cuda())
+        #        points_dir_all.append(torch.randn((1, len(points_xyz_holder), 3)).cuda())
         all_z = nn.Parameter(get_latents_fn(train_dataset.total, 8, opt.z_dim, device='cuda')[0][0])
 
         opt.resume_iter = opt.resume_iter if opt.resume_iter != "latest" else get_latest_epoch(opt.resume_dir)
@@ -639,11 +658,16 @@ def main():
 
         bg_color = nn.Parameter(torch.zeros((1, opt.shading_color_channel_num))).cuda()
 
-        if "1" in list(opt.point_color_mode):
-            model.set_points(points_xyz_all_list, points_embedding_all, points_color=points_color_all, points_dir=points_dir_all, points_conf=points_conf_all,
-                             Rw2c=None, bg_color=bg_color, stylecode=all_z)
-        else:
-            model.set_points(points_xyz_all_list, points_embedding_all, points_color=None, points_dir=None, points_conf=points_conf_all, Rw2c=None, bg_color=bg_color, stylecode=all_z)
+        #points_xyz_holder = torch.tensor([[-0.5, -0.5, -0.5], [-0.5, -0.5, 0.5], [-0.5, 0.5, -0.5], [0.5, -0.5, -0.5], [-0.5, 0.5, 0.5], [0.5, -0.5, 0.5], [0.5, 0.5, -0.5], [0.5, 0.5, 0.5]]).cuda()
+        points_xyz_all_list.append(points_xyz_holder.cuda())
+        points_embedding_all.append(torch.randn((1, len(points_xyz_holder), opt.point_features_dim)).cuda())
+        points_conf_all.append(torch.ones((1, len(points_xyz_holder), 1)).cuda())
+        #if "1" in list(opt.point_color_mode):
+        #    model.set_points(points_xyz_all_list, points_embedding_all, points_color=points_color_all, points_dir=points_dir_all, points_conf=points_conf_all,
+        #                     Rw2c=None, bg_color=bg_color, stylecode=all_z)
+        #else:
+        model.set_points(points_xyz_all_list, points_embedding_all, points_color=None, points_dir=None, points_conf=points_conf_all, Rw2c=None, bg_color=bg_color, stylecode=all_z)
+        cprint.err('-----initial done------')
         epoch_count = 1
         total_steps = 0
         del points_xyz_all_list, points_embedding_all, points_color_all, points_dir_all, points_conf_all, all_z
@@ -653,7 +677,7 @@ def main():
     model.setup(opt, train_len=train_dataset.total)
     model.train()
 
-    cprint.warn(model.get_networks())
+    #cprint.warn(model.get_networks())
 
     if opt.resume_dir and opt.fix_net==False:
         load_path = os.path.join(opt.resume_dir, str(opt.resume_iter)+'_states.pth')
@@ -671,7 +695,7 @@ def main():
     test_opt.n_threads = 0
     test_opt.prob = 0
     test_opt.split = "test"
-    test_dataset = WaymoFtDataset(test_opt)
+    test_dataset = ScannetFtDataset(test_opt)
 
 #    loss_fn_vgg = lpips.LPIPS(net='vgg', version='0.1').cuda()
     if opt.only_test:
@@ -703,7 +727,7 @@ def main():
             if opt.maximum_step is not None and total_steps >= opt.maximum_step:
                 break
             total_steps += 1
-            data['bg_color'] = bg_color
+            #data['bg_color'] = bg_color
             model.set_input(data)
             model.optimize_parameters(total_steps=total_steps)
             #model.grad_norm()

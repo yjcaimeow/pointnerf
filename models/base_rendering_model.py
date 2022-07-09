@@ -544,9 +544,10 @@ class BaseRenderingModel(BaseModel):
         self.loss_total = 0
         opt = self.opt
         #color losses
-        ray_mask = torch.from_numpy(cv2.resize(np.asarray(self.output['ray_mask'].reshape(64, 96).cpu(), dtype='uint8'), (768, 512), \
-                                               interpolation=cv2.INTER_AREA)).cuda()[512//2:,...]
-        height, width = 512,768
+        #height, width = 64,96
+        #height, width = 512,768
+        #ray_mask = torch.from_numpy(cv2.resize(np.asarray(self.output['ray_mask'].reshape(64, 96).cpu(), dtype='uint8'), (width, height), \
+        #                                       interpolation=cv2.INTER_AREA)).cuda()[height//2:,...]
         for i, name in enumerate(opt.color_loss_items):
             if name.startswith("ray_masked"):
                 unmasked_name = name[len("ray_masked")+1:]
@@ -617,15 +618,31 @@ class BaseRenderingModel(BaseModel):
                 #          fmt.END)
                 if self.opt.half_supervision:
 #                if name.split('_')[-1]=="half":
-                    height, width = 512,768
                     batch_size = self.output[name].shape[0]
-                    if self.opt.fix_net:
-                        mask = torch.from_numpy(1-cv2.resize(self.output["random_masks"][0], (768, 512), interpolation=cv2.INTER_AREA).reshape(batch_size, height, width)[:,height//2:,...][...,None]).cuda()
+                    if self.opt.fix_net and self.opt.perceiver_io:
+                        mask = torch.from_numpy(1-cv2.resize(self.output["random_masks"][0], (width, height), interpolation=cv2.INTER_AREA).reshape(batch_size, height, width)[:,height//2:,...][...,None]).cuda()
                         loss = self.l2loss(self.output[name].reshape(batch_size, height, width, 3)[:,height//2:,...].mul(mask), self.gt_image.reshape(batch_size, height, width, 3)[:,height//2:,...].mul(mask))
                     else:
                         loss = self.l2loss(self.output[name].reshape(batch_size, height, width, 3)[:,height//2:,...], self.gt_image.reshape(batch_size, height, width, 3)[:,height//2:,...])
                 else:
-                    loss = self.l2loss(self.output[name], self.gt_image)
+                    height, width = 480, 640
+                    pixel_idx = self.input['pixel_idx'].view(self.input['pixel_idx'].shape[0], -1, self.input['pixel_idx'].shape[3]).clone()
+                    x,y = pixel_idx[:,:,0], pixel_idx[:,:,1]
+                    edge_mask = torch.zeros([height, width], dtype=torch.bool)
+                    edge_mask[pixel_idx[0,...,1].to(torch.long), pixel_idx[0,...,0].to(torch.long)] = 1
+                    edge_mask=edge_mask.reshape(-1) > 0
+
+                    gt_image = torch.zeros((height*width, 3), dtype=torch.float32).cuda()
+                    gt_image[edge_mask, :] = self.gt_image[:,10:-10,10:-10,:].reshape(1,-1,3)
+
+                    pred_image = torch.zeros((height*width, 3), dtype=torch.float32).cuda()
+                    pred_image[edge_mask, :] = self.output[name].reshape(1, 480, 640, 3)[:,10:-10, 10:-10,:].reshape(1,-1,3)
+
+                    loss = self.l2loss(gt_image, pred_image)
+#                    loss = self.l2loss(self.output[name].reshape(1, 480, 640, 3)[:,10:-10, 10:-10,:], self.gt_image[:,10:-10, 10:-10,:])
+                    #psnr = mse2psnr(loss)
+                    #print (loss, psnr, '------loss psnr------')
+                    #exit()
                 # print("loss", name, torch.max(torch.abs(loss)))
             self.loss_total += (loss * opt.color_loss_weights[i] + 1e-6)
             # loss.register_hook(lambda grad: print(torch.any(torch.isnan(grad)), grad, opt.color_loss_weights[i]))

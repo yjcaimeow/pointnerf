@@ -115,13 +115,14 @@ class WaymoFtDataset(BaseDataset):
         import glob
         self.seq_id, self.images, self.images_4, self.poses, self.intrinsic, self.points_xyz_all, self.camposes, self.centerdirs = [],[],[],[],[],[],[],[]
         self.id_in_seq_list=[]
-        with open('./data/waymo_video_list.txt') as file:
+        with open('./data/waymo_video_list.txt.all') as file:
             filenames = file.readlines()
         file.close()
         self.filenames = []
         for filename in filenames:
             self.filenames.append(filename.strip())
-#        self.filenames = ['segment-11017034898130016754_697_830_717_830_with_camera_labels.tfrecord']
+        #self.filenames = ['segment-11017034898130016754_697_830_717_830_with_camera_labels.tfrecord']
+#        self.filenames = ['segment-12102100359426069856_3931_470_3951_470_with_camera_labels.tfrecord']
 #        self.filenames = ['segment-10247954040621004675_2180_000_2200_000_with_camera_labels.tfrecord']
 #        self.filenames = ['segment-10689101165701914459_2072_300_2092_300_with_camera_labels.tfrecord']
         #self.filenames = glob.glob(os.path.join(opt.filename, '*.tfrecord'))[0:opt.seq_num]
@@ -204,8 +205,8 @@ class WaymoFtDataset(BaseDataset):
         item['h'] = self.height
         item['w'] = self.width
         item['id'] = id
-        if full_img:
-            item['images'] = img[None,...].clone()
+        #if full_img:
+        #    item['images'] = img[None,...].clone()
         subsamplesize = self.opt.random_sample_size
         if self.opt.random_sample == "random":
             px = np.random.randint(0,
@@ -227,6 +228,7 @@ class WaymoFtDataset(BaseDataset):
         raydir = np.reshape(raydir, (-1, 3))
         item['raydir'] = torch.from_numpy(raydir).float()
         item['local_raydir'] = torch.from_numpy(local_dirs).float().reshape(-1,3)
+        #img = cv2.resize(img,  (96, 64), interpolation=cv2.INTER_AREA)
         item['gt_image'] = np.reshape(img, (-1, 3))
         return item
 

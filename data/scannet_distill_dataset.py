@@ -20,9 +20,9 @@ import configparser
 
 from os.path import join
 import cv2
-# import torch.nn.functional as F
 from .data_utils import get_dtu_raydir
 from plyfile import PlyData, PlyElement
+from cprint import *
 
 FLIP_Z = np.asarray([
     [1,0,0],
@@ -87,13 +87,14 @@ def get_ray_directions(H, W, focal, center=None):
 
 class ScannetFtDataset(BaseDataset):
 
-    def initialize(self, opt, img_wh=[800,800], downSample=1.0, max_len=-1, norm_w2c=None, norm_c2w=None):
+    def __init__(self, opt, img_wh=[640,480], downSample=1, max_len=-1, norm_w2c=None, norm_c2w=None):
         self.opt = opt
         self.data_dir = opt.data_root
         self.scan = opt.scan
         self.split = opt.split
 
-        self.img_wh = (int(opt.img_wh[0] * downSample), int(opt.img_wh[1] * downSample))
+        self.img_wh = (int(img_wh[0] * downSample), int(img_wh[1] * downSample))
+        cprint (self.img_wh, '----image shape')
         self.downSample = downSample
 
         self.scale_factor = 1.0 / 1.0
@@ -118,13 +119,6 @@ class ScannetFtDataset(BaseDataset):
         self.build_init_metas()
 
         self.norm_w2c, self.norm_c2w = torch.eye(4, device="cuda", dtype=torch.float32), torch.eye(4, device="cuda", dtype=torch.float32)
-        # if opt.normview > 0:
-        #     _, _ , w2cs, c2ws = self.build_proj_mats(list=torch.load('../data/dtu_configs/pairs.th')[f'{self.scan}_test'])
-        #     norm_w2c, norm_c2w = self.normalize_cam(w2cs, c2ws)
-        # if opt.normview >= 2:
-        #     self.norm_w2c, self.norm_c2w = torch.as_tensor(norm_w2c, device="cuda", dtype=torch.float32), torch.as_tensor(norm_c2w, device="cuda", dtype=torch.float32)
-        #     norm_w2c, norm_c2w = None, None
-        # self.proj_mats, self.intrinsics, self.world2cams, self.cam2worlds = self.build_proj_mats()
         self.intrinsic = np.loadtxt(os.path.join(self.data_dir, self.scan, "exported/intrinsic/intrinsic_color.txt")).astype(np.float32)[:3,:3]
         self.depth_intrinsic = np.loadtxt(
             os.path.join(self.data_dir, self.scan, "exported/intrinsic/intrinsic_depth.txt")).astype(np.float32)[:3, :3]
@@ -132,12 +126,9 @@ class ScannetFtDataset(BaseDataset):
         ori_img_shape = list(self.transform(img).shape)  # (4, h, w)
         self.intrinsic[0, :] *= (self.width / ori_img_shape[2])
         self.intrinsic[1, :] *= (self.height / ori_img_shape[1])
-        # print(self.intrinsic)
         self.total = len(self.id_list)
-        print("dataset total:", self.split, self.total)
-
-
-
+        #self.poses = np.load('/mnt/cache/caiyingjie/code/mipnerf-pytorch/scannet_0006_processed_poses.npz')['poses']
+        print("dataset total:", self.split, self.total, self.img_wh)
     @staticmethod
     def modify_commandline_options(parser, is_train):
         # ['random', 'random2', 'patch'], default: no random sample
@@ -323,12 +314,11 @@ class ScannetFtDataset(BaseDataset):
             self.test_id_list = [self.all_id_list[i] for i in range(len(self.all_id_list)) if (i % step) !=0] if self.opt.test_num_step != 1 else self.all_id_list
 
         print("all_id_list",len(self.all_id_list))
-        print("test_id_list",len(self.test_id_list), self.test_id_list)
+        print("test_id_list",len(self.test_id_list))
         print("train_id_list",len(self.train_id_list))
         self.train_id_list = self.remove_blurry(self.train_id_list)
         self.id_list = self.train_id_list if self.split=="train" else self.test_id_list
         self.view_id_list=[]
-
 
     def filter_valid_id(self, id_list):
         empty_lst=[]
@@ -563,12 +553,27 @@ class ScannetFtDataset(BaseDataset):
 
         item = {}
         vid = self.id_list[id]
+        #vid = 0
         image_path = os.path.join(self.data_dir, self.scan, "exported/color/{}.jpg".format(vid))
         # print("vid",vid)
         img = Image.open(image_path)
         img = img.resize(self.img_wh, Image.LANCZOS)
         img = self.transform(img)  # (4, h, w)
         c2w = np.loadtxt(os.path.join(self.data_dir, self.scan, "exported/pose", "{}.txt".format(vid))).astype(np.float32)
+        #mipnerf_sample_loc, mipnerf_sample_fea
+        #npz_data = np.load(os.path.join('/mnt/cache/caiyingjie/code/mipnerf-pytorch/logs/mipnerf.scannet_wotscale_con/renderonly_test_089999', "{:03d}_mipnerf.npz".format(vid)))
+        #npz_data = np.load('/mnt/cache/caiyingjie/results_pointnerf_scanenet006_0.npz')
+        #item['sample_loc'] = npz_data['sample_loc']
+        #item['sample_loc_w'] = npz_data['sample_loc_w']
+        #item['ray_valid'] = npz_data['ray_valid']
+        #item['decoded_features'] = npz_data['decoded_features']
+        #item['ray_dist'] = npz_data['ray_dist']
+        #item['z_vals'] = npz_data['z_vals']
+        #item['raw'] = npz_data['raw']
+        #item['rgb'] = npz_data['rgb']
+        #item['weights'] = npz_data['weights']
+        #rays_o, rays_d = get_rays_np(self.height, self.width, self.intrinsic, c2w)
+        #print (rays_o.shape, rays_d.shape, '=====rays_o and rays_d shape =====')
         # w2c = np.linalg.inv(c2w)
         intrinsic = self.intrinsic
 
@@ -576,10 +581,8 @@ class ScannetFtDataset(BaseDataset):
         width, height = img.shape[2], img.shape[1]
         camrot = (c2w[0:3, 0:3])
         campos = c2w[0:3, 3]
-        # print("camrot", camrot, campos)
 
         item["intrinsic"] = intrinsic
-        # item["intrinsic"] = sample['intrinsics'][0, ...]
         item["campos"] = torch.from_numpy(campos).float()
         item["c2w"] = torch.from_numpy(c2w).float()
         item["camrotc2w"] = torch.from_numpy(camrot).float() # @ FLIP_Z
@@ -601,36 +604,38 @@ class ScannetFtDataset(BaseDataset):
             item['images'] = img[None,...].clone()
         gt_image = np.transpose(img, (1, 2, 0))
         subsamplesize = self.opt.random_sample_size
-        if self.opt.random_sample == "patch":
-            indx = np.random.randint(margin, width - margin - subsamplesize + 1)
-            indy = np.random.randint(margin, height - margin - subsamplesize + 1)
-            px, py = np.meshgrid(
-                np.arange(indx, indx + subsamplesize).astype(np.float32),
-                np.arange(indy, indy + subsamplesize).astype(np.float32))
-        elif self.opt.random_sample == "random":
-            px = np.random.randint(margin,
-                                   width-margin,
-                                   size=(subsamplesize,
-                                         subsamplesize)).astype(np.float32)
-            py = np.random.randint(margin,
-                                   height-margin,
-                                   size=(subsamplesize,
-                                         subsamplesize)).astype(np.float32)
-        elif self.opt.random_sample == "random2":
-            px = np.random.uniform(margin,
-                                   width - margin - 1e-5,
-                                   size=(subsamplesize,
-                                         subsamplesize)).astype(np.float32)
-            py = np.random.uniform(margin,
-                                   height - margin - 1e-5,
-                                   size=(subsamplesize,
-                                         subsamplesize)).astype(np.float32)
-        elif self.opt.random_sample == "proportional_random":
-            raise Exception("no gt_mask, no proportional_random !!!")
-        else:
-            px, py = np.meshgrid(
+        #if self.opt.random_sample == "patch":
+        #    indx = np.random.randint(margin, width - margin - subsamplesize + 1)
+        #    indy = np.random.randint(margin, height - margin - subsamplesize + 1)
+        #    px, py = np.meshgrid(
+        #        np.arange(indx, indx + subsamplesize).astype(np.float32),
+        #        np.arange(indy, indy + subsamplesize).astype(np.float32))
+        #elif self.opt.random_sample == "random":
+        #    px = np.random.randint(margin,
+        #                           width-margin,
+        #                           size=(subsamplesize,
+        #                                 subsamplesize)).astype(np.float32)
+        #    py = np.random.randint(margin,
+        #                           height-margin,
+        #                           size=(subsamplesize,
+        #                                 subsamplesize)).astype(np.float32)
+        #elif self.opt.random_sample == "random2":
+        #    px = np.random.uniform(margin,
+        #                           width - margin - 1e-5,
+        #                           size=(subsamplesize,
+        #                                 subsamplesize)).astype(np.float32)
+        #    py = np.random.uniform(margin,
+        #                           height - margin - 1e-5,
+        #                           size=(subsamplesize,
+        #                                 subsamplesize)).astype(np.float32)
+        #elif self.opt.random_sample == "proportional_random":
+        #    raise Exception("no gt_mask, no proportional_random !!!")
+        #else:
+        px, py = np.meshgrid(
                 np.arange(margin, width - margin).astype(np.float32),
                 np.arange(margin, height- margin).astype(np.float32))
+        #px, py = np.meshgrid(np.arange(0, self.width).astype(np.float32),
+        #                     np.arange(0, self.height).astype(np.float32))
         pixelcoords = np.stack((px, py), axis=-1).astype(np.float32)  # H x W x 2
         # raydir = get_cv_raydir(pixelcoords, self.height, self.width, focal, camrot)
         item["pixel_idx"] = pixelcoords
@@ -638,9 +643,11 @@ class ScannetFtDataset(BaseDataset):
         raydir = get_dtu_raydir(pixelcoords, item["intrinsic"], camrot, self.opt.dir_norm > 0)
         raydir = np.reshape(raydir, (-1, 3))
         item['raydir'] = torch.from_numpy(raydir).float()
-        gt_image = gt_image[py.astype(np.int32), px.astype(np.int32)]
+        #item['rays_o'] = torch.from_numpy(rays_o).float()
+        #item['rays_d'] = torch.from_numpy(rays_d).float()
+        #gt_image = gt_image[py.astype(np.int32), px.astype(np.int32)]
         # gt_mask = gt_mask[py.astype(np.int32), px.astype(np.int32), :]
-        gt_image = np.reshape(gt_image, (-1, 3))
+        #gt_image = np.reshape(gt_image, (-1, 3))
         item['gt_image'] = gt_image
 
         if self.bg_color:

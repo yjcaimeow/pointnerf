@@ -826,9 +826,7 @@ class NeuralPoints(nn.Module):
             sample_pidx_tensor, sample_loc_tensor, sample_loc_w_tensor, sample_ray_dirs_tensor, sample_local_ray_dirs_tensor, ray_mask_tensor, vsize, ranges = self.querier.query_points(pixel_idx_tensor, point_xyz_pers_tensor, \
                                 self.xyz_middle[None,...], actual_numpoints_tensor, h, w, intrinsic, near_plane, far_plane, ray_dirs_tensor, local_ray_dirs_tensor, cam_pos_tensor, cam_rot_tensor, inputs['vsize'])
         else:
-            #sample_pidx_tensor, sample_loc_tensor, sample_loc_w_tensor, sample_ray_dirs_tensor, sample_local_ray_dirs_tensor, ray_mask_tensor, vsize, ranges, raypos_tensor, index_tensor = self.querier.query_points(pixel_idx_tensor, point_xyz_pers_tensor, \
-            #                    self.xyz[None,...], actual_numpoints_tensor, h, w, intrinsic, near_plane, far_plane, ray_dirs_tensor, local_ray_dirs_tensor, cam_pos_tensor, cam_rot_tensor, inputs['vsize'])
-            return self.querier.query_points(pixel_idx_tensor, point_xyz_pers_tensor, \
+            sample_pidx_tensor, sample_loc_tensor, sample_loc_w_tensor, sample_ray_dirs_tensor, sample_local_ray_dirs_tensor, ray_mask_tensor, vsize, ranges, raypos_tensor, index_tensor = self.querier.query_points(pixel_idx_tensor, point_xyz_pers_tensor, \
                                 self.xyz[None,...], actual_numpoints_tensor, h, w, intrinsic, near_plane, far_plane, ray_dirs_tensor, local_ray_dirs_tensor, cam_pos_tensor, cam_rot_tensor, inputs['vsize'])
 
         # print("ray_mask_tensor",ray_mask_tensor.shape)
@@ -960,7 +958,12 @@ class NeuralPoints(nn.Module):
         input = self.pointuniform(torch.cat([input,input], dim=0), std)
         return input
 
-    def forward(self, inputs, use_middle=False):
+    def forward(self, inputs=None, use_middle=False):
+        #h, w, intrinsic, c2w = inputs["h"], inputs["w"], inputs["intrinsic"], inputs["c2w"]
+        #self.xyz, _, fov_ids, pts_2d = get_lidar_in_image_fov(self.xyz_all, c2w.squeeze(), intrinsic.squeeze(), xmin=0, ymin=0, xmax=int(w), ymax=int(h), return_more=True)
+        #self.points_conf = self.points_conf_all.squeeze(0)[fov_ids].unsqueeze(0)
+        #self.points_embeding = self.points_embeding_all.squeeze(0)[fov_ids].unsqueeze(0)
+        #return
         pixel_idx, camrotc2w, campos, near_plane, far_plane, h, w, intrinsic, c2w = inputs["pixel_idx"].to(torch.int32), inputs["camrotc2w"], inputs["campos"], inputs["near"], inputs["far"], \
             inputs["h"], inputs["w"], inputs["intrinsic"], inputs["c2w"]
         img_fea, img_fea_2h = None, None
@@ -992,35 +995,18 @@ class NeuralPoints(nn.Module):
             else:
                 self.xyz, _, fov_ids, pts_2d = get_lidar_in_image_fov(self.xyz_all, c2w.squeeze(), intrinsic.squeeze(), xmin=0, ymin=0, xmax=int(w), ymax=int(h), return_more=True)
                 self.points_color = self.points_color_all.squeeze(0)[fov_ids].unsqueeze(0)
-                self.points_dir = self.points_dir_all.squeeze(0)[fov_ids].unsqueeze(0)
-                self.points_conf = self.points_conf_all.squeeze(0)[fov_ids].unsqueeze(0)
                 self.points_embeding = self.points_embeding_all.squeeze(0)[fov_ids].unsqueeze(0)
 
-        elif self.opt.fov and use_middle:
-            self.xyz_middle, _, fov_ids, _  = get_lidar_in_image_fov(self.xyz_middle_all, c2w.squeeze(), intrinsic.squeeze(), xmin=0, ymin=0, xmax=int(w), ymax=int(h), return_more=True)
-            self.points_color_middle = self.points_color_middle_all.squeeze(0)[fov_ids].unsqueeze(0)
-            self.points_dir_middle = self.points_dir_middle_all.squeeze(0)[fov_ids].unsqueeze(0)
-            self.points_conf_middle = self.points_conf_middle_all.squeeze(0)[fov_ids].unsqueeze(0)
-            self.points_embeding_middle = self.points_embeding_middle_all.squeeze(0)[fov_ids].unsqueeze(0)
-
-        #sample_pidx, sample_loc, ray_mask_tensor, point_xyz_pers_tensor, sample_loc_w_tensor, sample_ray_dirs_tensor, sample_local_ray_dirs_tensor, vsize, raypos_tensor, index_tensor = self.get_point_indices(inputs, camrotc2w, campos, pixel_idx, \
-        #        torch.min(near_plane).cpu().numpy(), torch.max(far_plane).cpu().numpy(), torch.max(h).cpu().numpy(), torch.max(w).cpu().numpy(), intrinsic.cpu().numpy()[0], vox_query=self.opt.NN<0, use_middle=use_middle)
-        return self.get_point_indices(inputs, camrotc2w, campos, pixel_idx, \
+        sample_pidx, sample_loc, ray_mask_tensor, point_xyz_pers_tensor, sample_loc_w_tensor, sample_ray_dirs_tensor, sample_local_ray_dirs_tensor, vsize, raypos_tensor, index_tensor = self.get_point_indices(inputs, camrotc2w, campos, pixel_idx, \
                 torch.min(near_plane).cpu().numpy(), torch.max(far_plane).cpu().numpy(), torch.max(h).cpu().numpy(), torch.max(w).cpu().numpy(), intrinsic.cpu().numpy()[0], vox_query=self.opt.NN<0, use_middle=use_middle)
 
         sample_pnt_mask = sample_pidx >= 0
         B, R, SR, K = sample_pidx.shape
         sample_pidx = torch.clamp(sample_pidx, min=0).view(-1).long()
-        if use_middle:
-            sampled_embedding = torch.index_select(torch.cat([self.xyz_middle[None, ...], point_xyz_pers_tensor, self.points_embeding_middle], dim=-1), 1, sample_pidx).view(B, R, SR, K, self.points_embeding_middle.shape[2]+self.xyz_middle.shape[1]*2)
-            sampled_color = None if self.points_color_middle is None else torch.index_select(self.points_color_middle, 1, sample_pidx).view(B, R, SR, K, self.points_color_middle.shape[2])
-            sampled_dir = None if self.points_dir_middle is None else torch.index_select(self.points_dir_middle, 1, sample_pidx).view(B, R, SR, K, self.points_dir_middle.shape[2])
-            sampled_conf = None if self.points_conf_middle is None else torch.index_select(self.points_conf_middle, 1, sample_pidx).view(B, R, SR, K, self.points_conf_middle.shape[2])
-        else:
-            sampled_embedding = torch.index_select(torch.cat([self.xyz[None, ...], point_xyz_pers_tensor, self.points_embeding], dim=-1), 1, sample_pidx).view(B, R, SR, K, self.points_embeding.shape[2]+self.xyz.shape[1]*2)
-            sampled_color = None if self.points_color is None else torch.index_select(self.points_color, 1, sample_pidx).view(B, R, SR, K, self.points_color.shape[2])
-            sampled_dir = None if self.points_dir is None else torch.index_select(self.points_dir, 1, sample_pidx).view(B, R, SR, K, self.points_dir.shape[2])
-            sampled_conf = None if self.points_conf is None else torch.index_select(self.points_conf, 1, sample_pidx).view(B, R, SR, K, self.points_conf.shape[2])
+        sampled_embedding = torch.index_select(torch.cat([self.xyz[None, ...], point_xyz_pers_tensor, self.points_embeding], dim=-1), 1, sample_pidx).view(B, R, SR, K, self.points_embeding.shape[2]+self.xyz.shape[1]*2)
+        sampled_color = None if self.points_color is None else torch.index_select(self.points_color, 1, sample_pidx).view(B, R, SR, K, self.points_color.shape[2])
+        sampled_dir = None if self.points_dir is None else torch.index_select(self.points_dir, 1, sample_pidx).view(B, R, SR, K, self.points_dir.shape[2])
+        sampled_conf = None if self.points_conf is None else torch.index_select(self.points_conf, 1, sample_pidx).view(B, R, SR, K, self.points_conf.shape[2])
 
         sampled_Rw2c = self.Rw2c if self.Rw2c.dim() == 2 else torch.index_select(self.Rw2c, 0, sample_pidx).view(B, R, SR, K, self.Rw2c.shape[1], self.Rw2c.shape[2])
 

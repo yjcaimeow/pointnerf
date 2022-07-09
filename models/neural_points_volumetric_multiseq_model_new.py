@@ -6,8 +6,7 @@ from utils import format as fmt
 import random
 from utils.kitti_object import trans_world2nerf
 from .helpers.networks import init_seq, positional_encoding, effective_range
-import torch
-from torch_cluster import knn
+#import faiss
 from cprint import *
 import time
 
@@ -400,17 +399,14 @@ class NeuralPointsRayMarching(nn.Module):
                 query_points = sample_loc_w_i[ray_valid_i][None,...].contiguous()
                 query_points_local = sample_loc_i[ray_valid_i][None, ...].contiguous()
                 #gt_D, gt_I = gpu_index.search(query_points.squeeze().view(-1,3).cpu().numpy(), 8) # nq*k
-                assign_index = knn(self.neural_points.xyz.squeeze(), query_points.squeeze().view(-1,3), 8)[1]
+
                 ##--- get the pcd and feature for each sample loc and knn pcd
                 #ref_xyz = self.neural_points.xyz.squeeze()[gt_I.reshape(-1)].reshape(1, -1, 8, 3)
                 #ref_fea = self.neural_points.points_embeding.squeeze()[gt_I.reshape(-1)].reshape(-1, 8, self.neural_points.points_embeding.shape[-1])
                 #ref_xyz_pers = self.w2pers(ref_xyz.view(-1,3), camrotc2w[batch_index:batch_index+1], campos[batch_index:batch_index+1]).reshape(1, -1, 8, 3)
-                #ref_xyz     = sampled_xyz_i[ray_valid_i][None,...]
-                #ref_xyz_pers= sampled_xyz_pers_i[ray_valid_i][None, ...]
-                #ref_fea = sampled_embedding_i[ray_valid_i]
-                ref_xyz = self.neural_points.xyz.squeeze()[assign_index].reshape(1, -1, 8, 3)
-                ref_fea = self.neural_points.points_embeding.squeeze()[assign_index].reshape(-1, 8, self.neural_points.points_embeding.shape[-1])
-                ref_xyz_pers = self.w2pers(ref_xyz.view(-1,3), camrotc2w[batch_index:batch_index+1], campos[batch_index:batch_index+1]).reshape(1, -1, 8, 3)
+                ref_xyz     = sampled_xyz_i[ray_valid_i][None,...]
+                ref_xyz_pers= sampled_xyz_pers_i[ray_valid_i][None, ...]
+                ref_fea = sampled_embedding_i[ray_valid_i]
                 #ref_conf= sampled_conf_i[ray_valid_i]
                 # old
                 #ref_xyz_residual = ref_xyz - query_points_local[:,None,:]
@@ -629,7 +625,6 @@ class NeuralPointsRayMarching(nn.Module):
         output = self.fill_invalid(output, bg_color, perceiver_io_feature)
 
         output['final_coarse_raycolor'] = output['coarse_raycolor'].reshape(batch_size, img_h, img_w, -1)
-        return output
         #output['final_coarse_raycolor'] = output['coarse_raycolor'].reshape(batch_size, img_h, img_w, self.opt.shading_color_channel_num)
         if self.opt.is_train:
             style_code = self.neural_points.stylecode[0][id]
