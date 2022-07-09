@@ -425,21 +425,21 @@ class PerceiverEncoder(nn.Module):
         self.latent = nn.Parameter(torch.empty(num_latents, num_latent_channels))
         self._init_parameters()
 
-        in_channels = num_input_channels
-        out_channels = in_channels
-        block1 = []
-        for i in range(2):
-            block1.append(nn.Linear(in_channels, out_channels))
-            block1.append(nn.LeakyReLU(0.01))
-            in_channels = out_channels
-        self.init_block = nn.Sequential(*block1)
+        #in_channels = num_input_channels
+        #out_channels = in_channels
+        #block1 = []
+        #for i in range(2):
+        #    block1.append(nn.Linear(in_channels, out_channels))
+        #    block1.append(nn.LeakyReLU(0.01))
+        #    in_channels = out_channels
+        #self.init_block = nn.Sequential(*block1)
 
     def _init_parameters(self):
         with torch.no_grad():
             self.latent.normal_(0.0, 0.02).clamp_(-2.0, 2.0)
 
     def forward(self, x, pad_mask=None):
-        x = self.init_block(x)
+        #x = self.init_block(x)
         b, *_ = x.shape
 
         # encode task-specific input
@@ -528,6 +528,16 @@ class PerceiverDecoder(nn.Module):
         color_block.append(nn.Linear(out_channels, num_output_query_channels))
         self.color_branch = nn.Sequential(*color_block)
 
+        #color_block = []
+        #in_channels = num_output_query_channels
+        #out_channels = num_output_query_channels
+        #for i in range(3 - 1):
+        #    color_block.append(nn.Linear(in_channels, out_channels))
+        #    color_block.append(nn.LeakyReLU(0.01))
+        #    in_channels = out_channels
+        #color_block.append(nn.Linear(out_channels, 3))
+        #self.color_branch = nn.Sequential(*color_block)
+
     def forward(self, x, output_query=None, local_dir=None):
         #output_query = self.output_adapter.output_query(x)
         if self.perceiver_io_type=='each_sample_loc':
@@ -537,8 +547,11 @@ class PerceiverDecoder(nn.Module):
             output_query = self.initial_linear(output_query)
         output = self.cross_attn(output_query, x)
         alpha = self.density_super_act(self.alpha_linear(output)-1)
-        feature = self.color_branch(torch.cat((output, local_dir), -1))
-        return feature, alpha
+        if local_dir is not None:
+            feature = self.color_branch(torch.cat((output, local_dir), -1))
+            return feature, alpha
+
+        return output, alpha
 
 
 class PerceiverIO(Sequential):
