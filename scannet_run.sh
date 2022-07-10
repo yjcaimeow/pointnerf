@@ -3,9 +3,9 @@ scale_factor=20
 frames_length=30
 zoom_in_scale=8
 nrCheckpoint="../checkpoints"
-#nrDataRoot="/mnt/cache/caiyingjie/code/data_src"
-nrDataRoot="/home/xschen/yjcai/code/offical/pointnerf/data_src"
-name='waymo'
+nrDataRoot="/mnt/cache/caiyingjie/data"
+#nrDataRoot="/home/xschen/yjcai/code/offical/pointnerf/data_src"
+name='scannet'
 
 resume_iter=$2
 
@@ -48,7 +48,7 @@ kernel_size=" 3 3 3 "
 query_size=" 3 3 3 "
 vsize=" 0.008 0.008 0.008 " 
 wcoord_query=1
-z_depth_dim=300
+z_depth_dim=400
 max_o=610000
 ranges=" -10.0 -10.0 -10.0 10.0 10.0 10.0 "
 SR=24
@@ -141,9 +141,6 @@ iter_pg=200
 
 color_loss_weights=" 1.0 "
 color_loss_items='final_coarse_raycolor '
-#color_loss_weights=" 0.0 1.0 "
-#color_loss_items='ray_miss_final_coarse_raycolor ray_masked_final_coarse_raycolor'
-#color_loss_items='ray_masked_final_coarse_raycolor '
 test_color_loss_items='coarse_raycolor ray_miss_coarse_raycolor ray_masked_coarse_raycolor final_coarse_raycolor'
 
 bg_color="white" #"0.0,0.0,0.0,1.0,1.0,1.0"
@@ -153,15 +150,12 @@ seq_num=1
 GPUNUM=1
 NODENUM=1
 JOBNAME=pointnerf
-PART=pat_taurus
+PART=3dv-share
 
-#--perceiver_io_type ${perceiver_io_type} \
-#--perceiver_io \
-basic_agg='mlp'
+basic_agg='attention'
 
-#TOOLS="srun --partition=$PART --quotatype=auto --preempt --gres=gpu:${GPUNUM} -n$NODENUM --ntasks-per-node=1 --cpus-per-task=8"
-#$TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch --nnodes=$NODENUM --nproc_per_node=$GPUNUM --node_rank \$SLURM_PROCID --master_addr=\$(sinfo -Nh -n \$SLURM_NODELIST | head -n 1 | cut -d ' ' -f 1) --master_port $3 train_scannet.py \
-CUDA_VISIBLE_DEVICES=1 python -m torch.distributed.launch --nnodes=$NODENUM --nproc_per_node=$GPUNUM ./train_scannet.py \
+TOOLS="srun --partition=$PART --quotatype=auto --gres=gpu:${GPUNUM} -n$NODENUM --ntasks-per-node=1 --cpus-per-task=4"
+$TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch --nnodes=$NODENUM --nproc_per_node=$GPUNUM --node_rank \$SLURM_PROCID --master_addr=\$(sinfo -Nh -n \$SLURM_NODELIST | head -n 1 | cut -d ' ' -f 1) --master_port $3 train_scannet.py \
     --zoom_in_scale $zoom_in_scale --ddp_train \
     --basic_agg ${basic_agg} \
     --seq_num ${seq_num} \
@@ -279,4 +273,4 @@ CUDA_VISIBLE_DEVICES=1 python -m torch.distributed.launch --nnodes=$NODENUM --np
     --prob_mul $prob_mul \
     --prob_kernel_size $prob_kernel_size \
     --prob_tiers $prob_tiers \
-    --query_size $query_size
+    --query_size $query_size"

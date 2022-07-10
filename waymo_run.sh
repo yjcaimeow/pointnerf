@@ -1,9 +1,5 @@
 #!/bin/bash
-#filename='../waymo_fall_1006_vox100_res128-512.npz'
 filename='/mnt/lustre/caiyingjie/data/selected_waymo/'
-#filename='../'
-#filename='/mnt/cache/caiyingjie/vox_res_all/waymo_fall_1006_vox100_res128-512.npz'
-#filename='/home/yjcai/tmp/'
 scale_factor=20
 frames_length=30
 zoom_in_scale=8
@@ -12,7 +8,6 @@ nrDataRoot="../data_src"
 name='waymo'
 
 resume_iter=$2
-radius=1.0
 
 data_root="${nrDataRoot}/scannet/scans/"
 scan="scene0241_01"
@@ -56,7 +51,7 @@ wcoord_query=1
 z_depth_dim=300
 max_o=610000
 ranges=" 20.0 -10.0 -10.0 10.0 10.0 10.0 "
-SR=12
+SR=24
 K=8
 P=26
 NN=2
@@ -146,29 +141,21 @@ iter_pg=200
 
 color_loss_weights=" 1.0 "
 color_loss_items='final_coarse_raycolor '
-#color_loss_weights=" 0.0 1.0 "
-#color_loss_items='ray_miss_final_coarse_raycolor ray_masked_final_coarse_raycolor'
-#color_loss_items='ray_masked_final_coarse_raycolor '
 test_color_loss_items='coarse_raycolor ray_miss_coarse_raycolor ray_masked_coarse_raycolor final_coarse_raycolor'
 
 bg_color="white" #"0.0,0.0,0.0,1.0,1.0,1.0"
 split="train"
 seq_num=1
-#perceiver_io_type='each_sample_loc'
-#perceiver_io_type='all_lidar_pcd'
-#perceiver_io_type='local_lidar_pcd'
 
 GPUNUM=1
 NODENUM=1
 JOBNAME=pointnerf
-PART=pat_taurus
+PART=3dv-share
 
-#--perceiver_io_type ${perceiver_io_type} \
-#--perceiver_io \
-basic_agg='attention'
+basic_agg='mlp'
 
-TOOLS="srun --partition=$PART --quotatype=auto --preempt --gres=gpu:${GPUNUM} -n$NODENUM --ntasks-per-node=1 --cpus-per-task=8"
-$TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch --nnodes=$NODENUM --nproc_per_node=$GPUNUM --node_rank \$SLURM_PROCID --master_addr=\$(sinfo -Nh -n \$SLURM_NODELIST | head -n 1 | cut -d ' ' -f 1) --master_port $3 train_iter.py \
+TOOLS="srun --partition=$PART --quotatype=auto --preempt --gres=gpu:${GPUNUM} -n$NODENUM --ntasks-per-node=1 --cpus-per-task=4"
+$TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch --nnodes=$NODENUM --nproc_per_node=$GPUNUM --node_rank \$SLURM_PROCID --master_addr=\$(sinfo -Nh -n \$SLURM_NODELIST | head -n 1 | cut -d ' ' -f 1) --master_port $3 train_waymo.py \
     --zoom_in_scale $zoom_in_scale --ddp_train \
     --half_supervision \
     --basic_agg ${basic_agg} \

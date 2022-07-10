@@ -959,11 +959,6 @@ class NeuralPoints(nn.Module):
         return input
 
     def forward(self, inputs=None, use_middle=False):
-        #h, w, intrinsic, c2w = inputs["h"], inputs["w"], inputs["intrinsic"], inputs["c2w"]
-        #self.xyz, _, fov_ids, pts_2d = get_lidar_in_image_fov(self.xyz_all, c2w.squeeze(), intrinsic.squeeze(), xmin=0, ymin=0, xmax=int(w), ymax=int(h), return_more=True)
-        #self.points_conf = self.points_conf_all.squeeze(0)[fov_ids].unsqueeze(0)
-        #self.points_embeding = self.points_embeding_all.squeeze(0)[fov_ids].unsqueeze(0)
-        #return
         pixel_idx, camrotc2w, campos, near_plane, far_plane, h, w, intrinsic, c2w = inputs["pixel_idx"].to(torch.int32), inputs["camrotc2w"], inputs["campos"], inputs["near"], inputs["far"], \
             inputs["h"], inputs["w"], inputs["intrinsic"], inputs["c2w"]
         img_fea, img_fea_2h = None, None
