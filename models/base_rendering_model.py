@@ -625,24 +625,21 @@ class BaseRenderingModel(BaseModel):
                     else:
                         loss = self.l2loss(self.output[name].reshape(batch_size, height, width, 3)[:,height//2:,...], self.gt_image.reshape(batch_size, height, width, 3)[:,height//2:,...])
                 else:
-                    height, width = 480, 640
-                    pixel_idx = self.input['pixel_idx'].view(self.input['pixel_idx'].shape[0], -1, self.input['pixel_idx'].shape[3]).clone()
-                    x,y = pixel_idx[:,:,0], pixel_idx[:,:,1]
-                    edge_mask = torch.zeros([height, width], dtype=torch.bool)
-                    edge_mask[pixel_idx[0,...,1].to(torch.long), pixel_idx[0,...,0].to(torch.long)] = 1
-                    edge_mask=edge_mask.reshape(-1) > 0
+                    #height, width = 480, 640
+                    #pixel_idx = self.input['pixel_idx'].view(self.input['pixel_idx'].shape[0], -1, self.input['pixel_idx'].shape[3]).clone()
+                    #x,y = pixel_idx[:,:,0], pixel_idx[:,:,1]
+                    #edge_mask = torch.zeros([height, width], dtype=torch.bool)
+                    #edge_mask[pixel_idx[0,...,1].to(torch.long), pixel_idx[0,...,0].to(torch.long)] = 1
+                    #edge_mask=edge_mask.reshape(-1) > 0
 
-                    gt_image = torch.zeros((height*width, 3), dtype=torch.float32).cuda()
-                    gt_image[edge_mask, :] = self.gt_image[:,10:-10,10:-10,:].reshape(1,-1,3)
+                    #gt_image = torch.zeros((height*width, 3), dtype=torch.float32).cuda()
+                    #gt_image[edge_mask, :] = self.gt_image[:,10:-10,10:-10,:].reshape(1,-1,3)
 
-                    pred_image = torch.zeros((height*width, 3), dtype=torch.float32).cuda()
-                    pred_image[edge_mask, :] = self.output[name].reshape(1, 480, 640, 3)[:,10:-10, 10:-10,:].reshape(1,-1,3)
+                    #pred_image = torch.zeros((height*width, 3), dtype=torch.float32).cuda()
+                    #pred_image[edge_mask, :] = self.output[name].reshape(1, 480, 640, 3)[:,10:-10, 10:-10,:].reshape(1,-1,3)
 
-                    loss = self.l2loss(gt_image, pred_image)
-#                    loss = self.l2loss(self.output[name].reshape(1, 480, 640, 3)[:,10:-10, 10:-10,:], self.gt_image[:,10:-10, 10:-10,:])
-                    #psnr = mse2psnr(loss)
-                    #print (loss, psnr, '------loss psnr------')
-                    #exit()
+                    #loss = self.l2loss(gt_image, pred_image)
+                    loss = self.l2loss(self.output[name], self.gt_image)
                 # print("loss", name, torch.max(torch.abs(loss)))
             self.loss_total += (loss * opt.color_loss_weights[i] + 1e-6)
             # loss.register_hook(lambda grad: print(torch.any(torch.isnan(grad)), grad, opt.color_loss_weights[i]))

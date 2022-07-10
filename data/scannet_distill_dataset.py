@@ -20,7 +20,7 @@ import configparser
 
 from os.path import join
 import cv2
-from .data_utils import get_dtu_raydir
+from .data_utils import get_dtu_raydir, get_blender_raydir
 from plyfile import PlyData, PlyElement
 from cprint import *
 
@@ -94,7 +94,8 @@ class ScannetFtDataset(BaseDataset):
         self.split = opt.split
 
         self.img_wh = (int(img_wh[0] * downSample), int(img_wh[1] * downSample))
-        cprint (self.img_wh, '----image shape')
+        cprint.err('----image shape')
+        cprint.err(self.img_wh)
         self.downSample = downSample
 
         self.scale_factor = 1.0 / 1.0
@@ -560,6 +561,7 @@ class ScannetFtDataset(BaseDataset):
         img = img.resize(self.img_wh, Image.LANCZOS)
         img = self.transform(img)  # (4, h, w)
         c2w = np.loadtxt(os.path.join(self.data_dir, self.scan, "exported/pose", "{}.txt".format(vid))).astype(np.float32)
+        c2w = np.concatenate([c2w[:, 0:1], -c2w[:, 1:2], -c2w[:, 2:3], c2w[:, 3:4]], -1)
         #mipnerf_sample_loc, mipnerf_sample_fea
         #npz_data = np.load(os.path.join('/mnt/cache/caiyingjie/code/mipnerf-pytorch/logs/mipnerf.scannet_wotscale_con/renderonly_test_089999', "{:03d}_mipnerf.npz".format(vid)))
         #npz_data = np.load('/mnt/cache/caiyingjie/results_pointnerf_scanenet006_0.npz')
@@ -604,21 +606,21 @@ class ScannetFtDataset(BaseDataset):
             item['images'] = img[None,...].clone()
         gt_image = np.transpose(img, (1, 2, 0))
         subsamplesize = self.opt.random_sample_size
-        #if self.opt.random_sample == "patch":
-        #    indx = np.random.randint(margin, width - margin - subsamplesize + 1)
-        #    indy = np.random.randint(margin, height - margin - subsamplesize + 1)
-        #    px, py = np.meshgrid(
-        #        np.arange(indx, indx + subsamplesize).astype(np.float32),
-        #        np.arange(indy, indy + subsamplesize).astype(np.float32))
-        #elif self.opt.random_sample == "random":
-        #    px = np.random.randint(margin,
-        #                           width-margin,
-        #                           size=(subsamplesize,
-        #                                 subsamplesize)).astype(np.float32)
-        #    py = np.random.randint(margin,
-        #                           height-margin,
-        #                           size=(subsamplesize,
-        #                                 subsamplesize)).astype(np.float32)
+        if self.opt.random_sample == "patch":
+            indx = np.random.randint(margin, width - margin - subsamplesize + 1)
+            indy = np.random.randint(margin, height - margin - subsamplesize + 1)
+            px, py = np.meshgrid(
+                np.arange(indx, indx + subsamplesize).astype(np.float32),
+                np.arange(indy, indy + subsamplesize).astype(np.float32))
+        elif self.opt.random_sample == "random":
+            px = np.random.randint(margin,
+                                   width-margin,
+                                   size=(subsamplesize,
+                                         subsamplesize)).astype(np.float32)
+            py = np.random.randint(margin,
+                                   height-margin,
+                                   size=(subsamplesize,
+                                         subsamplesize)).astype(np.float32)
         #elif self.opt.random_sample == "random2":
         #    px = np.random.uniform(margin,
         #                           width - margin - 1e-5,
@@ -631,23 +633,25 @@ class ScannetFtDataset(BaseDataset):
         #elif self.opt.random_sample == "proportional_random":
         #    raise Exception("no gt_mask, no proportional_random !!!")
         #else:
-        px, py = np.meshgrid(
-                np.arange(margin, width - margin).astype(np.float32),
-                np.arange(margin, height- margin).astype(np.float32))
+        #px, py = np.meshgrid(
+        #        np.arange(margin, width - margin).astype(np.float32),
+        #        np.arange(margin, height- margin).astype(np.float32))
         #px, py = np.meshgrid(np.arange(0, self.width).astype(np.float32),
         #                     np.arange(0, self.height).astype(np.float32))
         pixelcoords = np.stack((px, py), axis=-1).astype(np.float32)  # H x W x 2
         # raydir = get_cv_raydir(pixelcoords, self.height, self.width, focal, camrot)
         item["pixel_idx"] = pixelcoords
         # print("pixelcoords", pixelcoords.reshape(-1,2)[:10,:])
-        raydir = get_dtu_raydir(pixelcoords, item["intrinsic"], camrot, self.opt.dir_norm > 0)
+        local_dirs, raydir = get_blender_raydir(pixelcoords, self.height, self.width, item["intrinsic"][0][0], camrot, self.opt.dir_norm > 0)
+#        local_dirs, raydir = get_dtu_raydir(pixelcoords, item["intrinsic"], camrot, self.opt.dir_norm > 0)
         raydir = np.reshape(raydir, (-1, 3))
         item['raydir'] = torch.from_numpy(raydir).float()
+        item['local_raydir'] = torch.from_numpy(local_dirs).float().reshape(-1,3)
         #item['rays_o'] = torch.from_numpy(rays_o).float()
         #item['rays_d'] = torch.from_numpy(rays_d).float()
-        #gt_image = gt_image[py.astype(np.int32), px.astype(np.int32)]
+        gt_image = gt_image[py.astype(np.int32), px.astype(np.int32)]
         # gt_mask = gt_mask[py.astype(np.int32), px.astype(np.int32), :]
-        #gt_image = np.reshape(gt_image, (-1, 3))
+        gt_image = np.reshape(gt_image, (-1, 3))
         item['gt_image'] = gt_image
 
         if self.bg_color:

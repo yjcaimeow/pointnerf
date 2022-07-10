@@ -149,8 +149,8 @@ def get_lidar_in_image_fov(pc_velo, pose, calib, xmin, ymin, xmax, ymax,
 #    calib = torch.from_numpy(calib).cuda()
     calib[2][2]=1
     points = trans_world2nerf(pc_velo, pose) #right, up, back
-    camera_points = torch.cat([points[..., 0:1], points[..., 1:2], points[..., 2:3]], -1)
-    #camera_points = torch.cat([points[..., 0:1], -points[..., 1:2], -points[..., 2:3]], -1)
+    #camera_points = torch.cat([points[..., 0:1], points[..., 1:2], points[..., 2:3]], -1)
+    camera_points = torch.cat([points[..., 0:1], -points[..., 1:2], -points[..., 2:3]], -1)
     pts_2d = torch.einsum('ij,nj->ni',calib, camera_points)
     pts_2d[...,0] = pts_2d[...,0]/(pts_2d[...,-1] + 1e-10)
     pts_2d[...,1] = pts_2d[...,1]/(pts_2d[...,-1] + 1e-10)

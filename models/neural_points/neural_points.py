@@ -975,7 +975,6 @@ class NeuralPoints(nn.Module):
                     top_mask = np.ones(mask.shape)
                     mask = np.concatenate((top_mask, mask), 0)
                 self.xyz, self.local_xyz, fov_ids, pts_2d = get_lidar_in_image_fov(self.xyz_all[inputs["seq_id"]].squeeze(), c2w.squeeze(), intrinsic.squeeze(), xmin=0, ymin=0, xmax=int(w), ymax=int(h), return_more=True, mask=mask)
-
                 if self.opt.mask_type=='3d' and self.opt.perceiver_io:
                     idx = torch.multinomial(torch.ones(len(self.xyz)), 1, replacement=True)
                     centers_pcd = self.xyz[idx]
@@ -993,9 +992,14 @@ class NeuralPoints(nn.Module):
                 #save_image(mask.squeeze()*255, './check_mask/'+name+'_mask_img.png')
                 self.points_dir, self.points_color=None, None
             else:
-                self.xyz, _, fov_ids, pts_2d = get_lidar_in_image_fov(self.xyz_all, c2w.squeeze(), intrinsic.squeeze(), xmin=0, ymin=0, xmax=int(w), ymax=int(h), return_more=True)
-                self.points_color = self.points_color_all.squeeze(0)[fov_ids].unsqueeze(0)
-                self.points_embeding = self.points_embeding_all.squeeze(0)[fov_ids].unsqueeze(0)
+                #self.xyz, _, fov_ids, pts_2d = get_lidar_in_image_fov(self.xyz_all, c2w.squeeze(), intrinsic.squeeze(), xmin=0, ymin=0, xmax=int(w), ymax=int(h), return_more=True)
+                #self.points_color = self.points_color_all.squeeze(0)[fov_ids].unsqueeze(0)
+                #self.points_embeding = self.points_embeding_all.squeeze(0)[fov_ids].unsqueeze(0)
+                #self.xyz, _, fov_ids, pts_2d = get_lidar_in_image_fov(self.xyz_all, c2w.squeeze(), intrinsic.squeeze(), xmin=0, ymin=0, xmax=int(w), ymax=int(h), return_more=True)
+                self.xyz, self.points_conf, self.points_embeding = self.xyz_all[0], self.points_conf_all[0], self.points_embeding_all[0]
+                #exit()
+                #self.points_color = self.points_color_all.squeeze(0)[fov_ids].unsqueeze(0)
+                #self.points_embeding = self.points_embeding_all.squeeze(0)[fov_ids].unsqueeze(0)
 
         sample_pidx, sample_loc, ray_mask_tensor, point_xyz_pers_tensor, sample_loc_w_tensor, sample_ray_dirs_tensor, sample_local_ray_dirs_tensor, vsize, raypos_tensor, index_tensor = self.get_point_indices(inputs, camrotc2w, campos, pixel_idx, \
                 torch.min(near_plane).cpu().numpy(), torch.max(far_plane).cpu().numpy(), torch.max(h).cpu().numpy(), torch.max(w).cpu().numpy(), intrinsic.cpu().numpy()[0], vox_query=self.opt.NN<0, use_middle=use_middle)
@@ -1010,4 +1014,4 @@ class NeuralPoints(nn.Module):
 
         sampled_Rw2c = self.Rw2c if self.Rw2c.dim() == 2 else torch.index_select(self.Rw2c, 0, sample_pidx).view(B, R, SR, K, self.Rw2c.shape[1], self.Rw2c.shape[2])
 
-        return sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding[..., 6:], sampled_embedding[..., 3:6], sampled_embedding[..., :3], sample_pnt_mask, sample_loc, sample_loc_w_tensor, sample_ray_dirs_tensor, sample_local_ray_dirs_tensor, ray_mask_tensor, vsize, self.grid_vox_sz, raypos_tensor, index_tensor, mask
+        return sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding[..., 6:], sampled_embedding[..., 3:6], sampled_embedding[..., :3], sample_pnt_mask, sample_loc, sample_loc_w_tensor, sample_ray_dirs_tensor, sample_local_ray_dirs_tensor, ray_mask_tensor, vsize, self.grid_vox_sz, raypos_tensor, index_tensor

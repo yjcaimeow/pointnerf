@@ -1,15 +1,15 @@
-#filename='../waymo_fall_1006_vox100_res128-512.npz'
 filename='/mnt/lustre/caiyingjie/data/selected_waymo/'
 scale_factor=20
 frames_length=30
 zoom_in_scale=8
 nrCheckpoint="../checkpoints"
-nrDataRoot="/mnt/cache/caiyingjie/code/data_src"
+#nrDataRoot="/mnt/cache/caiyingjie/code/data_src"
+nrDataRoot="/home/xschen/yjcai/code/offical/pointnerf/data_src"
 name='waymo'
 
 resume_iter=$2
 
-data_root="${nrDataRoot}/scans/"
+data_root="${nrDataRoot}/scannet/scans/"
 scan="scene0006_00"
 
 load_points=2
@@ -50,7 +50,6 @@ vsize=" 0.008 0.008 0.008 "
 wcoord_query=1
 z_depth_dim=300
 max_o=610000
-#ranges=" 20.0 -10.0 -10.0 10.0 10.0 10.0 "
 ranges=" -10.0 -10.0 -10.0 10.0 10.0 10.0 "
 SR=24
 K=8
@@ -97,8 +96,8 @@ out_channels=4
 num_pos_freqs=10
 num_viewdir_freqs=4 #6
 
-random_sample='full_image'
-random_sample_size=56 # 32 * 32 = 1024
+random_sample='random'
+random_sample_size=36 # 32 * 32 = 1024
 
 batch_size=1
 
@@ -122,7 +121,7 @@ n_threads=0
 
 train_and_test=0 #1
 test_num=10
-print_freq=100
+print_freq=10
 test_num_step=100
 
 prob_freq=10000 #10001
@@ -150,9 +149,6 @@ test_color_loss_items='coarse_raycolor ray_miss_coarse_raycolor ray_masked_coars
 bg_color="white" #"0.0,0.0,0.0,1.0,1.0,1.0"
 split="train"
 seq_num=1
-#perceiver_io_type='each_sample_loc'
-#perceiver_io_type='all_lidar_pcd'
-#perceiver_io_type='local_lidar_pcd'
 
 GPUNUM=1
 NODENUM=1
@@ -161,10 +157,11 @@ PART=pat_taurus
 
 #--perceiver_io_type ${perceiver_io_type} \
 #--perceiver_io \
-basic_agg='attention'
+basic_agg='mlp'
 
-TOOLS="srun --partition=$PART --quotatype=auto --preempt --gres=gpu:${GPUNUM} -n$NODENUM --ntasks-per-node=1 --cpus-per-task=8"
-$TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch --nnodes=$NODENUM --nproc_per_node=$GPUNUM --node_rank \$SLURM_PROCID --master_addr=\$(sinfo -Nh -n \$SLURM_NODELIST | head -n 1 | cut -d ' ' -f 1) --master_port $3 train_scannet.py \
+#TOOLS="srun --partition=$PART --quotatype=auto --preempt --gres=gpu:${GPUNUM} -n$NODENUM --ntasks-per-node=1 --cpus-per-task=8"
+#$TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch --nnodes=$NODENUM --nproc_per_node=$GPUNUM --node_rank \$SLURM_PROCID --master_addr=\$(sinfo -Nh -n \$SLURM_NODELIST | head -n 1 | cut -d ' ' -f 1) --master_port $3 train_scannet.py \
+CUDA_VISIBLE_DEVICES=1 python -m torch.distributed.launch --nnodes=$NODENUM --nproc_per_node=$GPUNUM ./train_scannet.py \
     --zoom_in_scale $zoom_in_scale --ddp_train \
     --basic_agg ${basic_agg} \
     --seq_num ${seq_num} \
@@ -282,4 +279,4 @@ $TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch --nnodes=$N
     --prob_mul $prob_mul \
     --prob_kernel_size $prob_kernel_size \
     --prob_tiers $prob_tiers \
-    --query_size $query_size"
+    --query_size $query_size

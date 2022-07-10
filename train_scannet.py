@@ -180,7 +180,7 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
     train_psnr_half, test_psnr_half = [],[]
     #ssim_train_half, ssim_test_half = [],[]
     #lpips_train_half_vgg, lpips_test_half_vgg = [],[]
-
+    sequence_length_list=[2160]
     seq_frame_index = 0
     seq_index = 0
     for i in range(total_num): # 1 if test_steps == 10000 else opt.test_num_step
@@ -210,8 +210,8 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
 #        data.pop('gt_mask', None)
 
 #        data['bg_color'] = bg_color
-        data['train_sequence_length_list'] = train_sequence_length_list
-        data['sequence_length_list'] = sequence_length_list
+        #data['train_sequence_length_list'] = train_sequence_length_list
+        #data['sequence_length_list'] = sequence_length_list
         model.set_input(data)
         output = model.test()
         ray_mask = torch.from_numpy(cv2.resize(np.asarray(output['ray_mask'].reshape(64, 96).cpu(), dtype='uint8'), (width, height), interpolation=cv2.INTER_AREA)).cuda()
@@ -290,7 +290,8 @@ def test(total_steps, model, dataset, visualizer, opt, bg_info, test_steps=0, ge
     #ssim_train_list, ssim_test_list = [],[]
     #lpips_train_list, lpips_test_list = [],[]
 
-    for seq_id in range(len(sequence_length_list)):
+    #for seq_id in range(len(sequence_length_list)):
+    for seq_id in range(1):
         test_psnr_half, train_psnr_half = alllist_psnr_test[seq_id], alllist_psnr_train[seq_id]
         #ssim_test_half, ssim_train_half = alllist_ssim_test[seq_id], alllist_ssim_train[seq_id]
         #lpips_test_half_vgg, lpips_train_half_vgg = alllist_lpips_test[seq_id], alllist_lpips_train[seq_id]
@@ -573,7 +574,8 @@ def init_distributed_mode(args, verbose=False):
 def main():
     from options import TrainOptions
     opt = TrainOptions().parse()
-    basedir = "/mnt/lustre/caiyingjie/pointnerf/"
+#    basedir = "/mnt/lustre/caiyingjie/pointnerf/"
+    basedir = '/home/xschen/yjcai/code/pointnerf'
     if opt.ddp_train:
         from engine.engine import Engine
         engine = Engine(args=opt)
@@ -756,7 +758,7 @@ def main():
             except Exception as e:
                 visualizer.print_details(e)
             #### test model
-            if (total_steps % opt.test_freq == 0 or total_steps==1):
+            if (total_steps % opt.test_freq == 0 or total_steps==1) and 1==2:
                 model.opt.is_train = 0
                 model.opt.no_loss = 1
                 #model.print_lr(opt=opt, total_steps=total_steps)
@@ -765,8 +767,8 @@ def main():
                     #cprint.info(test_opt)
                     #exit()
                     psnr_train_list, pnsr_test_list = \
-                    test(epoch, model, test_dataset, Visualizer(test_opt), test_opt, None, test_steps=total_steps, lpips=True, bg_color=bg_color, best_PSNR_half=best_PSNR_half, \
-                        sequence_length_list=test_dataset.sequence_length_list, train_sequence_length_list=train_dataset.sequence_length_list, loss_fn_vgg=None)
+                    test(epoch, model, test_dataset, Visualizer(test_opt), test_opt, None, test_steps=total_steps, lpips=True, bg_color=bg_color, best_PSNR_half=best_PSNR_half)
+                        #sequence_length_list=test_dataset.sequence_length_list, train_sequence_length_list=train_dataset.sequence_length_list, loss_fn_vgg=None)
                 model.opt.no_loss = 0
                 model.opt.is_train = 1
 

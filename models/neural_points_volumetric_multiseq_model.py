@@ -254,7 +254,7 @@ class NeuralPointsRayMarching(nn.Module):
              **kwargs):
         super(NeuralPointsRayMarching, self).__init__()
 
-        #self.aggregator = aggregator
+        self.aggregator = aggregator
 
         self.num_pos_freqs = num_pos_freqs
         self.num_viewdir_freqs = num_viewdir_freqs
@@ -366,13 +366,14 @@ class NeuralPointsRayMarching(nn.Module):
             perceiver_io_feature, random_masks = [],[]
         for batch_index in range(batch_size):
             _, sampled_Rw2c, _, sampled_conf_i, sampled_embedding_i, sampled_xyz_pers_i, sampled_xyz_i, sample_pnt_mask_i, sample_loc_i, sample_loc_w_i, \
-                sample_ray_dirs_i, sample_local_ray_dirs_i, ray_mask_tensor_i, vsize, grid_vox_sz, raypos_tensor_i, _, mask_i = self.neural_points({"pixel_idx": pixel_idx[batch_index:batch_index+1], \
-                                                                                                                                            "camrotc2w": camrotc2w[batch_index:batch_index+1],
-                                                                                                                                            "campos": campos[batch_index:batch_index+1], "near": near[batch_index:batch_index+1], "far": far[batch_index:batch_index+1], \
-                                                                                                                                            "focal": focal, "h": h[batch_index:batch_index+1], "w": w[batch_index:batch_index+1], "c2w":c2w[batch_index:batch_index+1], \
-                                                                                                                                            "intrinsic": intrinsic[batch_index:batch_index+1],"gt_image":gt_image[batch_index:batch_index+1], \
-                                                                                                                                            "raydir":raydir[batch_index:batch_index+1], "id":id[batch_index:batch_index+1], 'vsize':self.opt.vsize, \
-                                                                                                                                            "local_raydir":local_raydir[batch_index:batch_index+1], "seq_id":seq_id[batch_index:batch_index+1]})
+                sample_ray_dirs_i, sample_local_ray_dirs_i, ray_mask_tensor_i, vsize, grid_vox_sz, raypos_tensor_i, _ = self.neural_points({"pixel_idx": pixel_idx[batch_index:batch_index+1], \
+                                                                    "camrotc2w": camrotc2w[batch_index:batch_index+1],
+                                                                    "campos": campos[batch_index:batch_index+1], "near": near[batch_index:batch_index+1], "far": far[batch_index:batch_index+1], \
+                                                                    "focal": focal, "h": h[batch_index:batch_index+1], "w": w[batch_index:batch_index+1], "c2w":c2w[batch_index:batch_index+1], \
+                                                                    "intrinsic": intrinsic[batch_index:batch_index+1],"gt_image":gt_image[batch_index:batch_index+1], \
+                                                                    "raydir":raydir[batch_index:batch_index+1], "id":id[batch_index:batch_index+1], 'vsize':self.opt.vsize, \
+                                                                    "local_raydir":local_raydir[batch_index:batch_index+1], "seq_id":0})
+                                                                    #"local_raydir":local_raydir[batch_index:batch_index+1], "seq_id":seq_id[batch_index:batch_index+1]})
             sampled_conf.append(sampled_conf_i)
             sampled_embedding.append(sampled_embedding_i)
             sampled_xyz_pers.append(sampled_xyz_pers_i)
@@ -628,7 +629,8 @@ class NeuralPointsRayMarching(nn.Module):
         output["ray_mask"] = ray_mask_tensor
         output = self.fill_invalid(output, bg_color, perceiver_io_feature)
 
-        output['final_coarse_raycolor'] = output['coarse_raycolor'].reshape(batch_size, img_h, img_w, -1)
+        output['final_coarse_raycolor'] = output['coarse_raycolor']
+        #output['final_coarse_raycolor'] = output['coarse_raycolor'].reshape(batch_size, img_h, img_w, -1)
         return output
         #output['final_coarse_raycolor'] = output['coarse_raycolor'].reshape(batch_size, img_h, img_w, self.opt.shading_color_channel_num)
         if self.opt.is_train:
