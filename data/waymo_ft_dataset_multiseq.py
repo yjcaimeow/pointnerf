@@ -224,11 +224,9 @@ class WaymoFtDataset(BaseDataset):
         pixelcoords = np.stack((px, py), axis=-1).astype(np.float32)  # H x W x 2
         item["pixel_idx"] = pixelcoords
         local_dirs, raydir = get_blender_raydir(pixelcoords, self.height, self.width, item["intrinsic"][0][0], camrot, self.opt.dir_norm > 0)
-        #local_dirs, raydir = get_blender_raydir(pixelcoords, self.height, self.width, item["intrinsic"][0][0], camrot.numpy(), self.opt.dir_norm > 0)
         raydir = np.reshape(raydir, (-1, 3))
         item['raydir'] = torch.from_numpy(raydir).float()
         item['local_raydir'] = torch.from_numpy(local_dirs).float().reshape(-1,3)
-        #img = cv2.resize(img,  (96, 64), interpolation=cv2.INTER_AREA)
         item['gt_image'] = np.reshape(img, (-1, 3))
         return item
 

@@ -8,7 +8,7 @@ import time
 from tensorboardX import SummaryWriter
 import datetime
 import torch
-#import imageio
+import imageio
 from utils.util import to8b
 from models.mvs.mvs_utils import *
 
@@ -157,14 +157,12 @@ class Visualizer:
     def get_psnr(self, key):
         return self.acc_losses[key + "_psnr"] / self.acc_iterations
 
-    def print_losses(self, total_steps, epoch, writer=None):
+    def print_losses(self, total_steps, epoch):
         m = 'End of epoch {} \t iteration {} \t Number of batches {} \t Time taken: {:.2f}s\n'.format(
             epoch, total_steps, self.acc_iterations, (time.time() - self.start_time))
         m += '[Average Loss] '
         for k, v in self.acc_losses.items():
             m += '{}: {:.10f}   '.format(k, v / self.acc_iterations)
-            if writer is not None:
-                writer.add_scalar(k, (v / self.acc_iterations).item(), total_steps)
         filepath = os.path.join(self.log_dir, 'log.txt')
         with open(filepath, 'a') as f:
             f.write(m + '\n')

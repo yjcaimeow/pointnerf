@@ -2,121 +2,16 @@ import argparse
 import os
 from models import find_model_class_by_name
 from data import find_dataset_class_by_name
+import torch
 
 
 class BaseOptions:
     def initialize(self, parser: argparse.ArgumentParser):
         #================================ global ================================#
-        parser.add_argument('--clip_value',
-                            type=float,
-                            default=5.0,
-                            help='feed batches in order without shuffling')
-        parser.add_argument('--point_number',
-                            type=int,
-                            default=1000,
-                            help='name of the experiment')
-        parser.add_argument('--zoom_in_scale',
-                            type=int,
-                            default=4,
-                            help='name of the experiment')
-        parser.add_argument('--scale_factor',
-                            type=float,
-                            required=10.0,
-                            help='name of the experiment')
-        parser.add_argument('--filename',
-                            type=str,
-                            required=True,
-                            help='name of the experiment')
-        parser.add_argument('--load_data',
-                            type=str,
-                            default='ceph',
-                            help='name of the experiment')
         parser.add_argument('--name',
                             type=str,
                             required=True,
                             help='name of the experiment')
-        parser.add_argument(
-            '--fix_net',
-            action='store_true',
-            help='if specified, print more debugging information')
-        parser.add_argument(
-            '--context_weight_norm',
-            action='store_true',
-            help='if specified, print more debugging information')
-        parser.add_argument(
-            '--only_test',
-            action='store_true',
-            help='if specified, print more debugging information')
-        parser.add_argument(
-            '--context_weight_gate',
-            action='store_true',
-            help='if specified, print more debugging information')
-        parser.add_argument(
-            '--context_weight',
-            action='store_true',
-            help='if specified, print more debugging information')
-        parser.add_argument(
-            '--inference',
-            action='store_true',
-            help='if specified, print more debugging information')
-
-        parser.add_argument(
-            '--knn_transform',
-            action='store_true',
-            help='if specified, print more debugging information')
-        parser.add_argument(
-            '--perceiver_io',
-            action='store_true',
-            help='if specified, print more debugging information')
-        parser.add_argument('--radius', type=float, default=2.0, help='name of the experiment')
-
-        parser.add_argument('--vox_res', type=int, default=512, help='name of the experiment')
-        parser.add_argument('--N', type=int, default=512, help='name of the experiment')
-        parser.add_argument('--D', type=int, default=96, help='name of the experiment')
-        parser.add_argument('--E', type=int, default=96, help='name of the experiment')
-        parser.add_argument('--C', type=int, default=56, help='name of the experiment')
-        parser.add_argument('--num_self_attention_heads', type=int, default=2, help='name of the experiment')
-        parser.add_argument('--num_self_attention_blocks', type=int, default=3, help='name of the experiment')
-        parser.add_argument('--num_self_attention_layers_per_block', type=int, default=2, help='name of the experiment')
-
-        parser.add_argument('--mask_type', type=str, default='2d', help='name of the experiment')
-        parser.add_argument('--mask_region_r', type=float, default=5.0, help='name of the experiment')
-        parser.add_argument('--self_attention_num_heads', type=int, default=4, help='name of the experiment')
-
-        parser.add_argument('--light_N', type=int, default=8, help='name of the experiment')
-        parser.add_argument('--light_D', type=int, default=284, help='name of the experiment')
-        parser.add_argument('--light_C', type=int, default=284, help='name of the experiment')
-        #parser.add_argument('--light_E', type=int, default=128, help='name of the experiment')
-        parser.add_argument('--light_num_self_attention_heads', type=int, default=2, help='name of the experiment')
-        parser.add_argument('--light_num_self_attention_blocks', type=int, default=1, help='name of the experiment')
-        parser.add_argument('--light_num_self_attention_layers_per_block', type=int, default=2, help='name of the experiment')
-
-        parser.add_argument('--basic_agg', type=str, default='attention', help='name of the experiment')
-
-        parser.add_argument(
-            '--cat_raydir',
-            action='store_true',
-            help='if specified, print more debugging information')
-        parser.add_argument(
-            '--attention_weight',
-            action='store_true',
-            help='if specified, print more debugging information')
-        parser.add_argument(
-            '--eval_during_train',
-            action='store_true',
-            help='if specified, print more debugging information')
-        parser.add_argument(
-            '--fov',
-            action='store_true',
-            help='if specified, print more debugging information')
-        parser.add_argument(
-            '--catWithLocaldir',
-            action='store_true',
-            help='if specified, print more debugging information')
-        parser.add_argument(
-            '--multi_res',
-            action='store_true',
-            help='if specified, print more debugging information')
         parser.add_argument(
             '--verbose',
             action='store_true',
@@ -126,11 +21,49 @@ class BaseOptions:
             action='store_true',
             help='suffix the experiment name with current timestamp')
 
+        #================================ model aggregator========================#
+        parser.add_argument(
+            '--init_pcd_type',
+            type=str,
+            default="candidates",
+            help='name of dataset, determine which dataset class to use')
+        parser.add_argument(
+            '--k_type',
+            type=str,
+            default="voxel",
+            help='name of dataset, determine which dataset class to use')
+        parser.add_argument(
+            '--attention_type',
+            type=str,
+            default="normal",
+            help='name of dataset, determine which dataset class to use')
+        parser.add_argument(
+            '--agg_type',
+            type=str,
+            default="mlp",
+            help='name of dataset, determine which dataset class to use')
+        parser.add_argument(
+            '--gap',
+            type=float,
+            default=0.2,
+            help=
+            'vscale is the block size that store several voxels'
+        )
+        parser.add_argument('--progressive_distill',
+                            type=int,
+                            default=0,
+                            help='1 for render_only dataset')
+
+        parser.add_argument('--loss_thresh', type=float, default=1.0, help='name of the experiment')
+        parser.add_argument('--knn_k', type=int, default=8, help='name of the experiment')
+        parser.add_argument('--light_N', type=int, default=8, help='name of the experiment')
+        parser.add_argument('--light_D', type=int, default=284, help='name of the experiment')
+        parser.add_argument('--light_C', type=int, default=284, help='name of the experiment')
+        parser.add_argument('--light_num_self_attention_heads', type=int, default=2, help='name of the experiment')
+        parser.add_argument('--light_num_self_attention_blocks', type=int, default=2, help='name of the experiment')
+        parser.add_argument('--light_num_self_attention_layers_per_block', type=int, default=2, help='name of the experiment')
+        parser.add_argument('--num_perceiver_io_freqs', default=4, type=int, help='# threads for loading data')
         #================================ dataset ================================#
-        parser.add_argument('--optimizer_type',
-                            type=str,
-                            default=None,
-                            help='path to the dataset storage')
         parser.add_argument('--data_root',
                             type=str,
                             default=None,
@@ -153,24 +86,13 @@ class BaseOptions:
                             help='# threads for loading data')
         #================================ MVS ================================#
 
-        parser.add_argument('--num_perceiver_io_freqs',
-                            default=4,
-                            type=int,
-                            help='# threads for loading data')
         parser.add_argument('--geo_cnsst_num',
                             default=2,
                             type=int,
                             help='# threads for loading data')
 
+
         #================================ model ================================#
-        parser.add_argument('--combination',
-                            default="concat",
-                            type=str,
-                            help='cnn | style | condition')
-        parser.add_argument('--neural_render',
-                            default="style",
-                            type=str,
-                            help='cnn | style | condition')
         parser.add_argument('--bgmodel',
                             default="No",
                             type=str,
@@ -183,14 +105,14 @@ class BaseOptions:
             help='name of model, determine which network model to use')
 
         #================================ running ================================#
-        parser.add_argument('--vox_res_middle',
+        parser.add_argument('--batch_size',
                             type=int,
-                            default=1000,
-                            help='latent_dim')
-        parser.add_argument('--network_capacity',
+                            default=1,
+                            help='input batch size')
+        parser.add_argument('--render_only',
                             type=int,
-                            default=16,
-                            help='latent_dim')
+                            default=0,
+                            help='1 for render_only dataset')
         parser.add_argument('--serial_batches',
                             type=int,
                             default=0,
@@ -203,6 +125,10 @@ class BaseOptions:
                             type=str,
                             default='./checkpoints',
                             help='models are saved here')
+        parser.add_argument('--show_tensorboard',
+                            type=int,
+                            default=0,
+                            help='plot loss curves with tensorboard')
         parser.add_argument('--resume_dir',
                             type=str,
                             default='',
@@ -211,105 +137,9 @@ class BaseOptions:
                             type=str,
                             default='latest',
                             help='which epoch to resume from')
-        parser.add_argument('--z_dim',
-                            type=int,
-                            default=256,
-                            help='latent_dim')
-        parser.add_argument('--frames_length',
-                            type=int,
-                            default=30,
-                            help='frames length')
-        parser.add_argument('--N_importance',
-                            type=int,
-                            default=128,
-                            help='input batch size')
-        parser.add_argument('--perceiver_io_type',
-                            type=str,
-                            default='local_lidar_pcd',
-                            help='input batch size')
-        parser.add_argument('--N_samples',
-                            type=int,
-                            default=64,
-                            help='input batch size')
-        parser.add_argument('--batch_size',
-                            type=int,
-                            default=1,
-                            help='input batch size')
-        parser.add_argument('--port',
-                            type=int,
-                            default=66666,
-                            help='local_rank init value')
-        parser.add_argument('--local_rank',
-                            type=int,
-                            default=0,
-                            help='local_rank init value')
-        parser.add_argument('--render_only',
-                            type=int,
-                            default=0,
-                            help='1 for render_only dataset')
-        parser.add_argument('--show_tensorboard',
-                            type=int,
-                            default=0,
-                            help='plot loss curves with tensorboard')
-        parser.add_argument('--ddp_train',
-                            action='store_true',
-                            help='indicate a debug run')
-        parser.add_argument('--contain_coarse',
-                            action='store_true',
-                            help='indicate a debug run')
-        parser.add_argument('--half_supervision',
-                            action='store_true',
-                            help='indicate a debug run')
-        parser.add_argument('--pe_bound',
-                            action='store_true',
-                            help='indicate a debug run')
-        parser.add_argument('--weight_norm',
-                            action='store_true',
-                            help='indicate a debug run')
-        parser.add_argument('--alpha_as_weight',
-                            action='store_true',
-                            help='indicate a debug run')
-        parser.add_argument('--proposal_nerf',
-                            action='store_true',
-                            help='indicate a debug run')
-        parser.add_argument('--unified',
-                            action='store_true',
-                            help='indicate a debug run')
-        parser.add_argument('--nerf_raycolor',
-                            action='store_true',
-                            help='indicate a debug run')
-        parser.add_argument('--only_nerf',
-                            action='store_true',
-                            help='indicate a debug run')
-        parser.add_argument('--nerf_distill',
-                            action='store_true',
-                            help='indicate a debug run')
-        parser.add_argument('--nerf_aug',
-                            action='store_true',
-                            help='indicate a debug run')
-        parser.add_argument('--multi_nerf',
-                            action='store_true',
-                            help='indicate a debug run')
-        parser.add_argument('--inference_use_nerf',
-                            action='store_true',
-                            help='indicate a debug run')
         parser.add_argument('--debug',
                             action='store_true',
                             help='indicate a debug run')
-        parser.add_argument('--prune_points',
-                            action='store_true',
-                            help='indicate a debug run')
-        parser.add_argument('--nerf_create_points',
-                            action='store_true',
-                            help='indicate a debug run')
-        parser.add_argument('--iter_pg',
-                            type=int,
-                            default=100,
-                            help='feed batches in order without shuffling')
-        parser.add_argument('--seq_num',
-                            type=int,
-                            default=5,
-                            help='feed batches in order without shuffling')
         parser.add_argument('--vid',
                             type=int,
                             default=0,
@@ -370,7 +200,6 @@ class BaseOptions:
         with open(file_name, 'wt') as opt_file:
             opt_file.write(message)
             opt_file.write('\n')
-        opt_file.close()
 
     def parse(self):
         opt = self.gather_options()
@@ -383,12 +212,12 @@ class BaseOptions:
 
         self.print_and_save_options(opt)
 
-        #str_ids = opt.gpu_ids.split(',')
-        #opt.gpu_ids = [
-        #    int(x) for x in opt.gpu_ids.split(',') if x.strip() and int(x) >= 0
-        #]
-        #if len(opt.gpu_ids) > 0:
-        #    torch.cuda.set_device(opt.gpu_ids[0])
+        str_ids = opt.gpu_ids.split(',')
+        opt.gpu_ids = [
+            int(x) for x in opt.gpu_ids.split(',') if x.strip() and int(x) >= 0
+        ]
+        if len(opt.gpu_ids) > 0:
+            torch.cuda.set_device(opt.gpu_ids[0])
 
         self.opt = opt
         return self.opt

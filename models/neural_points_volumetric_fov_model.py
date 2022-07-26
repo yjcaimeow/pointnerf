@@ -1,14 +1,10 @@
-import torch
 from .base_rendering_model import *
-from .neural_points.neural_points import NeuralPoints
+from .neural_points.neural_points_fov import NeuralPoints
 from .aggregators.point_aggregators import PointAggregator
 import os
+from torch_cluster import knn
 from .helpers.networks import positional_encoding
 from cprint import *
-#import faiss
-#from torch_cluster import knn
-from pytorch3d.ops import knn_points
-
 class NeuralPointsVolumetricModel(BaseRenderingModel):
 
     @staticmethod
@@ -87,9 +83,8 @@ class NeuralPointsVolumetricModel(BaseRenderingModel):
             opt.visual_items.append('fine_raycolor')
 
     def run_network_models(self):
-        if self.opt.progressive_distill:
-            return self.net_ray_marching(**self.input)
         return self.fill_invalid(self.net_ray_marching(**self.input), self.input)
+        #return self.net_ray_marching(**self.input)
 
     def fill_invalid(self, output, input):
         # ray_mask:             torch.Size([1, 1024])
@@ -103,7 +98,6 @@ class NeuralPointsVolumetricModel(BaseRenderingModel):
         # print("coarse_is_background", output["coarse_is_background"].shape)
         # print("coarse_is_background_tensor", coarse_is_background_tensor.shape)
         # print("ray_inds", ray_inds.shape, ray_mask.shape)
-        # print (ray_mask.shape, ray_inds.shape, output["coarse_is_background"].shape)
         coarse_is_background_tensor[ray_inds[..., 0], ray_inds[..., 1], :] = output["coarse_is_background"]
         output["coarse_is_background"] = coarse_is_background_tensor
         output['coarse_mask'] = 1 - coarse_is_background_tensor
@@ -145,7 +139,6 @@ class NeuralPointsVolumetricModel(BaseRenderingModel):
         self.aggregator = self.check_getAggregator(opt)
         self.is_compute_depth = opt.compute_depth or not not opt.depth_loss_items
         checkpoint_path = os.path.join(opt.checkpoints_dir, opt.name, '{}_net_ray_marching.pth'.format(opt.resume_iter))
-        cprint.warn(checkpoint_path)
         checkpoint_path = checkpoint_path if os.path.isfile(checkpoint_path) else None
         if opt.num_point > 0:
             self.neural_points = NeuralPoints(opt.point_features_dim, opt.num_point, opt, self.device, checkpoint=checkpoint_path, feature_init_method=opt.feature_init_method, reg_weight=0., feedforward=opt.feedforward)
@@ -175,7 +168,6 @@ class NeuralPointsVolumetricModel(BaseRenderingModel):
             self.net_ray_marching.to(self.device)
             self.net_ray_marching = torch.nn.DataParallel(
                 self.net_ray_marching, self.opt.gpu_ids)
-            cprint.err('The model is DataParalleled.')
 
 
     def check_getAggregator(self, opt, **kwargs):
@@ -242,25 +234,21 @@ class NeuralPointsRayMarching(nn.Module):
              num_viewdir_freqs=0,
              **kwargs):
         super(NeuralPointsRayMarching, self).__init__()
-        self.l1loss = torch.nn.L1Loss(reduce=False)
-        self.bceloss= torch.nn.BCELoss(reduce=False)
+        if opt.loss_type=='l1':
+            self.loss = torch.nn.L1Loss(reduce=True).cuda()
+            cprint.err('l1 loss ...')
+        elif opt.loss_type=='ce':
+            self.loss = torch.nn.CrossEntropyLoss().cuda()
+            cprint.err('ce loss ...')
+        elif opt.loss_type=='l2':
+            self.loss = torch.nn.MSELoss().cuda()
+            cprint.err('l2 loss ...')
+
         if opt.agg_type == "mlp":
             self.aggregator = aggregator
         elif opt.agg_type == "attention":
-            from .perceiver.model.core.modules import PerceiverEncoder, PerceiverDecoder, Encoder
-            if opt.attention_type == "normal":
-                self.perceiver_encoder = Encoder(num_latents=opt.light_N, \
-                                                      num_latent_channels=opt.light_D, \
-                                                      num_cross_attention_qk_channels=opt.light_C, \
-                                                      num_input_channels=opt.light_C, \
-                                                      num_cross_attention_heads=1,
-                                                      num_self_attention_heads=opt.light_num_self_attention_heads,
-                                                      num_self_attention_layers_per_block=opt.light_num_self_attention_layers_per_block,
-                                                      num_self_attention_blocks=opt.light_num_self_attention_blocks,
-                                                      dropout=0.0,
-                                                      )
-            elif opt.attention_type == "perceiver":
-                self.perceiver_encoder = PerceiverEncoder(num_latents=opt.light_N, \
+            from .perceiver.model.core.modules import PerceiverEncoder, PerceiverDecoder
+            self.perceiver_encoder = PerceiverEncoder(num_latents=opt.light_N, \
                                                       num_latent_channels=opt.light_D, \
                                                       num_cross_attention_qk_channels=opt.light_C, \
                                                       num_input_channels=opt.light_C, \
@@ -271,8 +259,7 @@ class NeuralPointsRayMarching(nn.Module):
                                                       dropout=0.0,
                                                       )
             self.perceiver_decoder = PerceiverDecoder(num_latent_channels=opt.light_D, \
-                                                      num_output_query_channels=284, \
-                                                      #num_output_query_channels=opt.shading_color_channel_num, \
+                                                      num_output_query_channels=opt.shading_color_channel_num, \
                                                       num_cross_attention_heads=1,
                                                       dropout=0.0,
                                                       perceiver_io_type="each_sample_loc",
@@ -294,7 +281,6 @@ class NeuralPointsRayMarching(nn.Module):
     def forward(self,
                 campos,
                 raydir,
-                local_raydir=None,
                 c2w=None,
                 gt_image=None,
                 bg_color=None,
@@ -306,73 +292,41 @@ class NeuralPointsRayMarching(nn.Module):
                 h=None,
                 w=None,
                 intrinsic=None,
-                sample_loc_w_loaded=None,
-                sample_loc_loaded=None,
-                ray_valid_loaded=None,
-                decoded_features_loaded=None,
+                ######
+                sample_loc=None,
+                sample_loc_w=None,
+                ray_valid=None,
+                decoded_features_gt=None,
+                #ray_dist=None,
                 **kargs):
         output = {}
+        # B, channel, 292, 24, 32;      B, 3, 294, 24, 32;     B, 294, 24;     B, 291, 2
         weight = None
-        if self.opt.progressive_distill:
-            self.neural_points({"pixel_idx": pixel_idx, "camrotc2w": camrotc2w, "campos": campos, "near": near, "far": far,"focal": focal, "h": h, "w": w, "intrinsic": intrinsic,"gt_image":gt_image, "raydir":raydir, "c2w":c2w, \
-                                                            "local_raydir":local_raydir})
-            ray_valid = ray_valid_loaded
-            sample_loc_w = sample_loc_w_loaded
-            sample_loc = sample_loc_loaded
-
+        if self.opt.agg_type=='mlp':
+            sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, ray_mask_tensor, vsize, grid_vox_sz, point_xyz_pers_tensor = self.neural_points({"pixel_idx": pixel_idx, "camrotc2w": camrotc2w, "campos": campos, "near": near, "far": far,"focal": focal, "h": h, "w": w, "intrinsic": intrinsic,"gt_image":gt_image, "raydir":raydir, "c2w":c2w})
+            decoded_features, ray_valid, weight, conf_coefficient = self.aggregator(sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, vsize, grid_vox_sz)
+        elif self.opt.agg_type=='attention':
             vsize = self.opt.vsize
+            self.neural_points({"pixel_idx": pixel_idx, "camrotc2w": camrotc2w, "campos": campos, "near": near, "far": far,"focal": focal, "h": h, "w": w, "intrinsic": intrinsic,"gt_image":gt_image, "raydir":raydir, "c2w":c2w}, agg_type='attention')
             sampled_Rw2c = torch.tensor([[1., 0., 0.],
                             [0., 1., 0.],
                             [0., 0., 1.]], device='cuda')
+
             ray_mask_tensor = torch.sum(ray_valid, -1)
             ray_mask_tensor[ray_mask_tensor>1]=1
             ray_mask_tensor = ray_mask_tensor.reshape(1, -1)
-            self.opt.knn_k = 8
-        else:
-            sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, sample_local_ray_dirs, ray_mask_tensor, vsize, grid_vox_sz, point_xyz_pers_tensor = self.neural_points({"pixel_idx": pixel_idx, "camrotc2w": camrotc2w, "campos": campos, "near": near, "far": far,"focal": focal, "h": h, "w": w, "intrinsic": intrinsic,"gt_image":gt_image, "raydir":raydir, "c2w":c2w, \
-                                                        "local_raydir":local_raydir})
-            ray_valid = torch.any(sample_pnt_mask, dim=-1)
-        if self.opt.agg_type=='mlp':
-            decoded_features, ray_valid, weight, conf_coefficient = self.aggregator(sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding, sampled_xyz_pers, sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, vsize, grid_vox_sz)
-        elif self.opt.agg_type=='attention':
+
+            #### query_points, query_points_local, tmp_ray_dir, ray_valid, ray_dist, decided_features
+            #ray_valid = torch.any(sample_pnt_mask, dim=-1)
             query_points = sample_loc_w[ray_valid][None,...].contiguous()
             query_points_local = sample_loc[ray_valid][None, ...].contiguous()
+            pseudo_gt = decoded_features_gt[ray_valid]
 
-            if self.opt.k_type == 'knn':
-                #import time
-                #time1 = time.time()
-                dists, assign_index, ref_xyz = knn_points(p1=query_points, p2=self.neural_points.xyz_fov[None, ...], K=self.opt.knn_k, return_nn=True)
-                assign_index = assign_index.squeeze()
-                ref_xyz = ref_xyz.reshape(1, -1, self.opt.knn_k, 3)
-                #print (time.time()-time1, 'pytorch3d time')
+            assign_index = knn(self.neural_points.xyz_fov.squeeze(), query_points.squeeze().view(-1,3), 8)[1]
 
-                #time1 = time.time()
-                #index = faiss.IndexFlatL2(3)
-                #res = faiss.StandardGpuResources()
-                #index = faiss.index_cpu_to_gpu(res, 0, index)
-                #index.add(self.neural_points.xyz_fov.squeeze().cpu().numpy())
-                #D, assign_index = index.search(query_points.squeeze().view(-1,3).cpu().numpy(), self.opt.knn_k)
-                #del index
-                #assign_index = torch.tensor(assign_index).cuda().reshape(-1)
-                #print (time.time()-time1, 'faiss time')
-
-                #time2 = time.time()
-                #assign_index_2 = knn(self.neural_points.xyz_fov.squeeze().cpu(), query_points.squeeze().view(-1,3).cpu(), self.opt.knn_k)[1]
-                #print (time.time()-time2, 'torch cluster time')
-
-                #print (idx.squeeze()[0:10])
-                #print (assign_index[0:10])
-                #assign_index_2 = assign_index_2.reshape(-1, self.opt.knn_k)
-                #print (assign_index_2[0:10])
-                #print (idx.shape, assign_index.shape, assign_index_2.shape)
-                #exit()
-                #ref_xyz = self.neural_points.xyz_fov.squeeze()[assign_index].reshape(1, -1, self.opt.knn_k, 3)
-                ref_fea = self.neural_points.points_embeding_fov.squeeze()[assign_index].reshape(-1, self.opt.knn_k, self.neural_points.points_embeding_fov.shape[-1])
-                ref_xyz_pers = self.w2pers(ref_xyz.view(-1,3), camrotc2w, campos).reshape(1, -1, self.opt.knn_k, 3)
-            elif self.opt.k_type == 'voxel':
-                ref_xyz = sampled_xyz[ray_valid].reshape(1, -1, 8, 3)
-                ref_fea = sampled_embedding[ray_valid].reshape(-1, 8, sampled_embedding.shape[-1])
-                ref_xyz_pers = sampled_xyz_pers[ray_valid].reshape(1, -1, 8, 3)
+            ref_xyz = self.neural_points.xyz_fov.squeeze()[assign_index].reshape(1, -1, 8, 3)
+            ref_fea = self.neural_points.points_embeding_fov.squeeze()[assign_index].reshape(-1, 8, self.neural_points.points_embeding_fov.shape[-1])
+            ref_xyz_pers = self.w2pers(ref_xyz.view(-1,3), camrotc2w, campos).reshape(1, -1, 8, 3)
 
             xdist = ref_xyz_pers[..., 0] * ref_xyz_pers[..., 2] - query_points_local[:, :, None, 0] * query_points_local[:, :, None, 2]
             ydist = ref_xyz_pers[..., 1] * ref_xyz_pers[..., 2] - query_points_local[:, :, None, 1] * query_points_local[:, :, None, 2]
@@ -380,7 +334,7 @@ class NeuralPointsRayMarching(nn.Module):
             dists = torch.stack([xdist, ydist, zdist], dim=-1)
             dists = torch.cat([ref_xyz - query_points[..., None, :], dists], dim=-1)
             B, nq, k, _ = dists.shape
-            #B, valid_R, SR, _ = sample_pnt_mask.shape
+#            B, valid_R, SR, _ = sample_pnt_mask.shape
 
             dists_flat = dists.view(-1, dists.shape[-1])
             dists_flat /= (1.0 if self.opt.dist_xyz_deno == 0. else float(self.opt.dist_xyz_deno * np.linalg.norm(vsize)))
@@ -395,26 +349,44 @@ class NeuralPointsRayMarching(nn.Module):
             # --- obtain the feature for sample loc ---#
             #tmp_ray_dir = sample_local_ray_dirs[ray_valid]
             #tmp_ray_dir = sample_ray_dirs[ray_valid]
-            if self.opt.progressive_distill:
-                sample_ray_dirs = raydir.reshape(1,-1,1,3).expand(-1, -1, self.opt.SR, -1).contiguous()
-            else:
-                sample_ray_dirs = torch.masked_select(raydir, ray_mask_tensor[..., None]>0).reshape(raydir.shape[0],-1,3)[...,None,:].expand(-1, -1, self.opt.SR, -1).contiguous()
-            tmp_ray_dir = sample_ray_dirs[ray_valid]
-            tmp_ray_dir = positional_encoding(tmp_ray_dir, self.opt.num_perceiver_io_freqs)[:,None,:]
+            #tmp_ray_dir = positional_encoding(tmp_ray_dir, self.opt.num_perceiver_io_freqs)[:,None,:]
 
-            #query_pcd_fea, query_pcd_alpha = self.perceiver_decoder(memory, positional_encoding(query_points_local.squeeze(), 6)[:, None,:], tmp_ray_dir)
-            query_pcd_fea, query_pcd_alpha = self.perceiver_decoder(memory, nq, tmp_ray_dir)
+            #query_pcd_fea, query_pcd_alpha = self.perceiver_decoder(memory, nq, tmp_ray_dir)
+            query_pcd_fea, query_pcd_alpha = self.perceiver_decoder(memory, nq)
 
-            decoded_features = torch.zeros([torch.numel(ray_valid), 4], dtype=torch.float32, device=ray_valid.device)
-            #decoded_features = torch.zeros([B*valid_R*SR, 4], dtype=torch.float32, device=ray_valid.device)
+            pseudo_gt_alpha, pseudo_gt_fea = pseudo_gt[...,0], pseudo_gt[...,1:]
+
+            gt_opacity = 1 - torch.exp(-pseudo_gt_alpha.squeeze() * 0.008)
+            pred_opacity = 1 - torch.exp(-query_pcd_alpha.squeeze() * 0.008)
+
+            loss_alpha = self.loss(gt_opacity[None,...], pred_opacity[None,...])
+            loss_rgb   = self.loss(pseudo_gt_fea.squeeze(), query_pcd_fea.squeeze())
+            output['loss_alpha'] = loss_alpha
+            output['loss_rgb'] = loss_rgb
+
+            #loss = torch.sum(loss_rgb, dim=-1) + loss_alpha.squeeze()
+            #failed_index = loss > 1
+            #assign_index = assign_index.reshape(-1, 8)
+            #grid_pcd_index = assign_index[failed_index]
+            #grid_pcd_index = torch.unique(torch.tensor(grid_pcd_index.view(-1), dtype=torch.long))
+            #output['grid_pcd_index'] = grid_pcd_index
+            #output['loss'] = torch.mean(loss)
+
+            decoded_features = torch.zeros([torch.numel(ray_valid) , 4], dtype=torch.float32, device=ray_valid.device)
             decoded_features[ray_valid.view(-1)] = torch.cat([query_pcd_alpha, query_pcd_fea], dim=-1).squeeze()
+            #decoded_features[ray_valid.view(-1)] = pseudo_gt
             decoded_features = decoded_features.reshape(1, -1, self.opt.SR, 4)
-
             ray_valid = ray_valid.reshape(1, -1, self.opt.SR)
-
-        #sample_loc = sample_loc.reshape(sample_loc.shape[0], -1, self.opt.SR, 3)
+            #ray_dist = ray_dist.reshape(1, -1, self.opt.SR)
+        sample_loc = sample_loc.reshape(sample_loc.shape[0], -1, self.opt.SR, 3)
         ray_dist = torch.cummax(sample_loc[..., 2], dim=-1)[0]
         ray_dist = torch.cat([ray_dist[..., 1:] - ray_dist[..., :-1], torch.full((ray_dist.shape[0], ray_dist.shape[1], 1), vsize[2], device=ray_dist.device)], dim=-1)
+
+        #output['sample_loc_w'] = sample_loc_w
+        #output['sample_loc'] = sample_loc
+        #output['ray_valid'] = ray_valid
+        #output['decoded_features'] = decoded_features
+
         mask = ray_dist < 1e-8
         if self.opt.raydist_mode_unit > 0:
             mask = torch.logical_or(mask, ray_dist > 2 * vsize[2])
@@ -422,6 +394,19 @@ class NeuralPointsRayMarching(nn.Module):
         ray_dist = ray_dist * (1.0 - mask) + mask * vsize[2]
         ray_dist *= ray_valid.float()
         output['ray_dist'] = ray_dist
+        # raydir: N x Rays x 3sampled_color
+        # raypos: N x Rays x Samples x 3
+        # ray_dist: N x Rays x Samples
+        # ray_valid: N x Rays x Samples
+        # ray_features: N x Rays x Samples x Features
+        # Output
+        # ray_color: N x Rays x 3
+        # point_color: N x Rays x Samples x 3
+        # opacity: N x Rays x Samples
+        # acc_transmission: N x Rays x Samples
+        # blend_weight: N x Rays x Samples x 1
+        # background_transmission: N x Rays x 1
+        # ray march
         output["queried_shading"] = torch.logical_not(torch.any(ray_valid, dim=-1, keepdims=True)).repeat(1, 1, 3).to(torch.float32)
         if self.return_color:
             if "bg_ray" in kargs:
@@ -433,8 +418,8 @@ class NeuralPointsRayMarching(nn.Module):
                 acc_transmission,
                 blend_weight,
                 background_transmission,
-                _, opacity_gt,
-            ) = ray_march(ray_dist, ray_valid, decoded_features, self.render_func, self.blend_func, bg_color, decoded_features_loaded)
+                _,
+            ) = ray_march(ray_dist, ray_valid, decoded_features, self.render_func, self.blend_func, bg_color)
             ray_color = self.tone_map(ray_color)
             output["coarse_raycolor"] = ray_color
             output["coarse_point_opacity"] = opacity
@@ -447,34 +432,6 @@ class NeuralPointsRayMarching(nn.Module):
                 _,
             ) = alpha_ray_march(ray_dist, ray_valid, decoded_features, self.blend_func)
 
-        if self.opt.progressive_distill:
-            opacity_gt = opacity_gt[ray_valid][...,None]
-            opacity    = opacity[ray_valid][..., None]
-
-            rgb    = query_pcd_fea.squeeze()
-            rgb_gt = decoded_features_loaded[...,1:][ray_valid]
-            if self.opt.loss_type == 'l1':
-                opacity_loss = self.l1loss(opacity, opacity_gt)
-                rgb_loss = torch.mean(self.l1loss(rgb, rgb_gt), dim=-1, keepdim=True)
-            else:
-                opacity_loss = self.bceloss(opacity, opacity_gt)
-                rgb_loss = torch.mean(self.bceloss(rgb, rgb_gt), dim=-1, keepdim=True)
-            loss = opacity_loss + rgb_loss
-            failed_index = loss > self.opt.loss_thresh
-            failed_sample_loc = query_points.squeeze()[failed_index.squeeze()]
-            #dis = torch.tensor(D).cuda()[failed_index.squeeze()][...,0:1]
-            #failed_sample_loc = torch.cat([failed_sample_loc, dis], -1)
-            output['failed_sample_loc'] = failed_sample_loc
-            #print (D.shape, dis.shape)
-            #print (dis[0:10])
-            #assign_index = assign_index.reshape(-1, self.opt.knn_k)
-            #grid_pcd_index = assign_index[failed_index.squeeze()]
-            #grid_pcd_index = torch.unique(torch.tensor(grid_pcd_index.view(-1), dtype=torch.long))
-            #if len(self.neural_points.xyz_fov)>=self.opt.knn_k:
-            #    grid_pcd_index = index_list[grid_pcd_index]
-            #output['grid_pcd_index'] = grid_pcd_index
-            output['loss_opacity'] = torch.mean(opacity_loss)
-            output['loss_rgb'] = torch.mean(rgb_loss)
         if self.return_depth:
             alpha_blend_weight = opacity * acc_transmission
             weight = alpha_blend_weight.view(alpha_blend_weight.shape[:3])
@@ -488,7 +445,7 @@ class NeuralPointsRayMarching(nn.Module):
             output["conf_coefficient"] = conf_coefficient
 
 
-        if self.opt.prob == 1 and output["coarse_point_opacity"].shape[1] > 0 and 1==2:
+        if self.opt.prob == 1 and output["coarse_point_opacity"].shape[1] > 0 :
             B, OR, _, _ = sample_pnt_mask.shape
             if weight is not None:
                 output["ray_max_shading_opacity"], opacity_ind = torch.max(output["coarse_point_opacity"], dim=-1, keepdim=True)

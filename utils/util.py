@@ -1,5 +1,6 @@
 from __future__ import print_function
 import torch
+from pytorch3d.ops import ball_query
 import numpy as np
 from PIL import Image
 import os
@@ -10,7 +11,38 @@ import matplotlib as mpl
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation as R
+import itertools
 
+def add_flour(failed_sample_loc, candidates=None, gap=0.2, radius=0.2):
+    if candidates is None:
+        center = torch.tensor([3.7269, 3.4063, 1.2413]).cuda()
+        whl = torch.tensor([8.2886, 8.1767, 3.0916]).cuda()
+        range_min,range_max = center-whl/2, center+whl/2
+
+        xs = torch.arange(range_min[0], range_max[0], gap, device='cuda')
+        ys = torch.arange(range_min[1], range_max[1], gap, device='cuda')
+        zs = torch.arange(range_min[2], range_max[2], gap, device='cuda')
+
+        candidates = torch.cartesian_prod(xs, ys, zs)
+    else:
+        our_list = [-1,0,1]
+        lists = []
+        for item in itertools.product(our_list, our_list, our_list):
+            lists.append(item)
+        lists.remove((0,0,0))
+
+        neighbor_pcds = torch.tensor(lists.remove((0,0,0))).cuda()
+
+        new_candidates = []
+        for neighbor_pcd in neighbor_pcds:
+            pcd = candidates + (neighbor_pcd * gap).reshape(1,3)
+            new_candidates.append(pcd)
+        candidates = torch.cat(new_candidates)
+        print (candidates.shape, '-------candidates shape')
+
+    idx = ball_query(candidates[None,...], failed_sample_loc[None,...], K=1, radius=radius).idx.squeeze() #N*p1*1
+
+    return candidates[idx>0]
 
 def mkdir(path):
     if not os.path.exists(path):

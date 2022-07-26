@@ -17,9 +17,7 @@ import time
 
 from data.load_blender import load_blender_data
 
-#X = torch.cuda.FloatTensor(8)
-#src = torch.cuda.ByteTensor(8)
-#src = torch.cuda.DoubleTensor(8)
+# X = torch.cuda.FloatTensor(8)
 
 
 class Holder(pycuda.driver.PointerHolderBase):
@@ -42,7 +40,7 @@ class lighting_fast_querier():
         # self.device = drv.Device(gpu)
         self.ctx = drv.Device(self.gpu).make_context()
         self.get_occ_vox, self.near_vox_full, self.insert_vox_points, self.query_along_ray = self.build_cuda()
-
+        
         self.inverse = self.opt.inverse
 
     def clean_up(self):
@@ -133,7 +131,7 @@ class lighting_fast_querier():
         mod = SourceModule(
             """
             #define KN  """ + str(self.opt.K)
-            + """
+            + """ 
             #include <cuda.h>
             #include <cuda_runtime.h>
             #include <algorithm>
@@ -142,8 +140,8 @@ class lighting_fast_querier():
             #include <math.h>
             #include <stdlib.h>
             #include <curand_kernel.h>
-            namespace cuda {
-
+            namespace cuda {          
+    
                 static __device__ inline uint8_t atomicAdd(uint8_t *address, uint8_t val) {
                     size_t offset = (size_t)address & 3;
                     uint32_t *address_as_ui = (uint32_t *)(address - offset);
@@ -152,7 +150,7 @@ class lighting_fast_querier():
                     uint32_t old_byte;
                     uint32_t newval;
                     uint32_t assumed;
-
+    
                     do {
                       assumed = old;
                       old_byte = (old >> shift) & 0xff;
@@ -164,7 +162,7 @@ class lighting_fast_querier():
                     } while (assumed != old);
                     return __byte_perm(old, 0, offset);   // need validate
                 }
-
+    
                 static __device__ inline char atomicAdd(char* address, char val) {
                     // offset, in bytes, of the char* address within the 32-bit address of the space that overlaps it
                     size_t long_address_modulo = (size_t) address & 3;
@@ -176,9 +174,9 @@ class lighting_fast_querier():
                     // for selecting bytes within a 32-bit chunk that correspond to the char* address (relative to base_address)
                     unsigned int selector = selectors[long_address_modulo];
                     unsigned int long_old, long_assumed, long_val, replacement;
-
+    
                     long_old = *base_address;
-
+    
                     do {
                         long_assumed = long_old;
                         // replace bits in long_old that pertain to the char address with those from val
@@ -187,51 +185,51 @@ class lighting_fast_querier():
                         long_old = atomicCAS(base_address, long_assumed, replacement);
                     } while (long_old != long_assumed);
                     return __byte_perm(long_old, 0, long_address_modulo);
-                }
-
+                }            
+    
                 static __device__ inline int8_t atomicAdd(int8_t *address, int8_t val) {
                     return (int8_t)cuda::atomicAdd((char*)address, (char)val);
                 }
-
+    
                 static __device__ inline short atomicAdd(short* address, short val)
                 {
-
+    
                     unsigned int *base_address = (unsigned int *)((size_t)address & ~2);
-
+    
                     unsigned int long_val = ((size_t)address & 2) ? ((unsigned int)val << 16) : (unsigned short)val;
-
+    
                     unsigned int long_old = ::atomicAdd(base_address, long_val);
-
+    
                     if((size_t)address & 2) {
                         return (short)(long_old >> 16);
                     } else {
-
+    
                         unsigned int overflow = ((long_old & 0xffff) + long_val) & 0xffff0000;
-
+    
                         if (overflow)
-
+    
                             atomicSub(base_address, overflow);
-
+    
                         return (short)(long_old & 0xffff);
                     }
                 }
-
+    
                 static __device__ float cas(double *addr, double compare, double val) {
                    unsigned long long int *address_as_ull = (unsigned long long int *) addr;
                    return __longlong_as_double(atomicCAS(address_as_ull,
                                                  __double_as_longlong(compare),
                                                  __double_as_longlong(val)));
                 }
-
+    
                 static __device__ float cas(float *addr, float compare, float val) {
                     unsigned int *address_as_uint = (unsigned int *) addr;
                     return __uint_as_float(atomicCAS(address_as_uint,
                                            __float_as_uint(compare),
                                            __float_as_uint(val)));
                 }
-
-
-
+    
+    
+    
                 static __device__ inline uint8_t atomicCAS(uint8_t * const address, uint8_t const compare, uint8_t const value)
                 {
                     uint8_t const longAddressModulo = reinterpret_cast< size_t >( address ) & 0x3;
@@ -247,7 +245,7 @@ class lighting_fast_querier():
                         // Select bytes from the old value and new value to construct a 32-bit value to use.
                         uint32_t const replacement = __byte_perm( longOldValue, longValue,   byteSelector );
                         uint32_t const comparison  = __byte_perm( longOldValue, longCompare, byteSelector );
-
+    
                         longAssumed  = longOldValue;
                         // Use 32-bit atomicCAS() to try and set the 8-bits we care about.
                         longOldValue = ::atomicCAS( baseAddress, comparison, replacement );
@@ -257,14 +255,14 @@ class lighting_fast_querier():
                     return oldValue;
                 }
             }
-
-
-
+            
+    
+    
             extern "C" {
-
+    
                 __global__ void get_occ_vox(
                     const float* in_data,   // B * N * 3
-                    const int* in_actual_numpoints, // B
+                    const int* in_actual_numpoints, // B 
                     const int B,
                     const int N,
                     const float *d_coord_shift,     // 3
@@ -276,7 +274,7 @@ class lighting_fast_querier():
                     uint8_t *coor_occ,  // B * 400 * 400 * 400
                     int8_t *loc_coor_counter,  // B * 400 * 400 * 400
                     int *near_depth_id_tensor,  // B * 400 * 400
-                    int *far_depth_id_tensor,  // B * 400 * 400
+                    int *far_depth_id_tensor,  // B * 400 * 400 
                     const int inverse
                 ) {
                     int index = blockIdx.x * blockDim.x + threadIdx.x; // index of gpu thread
@@ -294,10 +292,10 @@ class lighting_fast_querier():
                         if (inverse > 0){ z = 1.0 / z;}
                         coor[2] = floor((z - d_coord_shift[2]) / d_voxel_size[2]);
                         if (coor[2] < 0 || coor[2] >= d_grid_size[2]) { return; }
-
+                        
                         int frust_id_b, coor_indx_b = i_batch * grid_size_vol + coor[0] * (d_grid_size[1] * d_grid_size[2]) + coor[1] * d_grid_size[2] + coor[2];
                         if (loc_coor_counter[coor_indx_b] < (int8_t)0 || cuda::atomicAdd(loc_coor_counter + coor_indx_b, (int8_t)-1) < (int8_t)0) { return; }
-
+    
                         for (int coor_x = max(0, coor[0] - kernel_size[0] / 2) ; coor_x < min(d_grid_size[0], coor[0] + (kernel_size[0] + 1) / 2); coor_x++)    {
                             for (int coor_y = max(0, coor[1] - kernel_size[1] / 2) ; coor_y < min(d_grid_size[1], coor[1] + (kernel_size[1] + 1) / 2); coor_y++)   {
                                 for (int coor_z = max(0, coor[2] - kernel_size[2] / 2) ; coor_z < min(d_grid_size[2], coor[2] + (kernel_size[2] + 1) / 2); coor_z++) {
@@ -309,10 +307,10 @@ class lighting_fast_querier():
                                     atomicMax(far_depth_id_tensor + frust_id_b, coor_z);
                                 }
                             }
-                        }
+                        }   
                     }
                 }
-
+    
                 __global__ void near_vox_full(
                     const int B,
                     const int SR,
@@ -328,8 +326,8 @@ class lighting_fast_querier():
                     const uint8_t *coor_occ,  // B * 400 * 400 * 400
                     int8_t *loc_coor_counter,    // B * 400 * 400 * 400
                     const int *near_depth_id_tensor,  // B * 400 * 400
-                    const int *far_depth_id_tensor,  // B * 400 * 400
-                    short *voxel_to_coorz_idx  // B * 400 * 400 * SR
+                    const int *far_depth_id_tensor,  // B * 400 * 400 
+                    short *voxel_to_coorz_idx  // B * 400 * 400 * SR 
                 ) {
                     int index = blockIdx.x * blockDim.x + threadIdx.x; // index of gpu thread
                     int i_batch = index / R;  // index of batch
@@ -363,11 +361,11 @@ class lighting_fast_querier():
                         }
                     }
                 }
-
-
-                __global__ void insert_vox_points(
+    
+    
+                __global__ void insert_vox_points(        
                     float* in_data,   // B * N * 3
-                    int* in_actual_numpoints, // B
+                    int* in_actual_numpoints, // B 
                     const int B,
                     const int N,
                     const int P,
@@ -378,7 +376,7 @@ class lighting_fast_querier():
                     const int *d_grid_size,
                     const float *d_voxel_size,      // 3
                     const int8_t *loc_coor_counter,    // B * 400 * 400 * 400
-                    short *voxel_pnt_counter,      // B * 400 * 400 * max_o
+                    short *voxel_pnt_counter,      // B * 400 * 400 * max_o 
                     int *voxel_to_pntidx,      // B * pixel_size * max_o * P
                     unsigned long seconds,
                     const int inverse
@@ -410,9 +408,9 @@ class lighting_fast_querier():
                             }
                         }
                     }
-                }
-
-
+                }                        
+    
+    
                 __global__ void query_rand_along_ray(
                     const float* in_data,   // B * N * 3
                     const int B,
@@ -421,7 +419,7 @@ class lighting_fast_querier():
                     const int max_o,
                     const int P,
                     const int K,                // num.  neighbors
-                    const int pixel_size,
+                    const int pixel_size,                
                     const int grid_size_vol,
                     const float radius_limit2,
                     const float depth_limit2,
@@ -433,8 +431,8 @@ class lighting_fast_querier():
                     const int *kernel_size,
                     const int *pixel_idx,               // B * R * 2
                     const int8_t *loc_coor_counter,    // B * 400 * 400 * 400
-                    const short *voxel_to_coorz_idx,            // B * 400 * 400 * SR
-                    const short *voxel_pnt_counter,      // B * 400 * 400 * max_o
+                    const short *voxel_to_coorz_idx,            // B * 400 * 400 * SR 
+                    const short *voxel_pnt_counter,      // B * 400 * 400 * max_o 
                     const int *voxel_to_pntidx,      // B * pixel_size * max_o * P
                     int *sample_pidx,       // B * R * SR * K
                     float *sample_loc,       // B * R * SR * K
@@ -444,9 +442,9 @@ class lighting_fast_querier():
                 ) {
                     int index =  blockIdx.x * blockDim.x + threadIdx.x; // index of gpu thread
                     int i_batch = index / (R * SR);  // index of batch
-                    int ray_idx_b = index / SR;
+                    int ray_idx_b = index / SR;  
                     if (i_batch >= B || ray_idx_b >= B * R) { return; }
-
+    
                     int ray_sample_loc_idx = index - ray_idx_b * SR;
                     int frustx = pixel_idx[ray_idx_b * 2] / vscale[0];
                     int frusty = pixel_idx[ray_idx_b * 2 + 1] / vscale[1];
@@ -473,7 +471,7 @@ class lighting_fast_querier():
                                 int voxel_indx_b = pixel_indx_b * max_o + (int)loc_coor_counter[shift_coor_indx_b];
                                 for (int g = 0; g < min(P, (int) voxel_pnt_counter[voxel_indx_b]); g++) {
                                     int pidx = voxel_to_pntidx[voxel_indx_b * P + g];
-                                    if ((radius_limit2 == 0 || (in_data[pidx*3]-centerx) * (in_data[pidx*3]-centerx) + (in_data[pidx*3 + 1]-centery) * (in_data[pidx*3 + 1]-centery) <= radius_limit2) && (depth_limit2==0 || (in_data[pidx*3 + 2]-centerz) * (in_data[pidx*3 + 2]-centerz) <= depth_limit2)) {
+                                    if ((radius_limit2 == 0 || (in_data[pidx*3]-centerx) * (in_data[pidx*3]-centerx) + (in_data[pidx*3 + 1]-centery) * (in_data[pidx*3 + 1]-centery) <= radius_limit2) && (depth_limit2==0 || (in_data[pidx*3 + 2]-centerz) * (in_data[pidx*3 + 2]-centerz) <= depth_limit2)) { 
                                         if (kid++ < K) {
                                             sample_pidx[raysample_startid + kid - 1] = pidx;
                                         }
@@ -490,8 +488,8 @@ class lighting_fast_querier():
                         }
                     }
                 }
-
-
+                
+                
                 __global__ void query_neigh_along_ray_layered(
                     const float* in_data,   // B * N * 3
                     const int B,
@@ -500,7 +498,7 @@ class lighting_fast_querier():
                     const int max_o,
                     const int P,
                     const int K,                // num.  neighbors
-                    const int pixel_size,
+                    const int pixel_size,                
                     const int grid_size_vol,
                     const float radius_limit2,
                     const float depth_limit2,
@@ -512,8 +510,8 @@ class lighting_fast_querier():
                     const int *kernel_size,
                     const int *pixel_idx,               // B * R * 2
                     const int8_t *loc_coor_counter,    // B * 400 * 400 * 400
-                    const short *voxel_to_coorz_idx,            // B * 400 * 400 * SR
-                    const short *voxel_pnt_counter,      // B * 400 * 400 * max_o
+                    const short *voxel_to_coorz_idx,            // B * 400 * 400 * SR 
+                    const short *voxel_pnt_counter,      // B * 400 * 400 * max_o 
                     const int *voxel_to_pntidx,      // B * pixel_size * max_o * P
                     int *sample_pidx,       // B * R * SR * K
                     float *sample_loc,       // B * R * SR * K
@@ -523,9 +521,9 @@ class lighting_fast_querier():
                 ) {
                     int index =  blockIdx.x * blockDim.x + threadIdx.x; // index of gpu thread
                     int i_batch = index / (R * SR);  // index of batch
-                    int ray_idx_b = index / SR;
+                    int ray_idx_b = index / SR;  
                     if (i_batch >= B || ray_idx_b >= B * R) { return; }
-
+    
                     int ray_sample_loc_idx = index - ray_idx_b * SR;
                     int frustx = pixel_idx[ray_idx_b * 2] / vscale[0];
                     int frusty = pixel_idx[ray_idx_b * 2 + 1] / vscale[1];
@@ -542,15 +540,15 @@ class lighting_fast_querier():
                     // int coor_indx_b = vxy_ind_b * d_grid_size[2] + frustz;
                     int raysample_startid = index * K;
                     // curandState state;
-
+                    
                     int kid = 0, far_ind = 0, coor_z, coor_y, coor_x;
                     float far2 = 0.0;
                     float xyz2Buffer[KN];
                     for (int layer = 0; layer < (kernel_size[0]+1)/2; layer++){
                         int zlayer = min((kernel_size[2]+1)/2-1, layer);
-
+                        
                         for (int x = max(-frustx, -layer); x < min(d_grid_size[0] - frustx, layer+1); x++) {
-                            for (int y = max(-frusty, -layer); y < min(d_grid_size[1] - frusty, layer+1); y++) {
+                            for (int y = max(-frusty, -layer); y < min(d_grid_size[1] - frusty, layer+1); y++) {                              
                                 coor_y = frusty + y;
                                 coor_x = frustx + x;
                                 int pixel_indx_b = i_batch * pixel_size  + coor_x * d_grid_size[1] + coor_y;
@@ -559,10 +557,10 @@ class lighting_fast_querier():
                                     if (max(abs(x),abs(y)) != layer && ((zlayer == layer) ? (abs(z) != zlayer) : 1)) continue;
                                     // if (max(abs(x),abs(y)) != layer) continue;
                                     coor_z = z + frustz;
-
+                                    
                                     int shift_coor_indx_b = pixel_indx_b * d_grid_size[2] + coor_z;
                                     if(loc_coor_counter[shift_coor_indx_b] < (int8_t)0) {continue;}
-                                    int voxel_indx_b = pixel_indx_b * max_o + (int)loc_coor_counter[shift_coor_indx_b];
+                                    int voxel_indx_b = pixel_indx_b * max_o + (int)loc_coor_counter[shift_coor_indx_b];                  
                                     for (int g = 0; g < min(P, (int) voxel_pnt_counter[voxel_indx_b]); g++) {
                                         int pidx = voxel_to_pntidx[voxel_indx_b * P + g];
                                         float x_v = (NN < 2) ? (in_data[pidx*3]-centerx) : (in_data[pidx*3] * in_data[pidx*3+2]-centerx*centerz) ;
@@ -589,7 +587,7 @@ class lighting_fast_querier():
                                                             far_ind = i;
                                                         }
                                                     }
-                                                }
+                                                } 
                                             }
                                         }
                                     }
@@ -909,36 +907,36 @@ def save_queried_points(point_xyz_tensor, point_xyz_pers_tensor, sample_pidx_ten
 
 
 
-#if __name__ == "__main__":
-#    obj = "lego"
-#    point_file = "{}.pkl".format(obj)
-#    point_dir = os.path.expandvars("${nrDataRoot}/nerf/nerf_synthetic_points/")
-#    r = 0.36000002589322094
-#    ranges = np.array([-r, -r, 2., r, r, 6.], dtype=np.float32)
-#    vdim = np.array([800, 800, 400], dtype=np.int32)
-#    vsize = np.array([2 * r / vdim[0], 2 * r / vdim[1], 4. / vdim[2]], dtype=np.float32)
-#    vscale = np.array([2, 2, 1], dtype=np.int32)
-#    SR = 24
-#    P = 16
-#    kernel_size = np.array([5, 5, 1], dtype=np.int32)
-#    radius_limit = 0  # r / 400 * 5 #r / 400 * 5
-#    depth_limit = 0  # 4. / 400 * 1.5 # r / 400 * 2
-#    max_o = None
-#    K = 32
-#
-#    xrange = np.arange(0, 800, 1, dtype=np.int32)
-#    yrange = np.arange(0, 800, 1, dtype=np.int32)
-#    xv, yv = np.meshgrid(xrange, yrange, sparse=False, indexing='ij')
-#    pixel_idx = np.stack([xv, yv], axis=-1).reshape(-1, 2)  # 20000 * 2
-#    gpu = 0
-#    imgidx = 3
-#    split = ["train"]
-#
-#    if gpu < 0:
-#        import pycuda.autoinit
-#    else:
-#        drv.init()
-#        dev1 = drv.Device(gpu)
-#        ctx1 = dev1.make_context()
-#    try_build(point_file, point_dir, ranges, vsize, vdim, vscale, max_o, P, kernel_size, SR, K, pixel_idx, obj,
-#              radius_limit, depth_limit, split=split, imgidx=imgidx, gpu=0)
+if __name__ == "__main__":
+    obj = "lego"
+    point_file = "{}.pkl".format(obj)
+    point_dir = os.path.expandvars("${nrDataRoot}/nerf/nerf_synthetic_points/")
+    r = 0.36000002589322094
+    ranges = np.array([-r, -r, 2., r, r, 6.], dtype=np.float32)
+    vdim = np.array([800, 800, 400], dtype=np.int32)
+    vsize = np.array([2 * r / vdim[0], 2 * r / vdim[1], 4. / vdim[2]], dtype=np.float32)
+    vscale = np.array([2, 2, 1], dtype=np.int32)
+    SR = 24
+    P = 16
+    kernel_size = np.array([5, 5, 1], dtype=np.int32)
+    radius_limit = 0  # r / 400 * 5 #r / 400 * 5
+    depth_limit = 0  # 4. / 400 * 1.5 # r / 400 * 2
+    max_o = None
+    K = 32
+
+    xrange = np.arange(0, 800, 1, dtype=np.int32)
+    yrange = np.arange(0, 800, 1, dtype=np.int32)
+    xv, yv = np.meshgrid(xrange, yrange, sparse=False, indexing='ij')
+    pixel_idx = np.stack([xv, yv], axis=-1).reshape(-1, 2)  # 20000 * 2
+    gpu = 0
+    imgidx = 3
+    split = ["train"]
+
+    if gpu < 0:
+        import pycuda.autoinit
+    else:
+        drv.init()
+        dev1 = drv.Device(gpu)
+        ctx1 = dev1.make_context()
+    try_build(point_file, point_dir, ranges, vsize, vdim, vscale, max_o, P, kernel_size, SR, K, pixel_idx, obj,
+              radius_limit, depth_limit, split=split, imgidx=imgidx, gpu=0)

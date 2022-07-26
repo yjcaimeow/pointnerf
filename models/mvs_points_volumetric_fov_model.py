@@ -1,6 +1,6 @@
 from .base_rendering_model import *
-from .neural_points_volumetric_model import NeuralPointsVolumetricModel
-from .neural_points.neural_points import NeuralPoints
+from .neural_points_volumetric_fov_model import NeuralPointsVolumetricModel
+from .neural_points.neural_points_fov import NeuralPoints
 from .mvs.mvs_points_model import MvsPointsModel
 from .mvs import mvs_utils
 from. import base_model
@@ -186,7 +186,7 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
 
 
     def reset_optimizer(self, opt):
-        self.clean_optimizer()
+        self.clean_optimizer(opt)
         self.setup_optimizer(opt)
 
     def clean_optimizer(self):
@@ -236,7 +236,6 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
     def grow_points(self, points_xyz, points_embedding, points_color, points_dir, points_conf):
         self.neural_points.grow_points(points_xyz, points_embedding, points_color, points_dir, points_conf)
         # self.neural_points.reset_querier()
-        self.setup_optimizer(self.opt)
 
     def cleanup(self):
         if hasattr(self, "neural_points"):

@@ -233,15 +233,14 @@ class NeuralPoints(nn.Module):
         super().__init__()
 
         assert isinstance(size, int), 'size must be int'
-        print (checkpoint,'......???', checkpoint is not None)
+
         self.opt = opt
         self.grid_vox_sz = 0
         self.points_conf, self.points_dir, self.points_color, self.eulers, self.Rw2c = None, None, None, None, None
         self.device=device
         if self.opt.load_points ==1:
             saved_features = None
-            if checkpoint is not None:
-                print ('load model...')
+            if checkpoint:
                 saved_features = torch.load(checkpoint, map_location=device)
             if saved_features is not None and "neural_points.xyz" in saved_features:
                 self.xyz = nn.Parameter(saved_features["neural_points.xyz"])
@@ -375,6 +374,7 @@ class NeuralPoints(nn.Module):
 
 
     def grow_points(self, add_xyz, add_embedding, add_color, add_dir, add_conf, add_eulers=None, add_Rw2c=None):
+        # print(self.xyz.shape, self.points_conf.shape, self.points_embeding.shape, self.points_dir.shape, self.points_color.shape)
         self.xyz = nn.Parameter(torch.cat([self.xyz, add_xyz], dim=0))
         self.xyz.requires_grad = self.opt.xyz_grad > 0
 
@@ -487,6 +487,7 @@ class NeuralPoints(nn.Module):
             self.Rw2c = Rw2c
 
 
+
     def construct_grid_points(self, xyz):
         # --construct_res' '--grid_res',
         xyz_min, xyz_max = torch.min(xyz, dim=-2)[0], torch.max(xyz, dim=-2)[0]
@@ -563,9 +564,8 @@ class NeuralPoints(nn.Module):
         # print("actual_numpoints_tensor", actual_numpoints_tensor.shape)
         # sample_pidx_tensor: B, R, SR, K
         ray_dirs_tensor = inputs["raydir"]
-        local_ray_dirs_tensor = inputs["local_raydir"]
         # print("ray_dirs_tensor", ray_dirs_tensor.shape, self.xyz.shape)
-        sample_pidx_tensor, sample_loc_tensor, sample_loc_w_tensor, sample_ray_dirs_tensor, sample_local_ray_dirs_tensor, ray_mask_tensor, vsize, ranges = self.querier.query_points(pixel_idx_tensor, point_xyz_pers_tensor, self.xyz_fov[None,...], actual_numpoints_tensor, h, w, intrinsic, near_plane, far_plane, ray_dirs_tensor, local_ray_dirs_tensor, cam_pos_tensor, cam_rot_tensor)
+        sample_pidx_tensor, sample_loc_tensor, sample_loc_w_tensor, sample_ray_dirs_tensor, ray_mask_tensor, vsize, ranges = self.querier.query_points(pixel_idx_tensor, point_xyz_pers_tensor, self.xyz_fov[None,...], actual_numpoints_tensor, h, w, intrinsic, near_plane, far_plane, ray_dirs_tensor, cam_pos_tensor, cam_rot_tensor)
 
         # print("ray_mask_tensor",ray_mask_tensor.shape)
         # self.pers2img(point_xyz_pers_tensor, pixel_idx_tensor.cpu().numpy(), pixel_idx_cur_tensor.cpu().numpy(), ray_mask_tensor.cpu().numpy(), sample_pidx_tensor.cpu().numpy(), ranges, h, w, inputs)
@@ -577,8 +577,7 @@ class NeuralPoints(nn.Module):
             else:
                 sample_pidx_tensor = torch.zeros([B, 0, SR, 8], device=sample_pidx_tensor.device, dtype=sample_pidx_tensor.dtype)
 
-        return sample_pidx_tensor, sample_loc_tensor, ray_mask_tensor, point_xyz_pers_tensor, sample_loc_w_tensor, sample_ray_dirs_tensor, \
-            sample_local_ray_dirs_tensor, vsize
+        return sample_pidx_tensor, sample_loc_tensor, ray_mask_tensor, point_xyz_pers_tensor, sample_loc_w_tensor, sample_ray_dirs_tensor, vsize
 
 
     def query_vox_grid(self, sample_loc_w_tensor, full_grid_idx, space_min, grid_vox_sz):
@@ -700,18 +699,20 @@ class NeuralPoints(nn.Module):
 
 
 
-    def forward(self, inputs):
+    def forward(self, inputs, agg_type='mlp'):
 
         pixel_idx, camrotc2w, campos, near_plane, far_plane, h, w, intrinsic = inputs["pixel_idx"].to(torch.int32), inputs["camrotc2w"], inputs["campos"], inputs["near"], inputs["far"], inputs["h"], inputs["w"], inputs["intrinsic"]
-        self.xyz_fov, _, fov_ids, pts_2d = get_lidar_in_image_fov(self.xyz.squeeze(), inputs["c2w"].squeeze(), intrinsic.squeeze(), xmin=0, ymin=0, xmax=int(w), ymax=int(h), return_more=True)
-        #index_list = torch.tensor(list(range(len(self.xyz.squeeze()))))[fov_ids]
-        self.points_embeding_fov = self.points_embeding.squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
-        self.points_color_fov = self.points_color.squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
-        self.points_dir_fov = self.points_dir.squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
-        self.points_conf_fov = self.points_conf.squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
-        if self.opt.progressive_distill:
+        # 1, 294, 24, 32;   1, 294, 24;     1, 291, 2
+        if agg_type=="attention":
+            self.xyz_fov, _, fov_ids, pts_2d = get_lidar_in_image_fov(self.xyz.squeeze(), inputs["c2w"].squeeze(), intrinsic.squeeze(), xmin=0, ymin=0, xmax=int(w), ymax=int(h), return_more=True)
+            self.points_embeding_fov = self.points_embeding.squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
+            self.points_color_fov = self.points_color.squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
+            self.points_dir_fov = self.points_dir.squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
+            self.points_conf_fov = self.points_conf.squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
+
             return
-        sample_pidx, sample_loc, ray_mask_tensor, point_xyz_pers_tensor, sample_loc_w_tensor, sample_ray_dirs_tensor, sample_local_ray_dirs_tensor, vsize = self.get_point_indices(inputs, camrotc2w, campos, pixel_idx, torch.min(near_plane).cpu().numpy(), torch.max(far_plane).cpu().numpy(), torch.max(h).cpu().numpy(), torch.max(w).cpu().numpy(), intrinsic.cpu().numpy()[0], vox_query=self.opt.NN<0)
+
+        sample_pidx, sample_loc, ray_mask_tensor, point_xyz_pers_tensor, sample_loc_w_tensor, sample_ray_dirs_tensor, vsize = self.get_point_indices(inputs, camrotc2w, campos, pixel_idx, torch.min(near_plane).cpu().numpy(), torch.max(far_plane).cpu().numpy(), torch.max(h).cpu().numpy(), torch.max(w).cpu().numpy(), intrinsic.cpu().numpy()[0], vox_query=self.opt.NN<0)
 
         sample_pnt_mask = sample_pidx >= 0
         B, R, SR, K = sample_pidx.shape
@@ -737,4 +738,4 @@ class NeuralPoints(nn.Module):
         # if self.points_embeding.grad is not None:
         #     print("points_embeding grad:", self.points_embeding.requires_grad, torch.max(self.points_embeding.grad))
         # print("points_embeding 3", torch.max(self.points_embeding), torch.min(self.points_embeding))
-        return sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding[..., 6:], sampled_embedding[..., 3:6], sampled_embedding[..., :3], sample_pnt_mask, sample_loc, sample_loc_w_tensor, sample_ray_dirs_tensor, sample_local_ray_dirs_tensor, ray_mask_tensor, vsize, self.grid_vox_sz, point_xyz_pers_tensor
+        return sampled_color, sampled_Rw2c, sampled_dir, sampled_conf, sampled_embedding[..., 6:], sampled_embedding[..., 3:6], sampled_embedding[..., :3], sample_pnt_mask, sample_loc, sample_loc_w_tensor, sample_ray_dirs_tensor, ray_mask_tensor, vsize, self.grid_vox_sz, point_xyz_pers_tensor

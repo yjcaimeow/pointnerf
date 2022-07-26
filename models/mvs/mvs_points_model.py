@@ -1,5 +1,4 @@
 import torch
-import torch.nn as nn
 import os
 from torch.utils.data import DataLoader
 import imageio
@@ -14,7 +13,7 @@ from ..depth_estimators.mvsnet import MVSNet as Ofcl_MVSNet
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from inplace_abn import InPlaceABN
 from collections import OrderedDict
-#device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 from torchvision import transforms as T
 
 feature_str_lst=['appr_feature_str0', 'appr_feature_str1', 'appr_feature_str2', 'appr_feature_str3']
@@ -49,8 +48,8 @@ class MvsPointsModel(nn.Module):
 
         # Create mvs model
         self.MVSNet = self.render_kwargs_train['network_featmvs']
-        #if args.pre_d_est is not None and self.args.manual_depth_view > 0 :
-        #    self.load_pretrained_d_est(self.MVSNet, args.pre_d_est)
+        if args.pre_d_est is not None and self.args.manual_depth_view > 0 :
+            self.load_pretrained_d_est(self.MVSNet, args.pre_d_est)
         self.FeatureNet = self.render_kwargs_train['network_2d']
         self.render_kwargs_train.pop('network_featmvs')
         self.render_kwargs_train.pop('network_2d')
