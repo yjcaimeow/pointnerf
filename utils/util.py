@@ -1,6 +1,5 @@
 from __future__ import print_function
 import torch
-from pytorch3d.ops import ball_query
 import numpy as np
 from PIL import Image
 import os
@@ -11,9 +10,10 @@ import matplotlib as mpl
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation as R
+from pytorch3d.ops import ball_query
 import itertools
 
-def add_flour(failed_sample_loc, candidates=None, gap=0.2, radius=0.2):
+def add_flour(failed_sample_loc, candidates=None, gap=0.2, radius=0.2, embed=None):
     if candidates is None:
         center = torch.tensor([3.7269, 3.4063, 1.2413]).cuda()
         whl = torch.tensor([8.2886, 8.1767, 3.0916]).cuda()
@@ -31,18 +31,29 @@ def add_flour(failed_sample_loc, candidates=None, gap=0.2, radius=0.2):
             lists.append(item)
         lists.remove((0,0,0))
 
-        neighbor_pcds = torch.tensor(lists.remove((0,0,0))).cuda()
+        neighbor_pcds = torch.tensor(lists).cuda()
 
         new_candidates = []
+        new_embed = []
         for neighbor_pcd in neighbor_pcds:
             pcd = candidates + (neighbor_pcd * gap).reshape(1,3)
+            new_embed.append(embed.squeeze())
             new_candidates.append(pcd)
         candidates = torch.cat(new_candidates)
-        print (candidates.shape, '-------candidates shape')
+        embed  = torch.cat(new_embed)
 
     idx = ball_query(candidates[None,...], failed_sample_loc[None,...], K=1, radius=radius).idx.squeeze() #N*p1*1
-
-    return candidates[idx>0]
+    valid_idx = idx>0
+    candidates, embed = candidates[valid_idx], embed[valid_idx]
+    return candidates, embed
+    #print (candidates.shape, embed.shape, 'before unique')
+    unique_candidates, unique_index = np.unique(candidates.cpu().numpy(), axis=0, return_index=True)
+    unique_embed = embed[unique_index]
+    return torch.as_tensor(unique_candidates).cuda(), torch.as_tensor(unique_embed).cuda()
+    #print (unique_candidates.shape, unique_embed.shape, 'after unique')
+    #exit()
+    #return candidates[valid_idx], embed[valid_idx]
+    #return candidates[idx>0]
 
 def mkdir(path):
     if not os.path.exists(path):

@@ -233,15 +233,14 @@ class NeuralPoints(nn.Module):
         super().__init__()
 
         assert isinstance(size, int), 'size must be int'
-        print (checkpoint,'......???', checkpoint is not None)
+
         self.opt = opt
         self.grid_vox_sz = 0
         self.points_conf, self.points_dir, self.points_color, self.eulers, self.Rw2c = None, None, None, None, None
         self.device=device
         if self.opt.load_points ==1:
             saved_features = None
-            if checkpoint is not None:
-                print ('load model...')
+            if checkpoint:
                 saved_features = torch.load(checkpoint, map_location=device)
             if saved_features is not None and "neural_points.xyz" in saved_features:
                 self.xyz = nn.Parameter(saved_features["neural_points.xyz"])
@@ -375,6 +374,7 @@ class NeuralPoints(nn.Module):
 
 
     def grow_points(self, add_xyz, add_embedding, add_color, add_dir, add_conf, add_eulers=None, add_Rw2c=None):
+        # print(self.xyz.shape, self.points_conf.shape, self.points_embeding.shape, self.points_dir.shape, self.points_color.shape)
         self.xyz = nn.Parameter(torch.cat([self.xyz, add_xyz], dim=0))
         self.xyz.requires_grad = self.opt.xyz_grad > 0
 
@@ -382,14 +382,15 @@ class NeuralPoints(nn.Module):
             self.points_embeding = nn.Parameter(torch.cat([self.points_embeding, add_embedding[None, ...]], dim=1))
             self.points_embeding.requires_grad = self.opt.feat_grad > 0
 
-        if self.points_conf is not None:
+        if self.points_conf is not None and add_conf is not None:
             self.points_conf = nn.Parameter(torch.cat([self.points_conf, add_conf[None, ...]], dim=1))
             self.points_conf.requires_grad = self.opt.conf_grad > 0
-        if self.points_dir is not None:
+
+        if self.points_dir is not None and add_dir is not None:
             self.points_dir = nn.Parameter(torch.cat([self.points_dir, add_dir[None, ...]], dim=1))
             self.points_dir.requires_grad = self.opt.dir_grad > 0
 
-        if self.points_color is not None:
+        if self.points_color is not None and add_color is not None:
             self.points_color = nn.Parameter(torch.cat([self.points_color, add_color[None, ...]], dim=1))
             self.points_color.requires_grad = self.opt.color_grad > 0
 
@@ -485,6 +486,7 @@ class NeuralPoints(nn.Module):
             self.Rw2c = torch.eye(3, device=points_xyz.device, dtype=points_xyz.dtype)
         else:
             self.Rw2c = Rw2c
+
 
 
     def construct_grid_points(self, xyz):
@@ -703,14 +705,17 @@ class NeuralPoints(nn.Module):
     def forward(self, inputs):
 
         pixel_idx, camrotc2w, campos, near_plane, far_plane, h, w, intrinsic = inputs["pixel_idx"].to(torch.int32), inputs["camrotc2w"], inputs["campos"], inputs["near"], inputs["far"], inputs["h"], inputs["w"], inputs["intrinsic"]
+        # 1, 294, 24, 32;   1, 294, 24;     1, 291, 2
+
         self.xyz_fov, _, fov_ids, pts_2d = get_lidar_in_image_fov(self.xyz.squeeze(), inputs["c2w"].squeeze(), intrinsic.squeeze(), xmin=0, ymin=0, xmax=int(w), ymax=int(h), return_more=True)
-        #index_list = torch.tensor(list(range(len(self.xyz.squeeze()))))[fov_ids]
         self.points_embeding_fov = self.points_embeding.squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
+
+        if self.opt.progressive_distill:
+            return
         self.points_color_fov = self.points_color.squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
         self.points_dir_fov = self.points_dir.squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
         self.points_conf_fov = self.points_conf.squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
-        if self.opt.progressive_distill:
-            return
+
         sample_pidx, sample_loc, ray_mask_tensor, point_xyz_pers_tensor, sample_loc_w_tensor, sample_ray_dirs_tensor, sample_local_ray_dirs_tensor, vsize = self.get_point_indices(inputs, camrotc2w, campos, pixel_idx, torch.min(near_plane).cpu().numpy(), torch.max(far_plane).cpu().numpy(), torch.max(h).cpu().numpy(), torch.max(w).cpu().numpy(), intrinsic.cpu().numpy()[0], vox_query=self.opt.NN<0)
 
         sample_pnt_mask = sample_pidx >= 0

@@ -20,17 +20,16 @@ class BaseOptions:
             '--timestamp',
             action='store_true',
             help='suffix the experiment name with current timestamp')
-
         #================================ model aggregator========================#
         parser.add_argument(
-            '--init_pcd_type',
+            '--loss_type',
             type=str,
-            default="candidates",
+            default="l1",
             help='name of dataset, determine which dataset class to use')
         parser.add_argument(
-            '--k_type',
+            '--perceiver_io_type',
             type=str,
-            default="voxel",
+            default="each_sample_loc",
             help='name of dataset, determine which dataset class to use')
         parser.add_argument(
             '--attention_type',
@@ -38,23 +37,27 @@ class BaseOptions:
             default="normal",
             help='name of dataset, determine which dataset class to use')
         parser.add_argument(
+                        '--k_type',
+                        type=str,
+                        default="knn",
+                        help='name of dataset, determine which dataset class to use')
+        parser.add_argument('--scans',
+                            type=str,
+                            nargs='+',
+                            default=("none "),
+                            help='saving frequency')
+        parser.add_argument(
+            '--load_type',
+            type=str,
+            default="ceph_not",
+            help='name of dataset, determine which dataset class to use')
+        parser.add_argument(
             '--agg_type',
             type=str,
             default="mlp",
             help='name of dataset, determine which dataset class to use')
-        parser.add_argument(
-            '--gap',
-            type=float,
-            default=0.2,
-            help=
-            'vscale is the block size that store several voxels'
-        )
-        parser.add_argument('--progressive_distill',
-                            type=int,
-                            default=0,
-                            help='1 for render_only dataset')
-
-        parser.add_argument('--loss_thresh', type=float, default=1.0, help='name of the experiment')
+        parser.add_argument('--progressive_distill',type=int,default=0,help='1 for render_only dataset')
+        parser.add_argument('--gap', type=float, default=0.2, help='name of the experiment')
         parser.add_argument('--knn_k', type=int, default=8, help='name of the experiment')
         parser.add_argument('--light_N', type=int, default=8, help='name of the experiment')
         parser.add_argument('--light_D', type=int, default=284, help='name of the experiment')
@@ -216,8 +219,8 @@ class BaseOptions:
         opt.gpu_ids = [
             int(x) for x in opt.gpu_ids.split(',') if x.strip() and int(x) >= 0
         ]
-        if len(opt.gpu_ids) > 0:
-            torch.cuda.set_device(opt.gpu_ids[0])
+#        if len(opt.gpu_ids) > 0:
+#            torch.cuda.set_device(opt.gpu_ids[0])
 
         self.opt = opt
         return self.opt

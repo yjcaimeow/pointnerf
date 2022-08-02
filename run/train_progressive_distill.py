@@ -724,8 +724,8 @@ def main():
     torch.backends.cudnn.benchmark = True
 
     opt = TrainOptions().parse()
-    cur_device = torch.device('cuda:{}'.format(opt.gpu_ids[0]) if opt.
-                              gpu_ids else torch.device('cpu'))
+    #cur_device = torch.device('cuda:{}'.format(opt.gpu_ids[0]) if opt.
+    #                          gpu_ids else torch.device('cpu'))
     print("opt.color_loss_items ", opt.color_loss_items)
 
     if opt.debug:
@@ -760,7 +760,8 @@ def main():
             else:
                 opt.resume_iter = resume_iter
                 states = torch.load(
-                    os.path.join(resume_dir, '{}_states.pth'.format(resume_iter)), map_location=cur_device)
+                    os.path.join(resume_dir, '{}_states.pth'.format(resume_iter)), map_location='cpu')
+                    #os.path.join(resume_dir, '{}_states.pth'.format(resume_iter)), map_location=cur_device)
                 epoch_count = states['epoch_count']
                 total_steps = states['total_steps']
                 best_PSNR = states['best_PSNR'] if 'best_PSNR' in states else best_PSNR

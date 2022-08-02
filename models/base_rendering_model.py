@@ -594,7 +594,7 @@ class BaseRenderingModel(BaseModel):
                 # self.save_image(img, filepath)
                 # print("psnrkey recal:",mse2psnr(torch.nn.MSELoss().to("cuda")(masked_output, masked_gt)) )
 
-            elif name=="loss_opacity" or name=="loss_rgb":
+            elif name=="loss_alpha" or name=="loss_rgb":
                 loss = self.output[name]
 
             else:
@@ -608,6 +608,7 @@ class BaseRenderingModel(BaseModel):
             # loss.register_hook(lambda grad: print(torch.any(torch.isnan(grad)), grad, opt.color_loss_weights[i]))
 
             setattr(self, "loss_" + name, loss)
+            #setattr(self, "loss_" + name, loss)
         # print(torch.sum(self.output["ray_mask"]))
 
         #depth losses

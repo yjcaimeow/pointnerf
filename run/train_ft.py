@@ -2,7 +2,6 @@ import sys
 import os
 import pathlib
 sys.path.append(os.path.join(pathlib.Path(__file__).parent.absolute(), '..'))
-import math
 import glob
 import copy
 import torch
@@ -16,7 +15,6 @@ from models.mvs import mvs_utils, filter_utils
 from pprint import pprint
 from utils.visualizer import Visualizer
 from utils import format as fmt
-from utils.util import add_flour
 from run.evaluate import report_metrics
 # from render_vid import render_vid
 torch.manual_seed(0)
@@ -28,7 +26,9 @@ from PIL import Image
 from tqdm import tqdm
 # from models.pointnet2.pointnet2_stack import pointnet2_utils as pointnet2_stack_utils
 # from pcdet.ops.pointnet2.pointnet2_stack import pointnet2_utils as pointnet2_stack_utils
+from utils.util import add_flour
 import gc
+from tensorboardX import SummaryWriter
 
 def mse2psnr(x): return -10.* torch.log(x)/np.log(10.)
 
@@ -255,26 +255,26 @@ def render_vid(model, dataset, visualizer, opt, bg_info, steps=0, gen_vid=True):
 
 
 
-def test(model, dataset, visualizer, opt, bg_info, test_steps=0, gen_vid=False, lpips=False):
+def test(model, dataset, visualizer, opt, bg_info, test_steps=0, gen_vid=False, lpips=False, writer=None):
     print('-----------------------------------Testing-----------------------------------')
     model.eval()
     total_num = dataset.total
     print("test set size {}, interval {}".format(total_num, opt.test_num_step)) # 1 if test_steps == 10000 else opt.test_num_step
     patch_size = opt.random_sample_size
     chunk_size = patch_size * patch_size
-
     height = dataset.height
     width = dataset.width
     visualizer.reset()
     count = 0;
 #    eval_list = list(range(0, total_num, opt.test_num_step))
-    eval_list = [0,1,1000,1001, 2000, 2001]
-    #for i in range(0, total_num, opt.test_num_step): # 1 if test_steps == 10000 else opt.test_num_step
-    for i in eval_list:
+#    eval_list = [0,1,1000,1001, 2000, 2001]
+#    for i in eval_list:
+    for i in range(0, total_num, opt.test_num_step): # 1 if test_steps == 10000 else opt.test_num_step
         data = dataset.get_item(i)
         raydir = data['raydir'].clone()
         local_raydir = data['local_raydir'].clone()
         pixel_idx = data['pixel_idx'].view(data['pixel_idx'].shape[0], -1, data['pixel_idx'].shape[3]).clone()
+
         if opt.progressive_distill:
             ray_valid_loaded = data['ray_valid_loaded']
             decoded_features_loaded = data['decoded_features_loaded']
@@ -308,6 +308,7 @@ def test(model, dataset, visualizer, opt, bg_info, test_steps=0, gen_vid=False, 
                 data['decoded_features_loaded'] = decoded_features_loaded[:, start:end, ...]
                 data['sample_loc_loaded'] = sample_loc_loaded[:, start:end, ...]
                 data['sample_loc_w_loaded']=sample_loc_w_loaded[:,start:end,...]
+
             model.set_input(data)
 
             if opt.bgmodel.endswith("plane"):
@@ -382,7 +383,7 @@ def test(model, dataset, visualizer, opt, bg_info, test_steps=0, gen_vid=False, 
         if "coarse_raycolor" in opt.test_color_loss_items:
             loss = torch.nn.MSELoss().to("cuda")(torch.as_tensor(visuals["coarse_raycolor"], device="cuda").view(1, -1, 3), gt_image.view(1, -1, 3).cuda())
             acc_dict.update({"coarse_raycolor": loss})
-            cprint.err("coarse_raycolor "+str(mse2psnr(loss).item()))
+            #cprint.err("coarse_raycolor "+str(mse2psnr(loss).item()))
 
         if "ray_mask" in model.output and "ray_masked_coarse_raycolor" in opt.test_color_loss_items:
             masked_gt = tmpgts["gt_image"].view(1, -1, 3).cuda()[ray_masks,:].reshape(1, -1, 3)
@@ -426,7 +427,10 @@ def test(model, dataset, visualizer, opt, bg_info, test_steps=0, gen_vid=False, 
 
     print('--------------------------------Finish Test Rendering--------------------------------')
 
-    report_metrics(visualizer.image_dir, visualizer.image_dir, visualizer.image_dir, ["psnr", "ssim", "lpips", "vgglpips", "rmse"] if lpips else ["psnr", "ssim", "rmse"], [i for i in range(0, total_num, opt.test_num_step)], imgStr="step-%04d-{}.png".format(opt.visual_items[0]),gtStr="step-%04d-{}.png".format(opt.visual_items[1]))
+    #report_metrics(visualizer.image_dir, visualizer.image_dir, visualizer.image_dir, ["psnr", "ssim", "lpips", "vgglpips", "rmse"] if lpips else ["psnr", "ssim", "rmse"], [i for i in range(0, total_num, opt.test_num_step)], imgStr="step-%04d-{}.png".format(opt.visual_items[0]),gtStr="step-%04d-{}.png".format(opt.visual_items[1]), \
+    #               writer=writer, iteration=test_steps)
+    report_metrics(visualizer.image_dir, visualizer.image_dir, visualizer.image_dir, ["psnr"] if lpips else ["psnr"], [i for i in range(0, total_num, opt.test_num_step)], imgStr="step-%04d-{}.png".format(opt.visual_items[0]),gtStr="step-%04d-{}.png".format(opt.visual_items[1]), \
+                   writer=writer, iteration=test_steps)
     #report_metrics(visualizer.image_dir, visualizer.image_dir, visualizer.image_dir, ["psnr", "ssim", "lpips", "vgglpips", "rmse"] if lpips else ["psnr", "ssim", "rmse"], [i for i in range(0, total_num, opt.test_num_step)], imgStr="step-%04d-{}.png".format(opt.visual_items[0]),gtStr="step-%04d-{}.png".format(opt.visual_items[1]))
 
 
@@ -438,13 +442,12 @@ def test(model, dataset, visualizer, opt, bg_info, test_steps=0, gen_vid=False, 
     return psnr
 
 def progressive_distill(model, dataset, visualizer, opt, bg_info, test_steps=0, opacity_thresh=0.7):
-    cprint.err('-----------------------------------Progressive Distill-----------------------------------')
+    cprint.err('-----------------------------------Probing Holes-----------------------------------')
     add_xyz = torch.zeros([0, 3], device="cuda", dtype=torch.float32)
     add_conf = torch.zeros([0, 1], device="cuda", dtype=torch.float32)
     add_color = torch.zeros([0, 3], device="cuda", dtype=torch.float32)
     add_dir = torch.zeros([0, 3], device="cuda", dtype=torch.float32)
     add_embedding = torch.zeros([0, opt.point_features_dim], device="cuda", dtype=torch.float32)
-    kernel_size = model.opt.kernel_size
     model.opt.prob = 1
     total_num = len(dataset)
 
@@ -454,12 +457,16 @@ def progressive_distill(model, dataset, visualizer, opt, bg_info, test_steps=0, 
     width = dataset.width
     visualizer.reset()
 
+    if test_steps>=60000:
+        opt.prob_num_step = opt.prob_num_step*2
+
     max_num = len(dataset) // opt.prob_num_step
-    frame_ids = list(range(len(dataset)))[:max_num]
+    frame_ids = list(range(len(dataset)))
     random.shuffle(frame_ids)
     frame_ids = frame_ids[:max_num]
 
     cprint.err("{}/{} id_lst to add flour".format(len(frame_ids), total_num))
+    cprint.err(frame_ids)
     failed_sample_loc_list = []
     with tqdm(range(len(frame_ids))) as pbar:
         for j in pbar:
@@ -499,30 +506,32 @@ def progressive_distill(model, dataset, visualizer, opt, bg_info, test_steps=0, 
                 failed_sample_loc_list.append(output["failed_sample_loc"].cuda())
                 chunk_pixel_id = data["pixel_idx"].to(torch.long)
                 output["ray_mask"] = output["ray_mask"][..., None]
+
         failed_sample_loc = torch.cat(failed_sample_loc_list)   # N*4 (x,y,z,d)
         cprint.warn("failed_sample_loc shape is ....{}".format(failed_sample_loc.shape))
 
-        to_add_pcd_xyz   = add_flour(failed_sample_loc, candidates=model.neural_points.xyz, gap=opt.gap, radius=opt.gap)
+        to_add_pcd_xyz, to_add_pcd_embed = add_flour(failed_sample_loc, candidates=model.neural_points.xyz, gap=opt.gap, radius=opt.gap, \
+                                     embed = model.neural_points.points_embeding)
         #to_add_pcd_xyz   = add_flour(failed_sample_loc, gap=opt.gap, radius=opt.gap)
-        to_add_pcd_embed = torch.randn([len(to_add_pcd_xyz), opt.point_features_dim], device=to_add_pcd_xyz.device, dtype=torch.float32)
-        to_add_pcd_color = torch.randn([len(to_add_pcd_xyz), 3], device=to_add_pcd_xyz.device, dtype=torch.float32)
-        to_add_pcd_dir   = torch.randn([len(to_add_pcd_xyz), 3], device=to_add_pcd_xyz.device, dtype=torch.float32)
-        to_add_pcd_conf  = torch.randn([len(to_add_pcd_xyz), 1], device=to_add_pcd_xyz.device, dtype=torch.float32)
+        #to_add_pcd_embed = torch.randn([len(to_add_pcd_xyz), opt.point_features_dim], device=to_add_pcd_xyz.device, dtype=torch.float32)
+        #to_add_pcd_color = torch.randn([len(to_add_pcd_xyz), 3], device=to_add_pcd_xyz.device, dtype=torch.float32)
+        #to_add_pcd_dir   = torch.randn([len(to_add_pcd_xyz), 3], device=to_add_pcd_xyz.device, dtype=torch.float32)
+        #to_add_pcd_conf  = torch.randn([len(to_add_pcd_xyz), 1], device=to_add_pcd_xyz.device, dtype=torch.float32)
 
-        cprint.warn("add level {} res flour {} number.".format(opt.gap, len(to_add_pcd_xyz)))
+        cprint.info("add level {} res flour xyz {} and embed {} number.".format(opt.gap, to_add_pcd_xyz.shape, to_add_pcd_embed.shape))
 
         add_xyz       = torch.cat([add_xyz, to_add_pcd_xyz], dim=0)
-        add_conf      = torch.cat([add_conf, to_add_pcd_conf],dim=0)
-        add_color     = torch.cat([add_color, to_add_pcd_color],dim=0)
-        add_dir       = torch.cat([add_dir, to_add_pcd_dir],dim=0)
         add_embedding = torch.cat([add_embedding, to_add_pcd_embed],dim=0)
+        #add_conf      = torch.cat([add_conf, to_add_pcd_conf],dim=0)
+        #add_color     = torch.cat([add_color, to_add_pcd_color],dim=0)
+        #add_dir       = torch.cat([add_dir, to_add_pcd_dir],dim=0)
 
     if len(add_xyz) > 0:
         visualizer.save_neural_points("prob{:04d}".format(test_steps), add_xyz, None, None, save_ref=False)
         visualizer.print_details("vis added points to probe folder")
     model.opt.prob = 0
 
-    return add_xyz, add_embedding, add_color, add_dir, add_conf
+    return add_xyz, add_embedding, None, None, None
 
 def probe_hole(model, dataset, visualizer, opt, bg_info, test_steps=0, opacity_thresh=0.7):
     print('-----------------------------------Probing Holes-----------------------------------')
@@ -687,15 +696,29 @@ def create_all_bg(dataset, model, img_lst, c2ws_lst, w2cs_lst, intrinsics_all, H
 
 def main():
     torch.backends.cudnn.benchmark = True
+
     opt = TrainOptions().parse()
-    cur_device = torch.device('cuda:{}'.format(opt.gpu_ids[0]) if opt.gpu_ids else torch.device('cpu'))
+    #cur_device = torch.device('cuda:{}'.format(opt.gpu_ids[0]) if opt.
+    #                          gpu_ids else torch.device('cpu'))
     print("opt.color_loss_items ", opt.color_loss_items)
 
+    basedir = "/mnt/lustre/caiyingjie/logs/checkpoints/"
+    writer = SummaryWriter(os.path.join(basedir, 'summaries', opt.name))
+
+    if opt.debug:
+        torch.autograd.set_detect_anomaly(True)
+        print(fmt.RED +
+              '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++')
+        print('Debug Mode')
+        print(
+            '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++' +
+            fmt.END)
     visualizer = Visualizer(opt)
     train_dataset = create_dataset(opt)
     normRw2c = train_dataset.norm_w2c[:3,:3] # torch.eye(3, device="cuda") #
     img_lst=None
-    best_PSNR, best_iter=0.0, 0
+    best_PSNR=0.0
+    best_iter=0
     points_xyz_all=None
     with torch.no_grad():
         print(opt.checkpoints_dir + opt.name + "/*_net_ray_marching.pth")
@@ -714,7 +737,7 @@ def main():
             else:
                 opt.resume_iter = resume_iter
                 states = torch.load(
-                    os.path.join(resume_dir, '{}_states.pth'.format(resume_iter)), map_location=cur_device)
+                    os.path.join(resume_dir, '{}_states.pth'.format(resume_iter)), map_location='cpu')
                 epoch_count = states['epoch_count']
                 total_steps = states['total_steps']
                 opt.gap = states['gap']
@@ -746,7 +769,35 @@ def main():
             model = create_model(opt)
             model.setup(opt)
             model.eval()
-            points_xyz_all = train_dataset.get_candicates() if opt.init_pcd_type == 'candidates' else train_dataset.load_init_depth_points(device="cuda", vox_res=100)
+            if load_points in [1,3]:
+                points_xyz_all = train_dataset.load_init_points()
+            if load_points == 2:
+                if opt.progressive_distill:
+                    points_xyz_all = train_dataset.get_candicates()
+                else:
+                    points_xyz_all = train_dataset.load_init_depth_points(device="cuda", vox_res=100)
+                cprint.info('origin pcd shape {}.'.format(points_xyz_all.shape))
+            if load_points == 3:
+                depth_xyz_all = train_dataset.load_init_depth_points(device="cuda", vox_res=80)
+                print("points_xyz_all",points_xyz_all.shape)
+                print("depth_xyz_all", depth_xyz_all.shape)
+                filter_res = 100
+                pc_grid_id, _, pc_space_min, pc_space_max = mvs_utils.construct_vox_points_ind(points_xyz_all, filter_res)
+                d_grid_id, depth_inds, _, _ = mvs_utils.construct_vox_points_ind(depth_xyz_all, filter_res, space_min=pc_space_min, space_max=pc_space_max)
+                all_grid= torch.cat([pc_grid_id, d_grid_id], dim=0)
+                min_id = torch.min(all_grid, dim=-2)[0]
+                max_id = torch.max(all_grid, dim=-2)[0] - min_id
+                max_id_lst = (max_id+1).cpu().numpy().tolist()
+                mask = torch.ones(max_id_lst, device=d_grid_id.device)
+                pc_maskgrid_id = (pc_grid_id - min_id[None,...]).to(torch.long)
+                mask[pc_maskgrid_id[...,0], pc_maskgrid_id[...,1], pc_maskgrid_id[...,2]] = 0
+                depth_maskinds = (d_grid_id[depth_inds,:] - min_id).to(torch.long)
+                depth_maskinds = mask[depth_maskinds[...,0], depth_maskinds[...,1], depth_maskinds[...,2]]
+                depth_xyz_all = depth_xyz_all[depth_maskinds > 0]
+                visualizer.save_neural_points("dep_filtered", depth_xyz_all, None, None, save_ref=False)
+                print("vis depth; after pc mask depth_xyz_all",depth_xyz_all.shape)
+                points_xyz_all = [points_xyz_all, depth_xyz_all] if opt.vox_res > 0 else torch.cat([points_xyz_all, depth_xyz_all],dim=0)
+                del depth_xyz_all, depth_maskinds, mask, pc_maskgrid_id, max_id_lst, max_id, min_id, all_grid
 
             if opt.ranges[0] > -99.0:
                 ranges = torch.as_tensor(opt.ranges, device=points_xyz_all.device, dtype=torch.float32)
@@ -761,10 +812,10 @@ def main():
                 for i in range(len(points_xyz_all)):
                     points_xyz = points_xyz_all[i]
                     vox_res = opt.vox_res // (1.5**i)
-                    cprint.warn("load points_xyz shape {}.".format(points_xyz.shape))
+                    print("load points_xyz", points_xyz.shape)
                     _, sparse_grid_idx, sampled_pnt_idx = mvs_utils.construct_vox_points_closest(points_xyz.cuda() if len(points_xyz) < 80000000 else points_xyz[::(len(points_xyz) // 80000000 + 1), ...].cuda(), vox_res)
                     points_xyz = points_xyz[sampled_pnt_idx, :]
-                    cprint.warn("after voxelize shape {}.".format(points_xyz.shape))
+                    print("after voxelize:", points_xyz.shape)
                     points_xyz_holder = torch.cat([points_xyz_holder, points_xyz], dim=0)
                 points_xyz_all = points_xyz_holder
 
@@ -776,44 +827,36 @@ def main():
                     inds = torch.randperm(len(points_xyz_all))[:opt.resample_pnts, ...]
                 points_xyz_all = points_xyz_all[inds, ...]
 
-            cprint.err('init pcd xyz shape is {}.'.format(points_xyz_all.shape))
+            campos, camdir = train_dataset.get_campos_ray()
+            cam_ind = nearest_view(campos, camdir, points_xyz_all, train_dataset.id_list)
+            unique_cam_ind = torch.unique(cam_ind)
+            print("unique_cam_ind", unique_cam_ind.shape)
+            points_xyz_all = [points_xyz_all[cam_ind[:,0]==unique_cam_ind[i], :] for i in range(len(unique_cam_ind))]
+
             featuredim = opt.point_features_dim
-            if opt.progressive_distill:
-                points_embedding_all = torch.randn([1, len(points_xyz_all), featuredim], device=points_xyz_all.device, dtype=torch.float32)
-                points_color_all = torch.randn([1, len(points_xyz_all), 3], device=points_xyz_all.device, dtype=torch.float32)
-                points_dir_all = torch.randn([1, len(points_xyz_all), 3], device=points_xyz_all.device, dtype=torch.float32)
-                points_conf_all = torch.ones([1, len(points_xyz_all), 1], device=points_xyz_all.device, dtype=torch.float32)
-                cprint.err('init pcd embed shape is {}.'.format(points_embedding_all.shape))
-            else:
-                campos, camdir = train_dataset.get_campos_ray()
-                cam_ind = nearest_view(campos, camdir, points_xyz_all, train_dataset.id_list)
-                unique_cam_ind = torch.unique(cam_ind)
-                print("unique_cam_ind", unique_cam_ind.shape)
-                points_xyz_all = [points_xyz_all[cam_ind[:,0]==unique_cam_ind[i], :] for i in range(len(unique_cam_ind))]
-
-                points_embedding_all = torch.zeros([1, 0, featuredim], device=unique_cam_ind.device, dtype=torch.float32)
-                points_color_all = torch.zeros([1, 0, 3], device=unique_cam_ind.device, dtype=torch.float32)
-                points_dir_all = torch.zeros([1, 0, 3], device=unique_cam_ind.device, dtype=torch.float32)
-                points_conf_all = torch.zeros([1, 0, 1], device=unique_cam_ind.device, dtype=torch.float32)
-                print("extract points embeding & colors", )
-                for i in tqdm(range(len(unique_cam_ind))):
-                    id = unique_cam_ind[i]
-                    batch = train_dataset.get_item(id, full_img=True)
-                    HDWD = [train_dataset.height, train_dataset.width]
-                    c2w = batch["c2w"][0].cuda()
-                    w2c = torch.inverse(c2w)
-                    intrinsic = batch["intrinsic"].cuda()
-                    # cam_xyz_all 252, 4
-                    cam_xyz_all = (torch.cat([points_xyz_all[i], torch.ones_like(points_xyz_all[i][...,-1:])], dim=-1) @ w2c.transpose(0,1))[..., :3]
-                    embedding, color, dir, conf = model.query_embedding(HDWD, cam_xyz_all[None,...], None, batch['images'].cuda(), c2w[None, None,...], w2c[None, None,...], intrinsic[:, None,...], 0, pointdir_w=True)
-                    conf = conf * opt.default_conf if opt.default_conf > 0 and opt.default_conf < 1.0 else conf
-                    points_embedding_all = torch.cat([points_embedding_all, embedding], dim=1)
-                    points_color_all = torch.cat([points_color_all, color], dim=1)
-                    points_dir_all = torch.cat([points_dir_all, dir], dim=1)
-                    points_conf_all = torch.cat([points_conf_all, conf], dim=1)
-                points_xyz_all=torch.cat(points_xyz_all, dim=0)
-
-            visualizer.save_neural_points("init", points_xyz_all, None, None, save_ref=load_points == 0)
+            points_embedding_all = torch.zeros([1, 0, featuredim], device=unique_cam_ind.device, dtype=torch.float32)
+            points_color_all = torch.zeros([1, 0, 3], device=unique_cam_ind.device, dtype=torch.float32)
+            points_dir_all = torch.zeros([1, 0, 3], device=unique_cam_ind.device, dtype=torch.float32)
+            points_conf_all = torch.zeros([1, 0, 1], device=unique_cam_ind.device, dtype=torch.float32)
+            print("extract points embeding & colors", )
+            for i in tqdm(range(len(unique_cam_ind))):
+                id = unique_cam_ind[i]
+                batch = train_dataset.get_item(id, full_img=True)
+                HDWD = [train_dataset.height, train_dataset.width]
+                c2w = batch["c2w"][0].cuda()
+                w2c = torch.inverse(c2w)
+                intrinsic = batch["intrinsic"].cuda()
+                # cam_xyz_all 252, 4
+                cam_xyz_all = (torch.cat([points_xyz_all[i], torch.ones_like(points_xyz_all[i][...,-1:])], dim=-1) @ w2c.transpose(0,1))[..., :3]
+                embedding, color, dir, conf = model.query_embedding(HDWD, cam_xyz_all[None,...], None, batch['images'].cuda(), c2w[None, None,...], w2c[None, None,...], intrinsic[:, None,...], 0, pointdir_w=True)
+                conf = conf * opt.default_conf if opt.default_conf > 0 and opt.default_conf < 1.0 else conf
+                points_embedding_all = torch.cat([points_embedding_all, embedding], dim=1)
+                points_color_all = torch.cat([points_color_all, color], dim=1)
+                points_dir_all = torch.cat([points_dir_all, dir], dim=1)
+                points_conf_all = torch.cat([points_conf_all, conf], dim=1)
+                # visualizer.save_neural_points(id, cam_xyz_all, color, batch, save_ref=True)
+            points_xyz_all=torch.cat(points_xyz_all, dim=0)
+            visualizer.save_neural_points("init", points_xyz_all, points_color_all, None, save_ref=load_points == 0)
 
             opt.resume_iter = opt.resume_iter if opt.resume_iter != "latest" else get_latest_epoch(opt.resume_dir)
             opt.is_train = True
@@ -903,8 +946,8 @@ def main():
         visualizer.print_details('saving model ({}, epoch {}, total_steps {})'.format(opt.name, 0, total_steps))
 
     real_start=total_steps
-    cprint.warn('Current gap is ..... '+str(opt.gap))
     train_random_sample_size = opt.random_sample_size
+    cprint.info('current gap is {}.'.format(opt.gap))
     for epoch in range(epoch_count, opt.niter + opt.niter_decay + 1):
         epoch_start_time = time.time()
         for i, data in enumerate(data_loader):
@@ -920,16 +963,17 @@ def main():
                     torch.cuda.empty_cache()
                     torch.cuda.synchronize()
 
-            if opt.prob_freq > 0 and real_start != total_steps and total_steps % opt.prob_freq == 0 and total_steps < (opt.maximum_step - 1) and total_steps > 0 and opt.progressive_distill:
-#                if opt.prob_kernel_size is not None:
+            #if opt.prob_freq > 0 and real_start != total_steps and total_steps % opt.prob_freq == 0 and total_steps < (opt.prob_maximum_step - 1) and total_steps > 0 and opt.progressive_distill:
+            if opt.prob_freq > 0 and real_start != total_steps and (total_steps in opt.prob_tiers) and total_steps < (opt.prob_maximum_step - 1) and total_steps > 0 and opt.progressive_distill:
+                #if opt.prob_kernel_size is not None:
                     tier = np.sum(np.asarray(opt.prob_tiers) < total_steps)
-#                if (model.top_ray_miss_loss[0] > 1e-5 or opt.prob_mode != 0 or opt.far_thresh > 0) and (opt.prob_kernel_size is None or tier < (len(opt.prob_kernel_size) // 3)):
-                    torch.cuda.empty_cache()
+                #if (model.top_ray_miss_loss[0] > 1e-5 or opt.prob_mode != 0 or opt.far_thresh > 0) and (opt.prob_kernel_size is None or tier < (len(opt.prob_kernel_size) // 3)):
+                #    torch.cuda.empty_cache()
                     model.opt.is_train = 0
                     model.opt.no_loss = 1
                     with torch.no_grad():
                         prob_opt = copy.deepcopy(test_opt)
-                        opt.gap = opt.gap/2
+                        opt.gap = opt.gap/3
                         prob_opt.name = opt.name
                         prob_opt.gap = opt.gap
                         # if opt.prob_type=0:
@@ -942,11 +986,14 @@ def main():
                         else:
                             prob_dataset = create_comb_dataset(test_opt, opt, total_steps, test_num_step=1)
                         model.eval()
+                        #add_xyz, add_embedding, add_color, add_dir, add_conf = probe_hole(model, prob_dataset, Visualizer(prob_opt), prob_opt, None, test_steps=total_steps, opacity_thresh=opt.prob_thresh)
+                        cprint.info('add flour at resolution {}'.format(prob_opt.gap))
                         add_xyz, add_embedding, add_color, add_dir, add_conf = progressive_distill(model, prob_dataset, Visualizer(prob_opt), prob_opt, None, test_steps=total_steps, opacity_thresh=opt.prob_thresh)
-                        torch.cuda.empty_cache()
-                        torch.cuda.synchronize()
+                        #torch.cuda.empty_cache()
+                        #torch.cuda.synchronize()
                         if opt.prob_mode != 0:
                             del prob_dataset
+                        # else:
                     model.train()
                     model.opt.is_train = 1
                     model.opt.no_loss = 0
@@ -956,8 +1003,8 @@ def main():
                         model.grow_points(add_xyz, add_embedding, add_color, add_dir, add_conf)
                         length_added = len(add_xyz)
                         del add_xyz, add_embedding, add_color, add_dir, add_conf
-                        torch.cuda.empty_cache()
-                        torch.cuda.synchronize()
+                        #torch.cuda.empty_cache()
+                        #torch.cuda.synchronize()
                         other_states = {
                             "best_PSNR": best_PSNR,
                             "best_iter": best_iter,
@@ -967,43 +1014,30 @@ def main():
                         }
                         visualizer.print_details('saving model ({}, epoch {}, total_steps {})'.format(opt.name, epoch, total_steps))
                         print("other_states",other_states)
-                        #model.save_networks(total_steps, other_states, back_gpu=False)
-                        model.save_networks(total_steps, other_states)
-                        visualizer.print_details(
-                            "$$$$$$$$$$$$$$$$$$$$$$$$$$           add grow new points num: {}, all num: {}           $$$$$$$$$$$$$$$$".format(length_added, len(model.neural_points.xyz)))
+                        model.save_networks(total_steps, other_states, back_gpu=True)
+                        visualizer.print_details("$$$$$$$$$$$$$$$$$$$$$$$$$$           add grow new points num: {}, all num: {}           $$$$$$$$$$$$$$$$".format(length_added, len(model.neural_points.xyz)))
                         model.init_scheduler(total_steps, opt)
-                        #model.reset_optimizer(opt)
-                        #model.reset_scheduler(total_steps, opt)
-                        #model.cleanup()
-                        #pprint(vars(model))
-                        #del model
-                        #visualizer.reset()
-                        #gc.collect()
-                        #torch.cuda.synchronize()
-                        #torch.cuda.empty_cache()
-                        #model = create_model(opt)
-                        ##
-                        #model.setup(opt, train_len=len(train_dataset))
-                        ##
-                        #exit()
-
-                    train_dataset.opt.random_sample = "random"
+                        train_dataset.opt.random_sample = "random"
                     #model.train()
                     #model.opt.no_loss = 0
                     #model.opt.is_train = 1
                     train_dataset.opt.random_sample_size = train_random_sample_size
-                    torch.cuda.synchronize()
-                    torch.cuda.empty_cache()
-
-                #else:
-                #    visualizer.print_details(
-                #        'nothing to probe, max ray miss is only {}'.format(model.top_ray_miss_loss[0]))
-
+                    #torch.cuda.synchronize()
+                    #torch.cuda.empty_cache()
 
             total_steps += 1
             model.set_input(data)
-
+            if opt.bgmodel.endswith("plane"):
+                if len(bg_ray_train_lst) > 0:
+                    bg_ray_all = bg_ray_train_lst[data["id"]]
+                    bg_idx = data["pixel_idx"].view(-1,2)
+                    bg_ray = bg_ray_all[:, bg_idx[:,1].long(), bg_idx[:,0].long(), :]
+                else:
+                    xyz_world_sect_plane = mvs_utils.gen_bg_points(model.input)
+                    bg_ray, fg_masks = model.set_bg(xyz_world_sect_plane, img_lst, c2ws_lst, w2cs_lst, intrinsics_all, HDWD_lst, fg_masks=fg_masks)
+                data["bg_ray"] = bg_ray
             model.optimize_parameters(total_steps=total_steps)
+
             losses = model.get_current_losses()
             visualizer.accumulate_losses(losses)
 
@@ -1013,7 +1047,7 @@ def main():
             if total_steps and total_steps % opt.print_freq == 0:
                 if opt.show_tensorboard:
                     visualizer.plot_current_losses_with_tb(total_steps, losses)
-                visualizer.print_losses(total_steps, epoch)
+                visualizer.print_losses(total_steps, writer)
                 visualizer.reset()
 
             if hasattr(opt, "save_point_freq") and total_steps and total_steps % opt.save_point_freq == 0 and (opt.prune_iter > 0 and total_steps <= opt.prune_max_iter or opt.save_point_freq==1):
@@ -1027,7 +1061,7 @@ def main():
                         "best_iter": best_iter,
                         'epoch_count': epoch,
                         'total_steps': total_steps,
-                        'gap':opt.gap,
+                        'gap': opt.gap,
                     }
                     visualizer.print_details('saving model ({}, epoch {}, total_steps {})'.format(opt.name, epoch, total_steps))
                     model.save_networks(total_steps, other_states)
@@ -1045,18 +1079,17 @@ def main():
                 model.opt.no_loss = 0
                 model.opt.is_train = 1
                 del test_dataset
-            # test during training
-            if (total_steps == 10000 or (total_steps % opt.test_freq == 0 and total_steps < (opt.maximum_step - 1) and total_steps > 0)):
+            if (total_steps == (real_start+40) or (total_steps % opt.test_freq == 0 and total_steps < (opt.maximum_step - 1) and total_steps > 0)):
                 torch.cuda.empty_cache()
                 test_dataset = create_test_dataset(test_opt, opt, total_steps, test_num_step=opt.test_num_step)
                 model.opt.is_train = 0
                 model.opt.no_loss = 1
                 with torch.no_grad():
                     if opt.test_train == 0:
-                        test_psnr = test(model, test_dataset, Visualizer(test_opt), test_opt, test_bg_info, test_steps=total_steps, lpips=False)
+                        test_psnr = test(model, test_dataset, Visualizer(test_opt), test_opt, test_bg_info, test_steps=total_steps, lpips=False, writer=writer)
                     else:
                         train_dataset.opt.random_sample = "no_crop"
-                        test_psnr = test(model, train_dataset, Visualizer(test_opt), test_opt, test_bg_info, test_steps=total_steps, lpips=False)
+                        test_psnr = test(model, train_dataset, Visualizer(test_opt), test_opt, test_bg_info, test_steps=total_steps, lpips=False, writer=writer)
                         train_dataset.opt.random_sample = opt.random_sample
                 model.opt.no_loss = 0
                 model.opt.is_train = 1
@@ -1079,7 +1112,7 @@ def main():
                 opt.name, total_steps, opt.maximum_step,
                 time.time() - epoch_start_time))
             break
-
+    writer.close()
     del train_dataset
     other_states = {
         'epoch_count': epoch,
@@ -1102,7 +1135,6 @@ def main():
         f"test at iter {total_steps}, PSNR: {test_psnr}, best_PSNR: {best_PSNR}, best_iter: {best_iter}")
     exit()
 
-
 def save_points_conf(visualizer, xyz, points_color, points_conf, total_steps):
     print("total:", xyz.shape, points_color.shape, points_conf.shape)
     colors, confs = points_color[0], points_conf[0,...,0]
@@ -1116,7 +1148,6 @@ def save_points_conf(visualizer, xyz, points_color, points_conf, total_steps):
         pre = thresh
     exit()
 
-
 def create_render_dataset(test_opt, opt, total_steps, test_num_step=1):
     test_opt.nerf_splits = ["render"]
     test_opt.split = "render"
@@ -1126,7 +1157,6 @@ def create_render_dataset(test_opt, opt, total_steps, test_num_step=1):
     test_dataset = create_dataset(test_opt)
     return test_dataset
 
-
 def create_test_dataset(test_opt, opt, total_steps, prob=None, test_num_step=1):
     test_opt.prob = prob if prob is not None else test_opt.prob
     test_opt.nerf_splits = ["test"]
@@ -1135,7 +1165,6 @@ def create_test_dataset(test_opt, opt, total_steps, prob=None, test_num_step=1):
     test_opt.test_num_step = test_num_step
     test_dataset = create_dataset(test_opt)
     return test_dataset
-
 
 def create_comb_dataset(test_opt, opt, total_steps, prob=None, test_num_step=1):
     test_opt.prob = prob if prob is not None else test_opt.prob

@@ -16,8 +16,9 @@ class BaseModel:
         self.opt = opt
         self.gpu_ids = opt.gpu_ids
         self.is_train = opt.is_train
-        self.device = torch.device('cuda:{}'.format(self.gpu_ids[0]) if self.
-                                   gpu_ids else torch.device('cpu'))
+        self.device = torch.device("cuda")
+        #self.device = torch.device('cuda:{}'.format(self.gpu_ids[0]) if self.
+        #                           gpu_ids else torch.device('cpu'))
         self.save_dir = os.path.join(opt.checkpoints_dir, opt.name)
         torch.backends.cudnn.benchmark = True
 
@@ -56,15 +57,6 @@ class BaseModel:
         with torch.no_grad():
             self.forward()
 
-    def set_device(self) -> [nn.Module]:
-        ret = []
-        for name in self.model_names:
-            assert isinstance(name, str)
-            net = getattr(self, 'net_{}'.format(name))
-            assert isinstance(net, nn.Module)
-            net = net.cuda()
-            setattr(self, 'net_{}'.format(name), net)
-
     def get_networks(self) -> [nn.Module]:
         ret = []
         for name in self.model_names:
@@ -95,16 +87,16 @@ class BaseModel:
         for name, net in zip(self.model_names, self.get_networks()):
             save_filename = '{}_net_{}.pth'.format(epoch, name)
             save_path = os.path.join(self.save_dir, save_filename)
-            torch.save(net.state_dict(), save_path)
-            #try:
-            #    if isinstance(net, nn.DataParallel):
-            #        net = net.module
-            #    net.cpu()
-            #    torch.save(net.state_dict(), save_path)
-            #    if back_gpu:
-            #        net.cuda()
-            #except Exception as e:
-            #    cprint.err("savenet:"+e)
+
+            try:
+                if isinstance(net, nn.DataParallel):
+                    net = net.module
+                net.cpu()
+                torch.save(net.state_dict(), save_path)
+                if back_gpu:
+                    net.cuda()
+            except Exception as e:
+                print("savenet:", e)
 
         save_filename = '{}_states.pth'.format(epoch)
         save_path = os.path.join(self.save_dir, save_filename)
@@ -121,11 +113,12 @@ class BaseModel:
                 print('cannot load', load_path)
                 continue
 
-            state_dict = torch.load(load_path, map_location=self.device)
+            state_dict = torch.load(load_path, map_location='cpu')
+            #state_dict = torch.load(load_path, map_location=self.device)
             if isinstance(net, nn.DataParallel):
                 net = net.module
 
-            net.load_state_dict(state_dict, strict=True)
+            net.load_state_dict(state_dict, strict=False)
 
 
     def print_networks(self, verbose):
