@@ -142,6 +142,8 @@ class Visualizer:
     def accumulate_losses(self, losses):
         self.acc_iterations += 1
         for k, v in losses.items():
+            if k == 'conf_coefficient':
+                continue
             if k not in self.acc_losses:
                 self.acc_losses[k] = 0
             self.acc_losses[k] += v
@@ -155,12 +157,15 @@ class Visualizer:
     def get_psnr(self, key):
         return self.acc_losses[key + "_psnr"] / self.acc_iterations
 
-    def print_losses(self, total_steps):
-        m = 'End of iteration {} \t Number of batches {} \t Time taken: {:.2f}s\n'.format(
-            total_steps, self.acc_iterations, (time.time() - self.start_time))
+    def print_losses(self, total_steps, writer=None, epoch=None):
+        m = 'End of epoch {} iteration {} \t Number of batches {} \t Time taken: {:.2f}s\n'.format(
+            epoch, total_steps, self.acc_iterations, (time.time() - self.start_time))
         m += '[Average Loss] '
         for k, v in self.acc_losses.items():
             m += '{}: {:.10f}   '.format(k, v / self.acc_iterations)
+            if writer is not None:
+                writer.add_scalar(k, (v / self.acc_iterations).item(), total_steps)
+                writer.add_scalar(k+'_epoch', (v / self.acc_iterations).item(), epoch)
         filepath = os.path.join(self.log_dir, 'log.txt')
         with open(filepath, 'a') as f:
             f.write(m + '\n')

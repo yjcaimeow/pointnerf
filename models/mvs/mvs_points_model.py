@@ -1,5 +1,4 @@
 import torch
-import torch.nn as nn
 import os
 from torch.utils.data import DataLoader
 import imageio
@@ -49,8 +48,8 @@ class MvsPointsModel(nn.Module):
 
         # Create mvs model
         self.MVSNet = self.render_kwargs_train['network_featmvs']
-        #if args.pre_d_est is not None and self.args.manual_depth_view > 0 :
-        #    self.load_pretrained_d_est(self.MVSNet, args.pre_d_est)
+        if args.pre_d_est is not None and self.args.manual_depth_view > 0 :
+            self.load_pretrained_d_est(self.MVSNet, args.pre_d_est)
         self.FeatureNet = self.render_kwargs_train['network_2d']
         self.render_kwargs_train.pop('network_featmvs')
         self.render_kwargs_train.pop('network_2d')

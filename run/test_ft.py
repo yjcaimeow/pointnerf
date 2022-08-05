@@ -23,6 +23,7 @@ import cv2
 from PIL import Image
 from tqdm import tqdm
 import gc
+from cprint import *
 
 def mse2psnr(x): return -10.* torch.log(x)/np.log(10.)
 
@@ -98,12 +99,20 @@ def render_vid(model, dataset, visualizer, opt, bg_info, steps=0, gen_vid=True):
 
             model.test()
             curr_visuals = model.get_current_visuals(data=data)
+            import pdb; pdb.set_trace()
             if visuals is None:
                 visuals = {}
                 for key, value in curr_visuals.items():
                     if key == "gt_image": continue
                     chunk = value.cpu().numpy()
-                    visuals[key] = np.zeros((height * width, 3)).astype(chunk.dtype)
+                    if key == 'sample_loc' or key=='sample_loc_w':
+                        visuals[key] = np.zeros((height * width, 24, 3)).astype(chunk.dtype)
+                    elif key=='ray_valid':
+                        visuals[key] = np.zeros((height * width, 24, 1)).astype(chunk.dtype)
+                    elif key == 'decoded_features':
+                        visuals[key] = np.zeros((height * width, 24, 128)).astype(chunk.dtype)
+                    else:
+                        visuals[key] = np.zeros((height * width, 3)).astype(chunk.dtype)
                     visuals[key][start:end, :] = chunk
             else:
                 for key, value in curr_visuals.items():
@@ -131,7 +140,7 @@ def render_vid(model, dataset, visualizer, opt, bg_info, steps=0, gen_vid=True):
 
 
 
-def test(model, dataset, visualizer, opt, bg_info, test_steps=0, gen_vid=False, lpips=True):
+def test(model, dataset, visualizer, opt, bg_info, test_steps=0, gen_vid=True, lpips=True):
     print('-----------------------------------Testing-----------------------------------')
     model.eval()
     total_num = dataset.total
@@ -144,9 +153,13 @@ def test(model, dataset, visualizer, opt, bg_info, test_steps=0, gen_vid=False, 
     visualizer.reset()
     count = 0;
     for i in range(0, total_num, opt.test_num_step): # 1 if test_steps == 10000 else opt.test_num_step
+        stop=False
+        if i<150 or i%5==0:
+            continue
         data = dataset.get_item(i)
         raydir = data['raydir'].clone()
         pixel_idx = data['pixel_idx'].view(data['pixel_idx'].shape[0], -1, data['pixel_idx'].shape[3]).clone()
+        x,y = pixel_idx[:,:,0], pixel_idx[:,:,1]
         edge_mask = torch.zeros([height, width], dtype=torch.bool)
         edge_mask[pixel_idx[0,...,1].to(torch.long), pixel_idx[0,...,0].to(torch.long)] = 1
         edge_mask=edge_mask.reshape(-1) > 0
@@ -163,6 +176,8 @@ def test(model, dataset, visualizer, opt, bg_info, test_steps=0, gen_vid=False, 
         stime = time.time()
         ray_masks = []
         for k in range(0, totalpixel, chunk_size):
+            if stop:
+                continue
             start = k
             end = min([k + chunk_size, totalpixel])
             data['raydir'] = raydir[:, start:end, :]
@@ -186,18 +201,42 @@ def test(model, dataset, visualizer, opt, bg_info, test_steps=0, gen_vid=False, 
             if visuals is None:
                 visuals = {}
                 for key, value in curr_visuals.items():
-                    if value is None or key=="gt_image":
-                        continue
                     chunk = value.cpu().numpy()
-                    visuals[key] = np.zeros((height, width, 3)).astype(chunk.dtype)
-                    visuals[key][chunk_pixel_id[0,...,1], chunk_pixel_id[0,...,0], :] = chunk
+                    if value is None or key=="gt_image" or stop:
+                        continue
+                    if key == 'sample_loc' or key=='sample_loc_w':
+                        visuals[key] = np.zeros((height, width, 24, 3)).astype(chunk.dtype)
+                    elif key=='ray_valid':
+                        visuals[key] = np.zeros((height, width, 24)).astype(chunk.dtype)
+                    elif key == 'decoded_features':
+                        visuals[key] = np.zeros((height, width, 24, 4)).astype(chunk.dtype)
+                    elif key == 'ray_dist':
+                        visuals[key] = np.zeros((height, width, 24)).astype(chunk.dtype)
+                    else:
+                        visuals[key] = np.zeros((height, width, 3)).astype(chunk.dtype)
+
+                    if chunk.shape[1]!=chunk_pixel_id.shape[1]:
+                        print ("has hole-----", i)
+                        stop=True
+                        continue
+                    visuals[key][chunk_pixel_id[0,...,1], chunk_pixel_id[0,...,0], ...] = chunk
             else:
                 for key, value in curr_visuals.items():
+                    chunk = value.cpu().numpy()
                     if value is None or key=="gt_image":
                         continue
-                    visuals[key][chunk_pixel_id[0,...,1], chunk_pixel_id[0,...,0], :] = value.cpu().numpy()
+                    if chunk.shape[1]!=chunk_pixel_id.shape[1]:
+                        print ("has hole-----", i)
+                        stop=True
+                        continue
+                    visuals[key][chunk_pixel_id[0,...,1], chunk_pixel_id[0,...,0], ...] = value.cpu().numpy()
             if "ray_mask" in model.output and "ray_masked_coarse_raycolor" in opt.test_color_loss_items:
                 ray_masks.append(model.output["ray_mask"] > 0)
+
+
+        if stop:
+            continue
+
         if len(ray_masks) > 0:
             ray_masks = torch.cat(ray_masks, dim=1)
         gt_image = torch.zeros((height*width, 3), dtype=torch.float32)
@@ -211,7 +250,7 @@ def test(model, dataset, visualizer, opt, bg_info, test_steps=0, gen_vid=False, 
             visuals['ray_masked_coarse_raycolor'] = np.copy(visuals["coarse_raycolor"]).reshape(height, width, 3)
             print(visuals['ray_masked_coarse_raycolor'].shape, ray_masks.cpu().numpy().shape)
             visuals['ray_masked_coarse_raycolor'][ray_masks.view(height, width).cpu().numpy() <= 0,:] = 0.0
-        if 'ray_depth_masked_coarse_raycolor' in model.visual_names:
+        if 'ray_depthchunk_masked_coarse_raycolor' in model.visual_names:
             visuals['ray_depth_masked_coarse_raycolor'] = np.copy(visuals["coarse_raycolor"]).reshape(height, width, 3)
             visuals['ray_depth_masked_coarse_raycolor'][model.output["ray_depth_mask"][0].cpu().numpy() <= 0] = 0.0
         if 'ray_depth_masked_gt_image' in model.visual_names:
@@ -220,20 +259,22 @@ def test(model, dataset, visualizer, opt, bg_info, test_steps=0, gen_vid=False, 
         if 'gt_image_ray_masked' in model.visual_names:
             visuals['gt_image_ray_masked'] = np.copy(tmpgts['gt_image']).reshape(height, width, 3)
             visuals['gt_image_ray_masked'][ray_masks.view(height, width).cpu().numpy() <= 0,:] = 0.0
-        for key, value in visuals.items():
-            if key in opt.visual_items:
-                visualizer.print_details("{}:{}".format(key, visuals[key].shape))
-                visuals[key] = visuals[key].reshape(height, width, 3)
+        #for key, value in visuals.items():
+        #    if key in opt.visual_items:
+        #        visualizer.print_details("{}:{}".format(key, visuals[key].shape))
+        #        visuals[key] = visuals[key].reshape(height, width, 3)
 
 
         print("num.{} in {} cases: time used: {} s".format(i, total_num // opt.test_num_step, time.time() - stime), " at ", visualizer.image_dir)
-        visualizer.display_current_results(visuals, i, opt=opt)
-
+        #visualizer.display_current_results(visuals, i, opt=opt)
+        np.savez('results_pointnerf_scanenet006_'+str(i)+'.npz', sample_loc=visuals['sample_loc'], sample_loc_w=visuals['sample_loc_w'], ray_valid=visuals["ray_valid"], \
+                 decoded_features=visuals['decoded_features'], ray_dist=visuals['ray_dist'])
         acc_dict = {}
         if "coarse_raycolor" in opt.test_color_loss_items:
             loss = torch.nn.MSELoss().to("cuda")(torch.as_tensor(visuals["coarse_raycolor"], device="cuda").view(1, -1, 3), gt_image.view(1, -1, 3).cuda())
             acc_dict.update({"coarse_raycolor": loss})
-            print("coarse_raycolor", loss, mse2psnr(loss))
+            #print("coarse_raycolor", loss, mse2psnr(loss))
+            #exit()
 
         if "ray_mask" in model.output and "ray_masked_coarse_raycolor" in opt.test_color_loss_items:
             masked_gt = tmpgts["gt_image"].view(1, -1, 3).cuda()[ray_masks,:].reshape(1, -1, 3)

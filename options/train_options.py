@@ -46,6 +46,10 @@ class TrainOptions(BaseOptions):
                             default=500,
                             help='test frequency')
 
+        parser.add_argument('--prob_maximum_step',
+                            type=int,
+                            default=None,
+                            help='maximum # of training iterations')
         parser.add_argument('--maximum_step',
                             type=int,
                             default=None,

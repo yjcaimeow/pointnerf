@@ -46,8 +46,7 @@ def alpha2_blend(opacity, acc_transmission):
 
 
 def radiance_render(ray_feature):
-    return ray_feature[..., 1:]
-    #return ray_feature[..., 1:4]
+    return ray_feature[..., 1:4]
 
 
 def white_color(ray_feature):

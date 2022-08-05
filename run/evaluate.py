@@ -1,5 +1,8 @@
 import os, sys, time, argparse, cv2
 import numpy as np
+from cprint import *
+from skimage.metrics import structural_similarity
+from skimage.metrics import peak_signal_noise_ratio as compare_psnr
 try:
     from skimage.measure import compare_ssim
     from skimage.measure import compare_psnr
@@ -31,7 +34,7 @@ parser.add_argument('-l', '--id_list', nargs='+', default=list(range(999)),  hel
 parser.add_argument('-m', '--metrics', nargs='+', default=["psnr", "ssim", "lpips", "vgglpips"],  help="The list of metrics to compute. By default it computes psnr, ssim and rmse.")
 
 
-def report_metrics(gtFolder, imgFolder, outFolder, metrics, id_list, imgStr="step-%04d-fine_raycolor.png", gtStr="step-%04d-gt_image.png", use_gpu=False, print_info=True):
+def report_metrics(gtFolder, imgFolder, outFolder, metrics, id_list, imgStr="step-%04d-fine_raycolor.png", gtStr="step-%04d-gt_image.png", use_gpu=False, print_info=True, writer=None, iteration=None, epoch=None):
     total ={}
     loss_fn, loss_fn_vgg = None, None
     if print_info:
@@ -92,6 +95,9 @@ def report_metrics(gtFolder, imgFolder, outFolder, metrics, id_list, imgStr="ste
             vals = np.asarray(total[key]).reshape(-1)
             np.savetxt(outFolder+"/"+key+'.txt', vals)
             outStr+= key + ": %.6f\n"%np.mean(vals)
+            if writer is not None:
+                writer.add_scalar('testset_iteration_'+key, np.mean(vals), iteration)
+                writer.add_scalar('testset_epoch_'+key, np.mean(vals), epoch)
         print(outStr)
         with open(outFolder+"/scores.txt", "w") as f:
             f.write(outStr)

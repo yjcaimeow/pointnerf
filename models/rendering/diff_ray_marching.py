@@ -383,7 +383,6 @@ def near_far_linear_ray_generation(campos,
     end_point_ts = near + end_point_ts
 
     middle_point_ts = (end_point_ts[:, :, :-1] + end_point_ts[:, :, 1:]) / 2
-    #import pdb; pdb.set_trace()
     raypos = campos[:, None, None, :] + raydir[:, :, None, :] * middle_point_ts[:, :, :, None]
     valid = torch.ones_like(middle_point_ts,
                             dtype=middle_point_ts.dtype,
@@ -511,7 +510,7 @@ def ray_march(ray_dist,
               ray_features,
               render_func,
               blend_func,
-              bg_color=None):
+              bg_color=None, pseudo_gt=None):
     # ray_dist: N x Rays x Samples
     # ray_valid: N x Rays x Samples
     # ray_features: N x Rays x Samples x Features
@@ -522,13 +521,17 @@ def ray_march(ray_dist,
     # acc_transmission: N x Rays x Samples
     # blend_weight: N x Rays x Samples x 1
     # background_transmission: N x Rays x 1
-    #import pdb; pdb.set_trace()
+
 
     point_color = render_func(ray_features)
 
     # we are essentially predicting predict 1 - e^-sigma
     sigma = ray_features[..., 0] * ray_valid.float()
     opacity = 1 - torch.exp(-sigma * ray_dist)
+
+    opacity_gt = None
+    if pseudo_gt is not None:
+        opacity_gt = 1 - torch.exp(-(pseudo_gt[..., 0] * ray_valid.float()) * ray_dist)
 
     # cumprod exclusive
     acc_transmission = torch.cumprod(1. - opacity + 1e-10, dim=-1)
@@ -543,7 +546,7 @@ def ray_march(ray_dist,
     ray_color = torch.sum(point_color * blend_weight, dim=-2, keepdim=False)
     if bg_color is not None:
         ray_color += bg_color.to(opacity.device).float().view(
-            background_transmission.shape[0], 1, 128) * background_transmission
+            background_transmission.shape[0], 1, 3) * background_transmission
     # #
     # if point_color.shape[1] > 0 and (torch.any(torch.isinf(point_color)) or torch.any(torch.isnan(point_color))):
     #     print("ray_color", torch.min(ray_color),torch.max(ray_color))
@@ -552,7 +555,7 @@ def ray_march(ray_dist,
     background_blend_weight = blend_func(1, background_transmission)
     # print("ray_color", torch.max(torch.abs(ray_color)), torch.max(torch.abs(sigma)), torch.max(torch.abs(opacity)),torch.max(torch.abs(acc_transmission)), torch.max(torch.abs(background_transmission)), torch.max(torch.abs(acc_transmission)), torch.max(torch.abs(background_blend_weight)))
     return ray_color, point_color, opacity, acc_transmission, blend_weight, \
-        background_transmission, background_blend_weight
+        background_transmission, background_blend_weight, opacity_gt
 
 
 def alpha_ray_march(ray_dist, ray_valid, ray_features,

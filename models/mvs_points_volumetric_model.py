@@ -25,15 +25,13 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
         parser.add_argument(
             '--mode',
             type=int,
-            default=2,
+            default=0,
             help='0 for both mvs and pointnerf, 1 for only mvs, 2 for only pointnerf')
         parser.add_argument(
             '--add_shading_dist',
             type=int,
-            default=2,
+            default=0,
             help='0 for both mvs and pointnerf, 1 for only mvs, 2 for only pointnerf')
-
-
 
     def create_network_models(self, opt):
         if opt.mode != 2:
@@ -70,11 +68,9 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
         self.net_params = net_params
         self.neural_params = neural_params
         self.mvs_params = mvs_params
-        mvs_lr = opt.lr
-        #mvs_lr = opt.mvs_lr if opt.mvs_lr is not None else opt.lr
+        mvs_lr = opt.mvs_lr if opt.mvs_lr is not None else opt.lr
 
         if len(mvs_params) > 0:
-            #print ('======', 2//0)
             self.mvs_optimizer = torch.optim.Adam(mvs_params,
                                               lr=mvs_lr,
                                               betas=(0.9, 0.999))
@@ -85,13 +81,11 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
                                           lr=opt.lr,
                                           betas=(0.9, 0.999))
             self.optimizers.append(self.optimizer)
-            print("net_params", [(par[0], par[1].shape, par[1].requires_grad)  for par in param_lst if not par[0].startswith("module.neural_points")])
-        
+
         if len(neural_params) > 0:
-            if self.stylecode!=None:
-                self.neural_point_optimizer = torch.optim.Adam(neural_params + [self.bg_color] + [self.stylecode], lr=opt.plr, betas=(0.9, 0.999))
-            else:
-                self.neural_point_optimizer = torch.optim.Adam(neural_params + [self.bg_color], lr=opt.plr, betas=(0.9, 0.999))
+            self.neural_point_optimizer = torch.optim.Adam(neural_params,
+                                          lr=opt.plr, #/ 5.0,
+                                          betas=(0.9, 0.999))
             self.optimizers.append(self.neural_point_optimizer)
             print("neural_params", [(par[0], par[1].shape, par[1].requires_grad)  for par in param_lst if par[0].startswith("module.neural_points")])
         else:
@@ -105,7 +99,6 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
             # print("self.loss_total", self.ray_masked_coarse_color.grad)
             # print("self.loss_total", self.loss_total)
             if self.loss_total != 0:
-                #print (self.loss_total.requires_grad)
                 self.loss_total.backward()
             else:
                 print(fmt.RED + "Loss == 0" +
@@ -170,14 +163,12 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
         self.top_ray_miss_loss = torch.zeros([self.num_probe + 1], dtype=torch.float32, device=self.device)
         self.top_ray_miss_ids = torch.arange(self.num_probe + 1, dtype=torch.int32, device=self.device)
 
-    def set_points(self, points_xyz, points_embedding, points_color=None, points_dir=None, points_conf=None, Rw2c=None, eulers=None, editing=False, bg_color=None, stylecode=None):
+    def set_points(self, points_xyz, points_embedding, points_color=None, points_dir=None, points_conf=None, Rw2c=None, eulers=None, editing=False):
         if not editing:
             self.neural_points.set_points(points_xyz, points_embedding, points_color=points_color, points_dir=points_dir, points_conf=points_conf, parameter=self.opt.feedforward == 0, Rw2c=Rw2c, eulers=eulers)
         else:
             self.neural_points.editing_set_points(points_xyz, points_embedding, points_color=points_color, points_dir=points_dir, points_conf=points_conf, parameter=self.opt.feedforward == 0, Rw2c=Rw2c, eulers=eulers)
         if self.opt.feedforward == 0 and self.opt.is_train:
-            self.bg_color = bg_color
-            self.stylecode = stylecode
             self.setup_optimizer(self.opt)
 
 
@@ -245,6 +236,7 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
     def grow_points(self, points_xyz, points_embedding, points_color, points_dir, points_conf):
         self.neural_points.grow_points(points_xyz, points_embedding, points_color, points_dir, points_conf)
         # self.neural_points.reset_querier()
+        self.setup_optimizer(self.opt)
 
     def cleanup(self):
         if hasattr(self, "neural_points"):
@@ -326,13 +318,14 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
             if not os.path.isfile(load_path):
                 print('cannot load', load_path)
                 continue
-            state_dict = torch.load(load_path, map_location=self.device)
+            state_dict = torch.load(load_path, map_location='cpu')
+            #state_dict = torch.load(load_path, map_location=self.device)
             if epoch=="best" and name == "ray_marching" and self.opt.default_conf > 0.0 and self.opt.default_conf <= 1.0 and self.neural_points.points_conf is not None:
                 assert "neural_points.points_conf" not in state_dict
                 state_dict["neural_points.points_conf"] = torch.ones_like(self.net_ray_marching.module.neural_points.points_conf) * self.opt.default_conf
             if isinstance(net, nn.DataParallel):
                 net = net.module
-            net.load_state_dict(state_dict, strict=False)
+            net.load_state_dict(state_dict, strict=True)
 
     def test(self, gen_points=False):
         with torch.no_grad():

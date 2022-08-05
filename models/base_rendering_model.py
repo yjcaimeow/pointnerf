@@ -17,14 +17,14 @@ from PIL import Image
 def mse2psnr(x): return -10.* torch.log(x)/np.log(10.)
 
 class BaseRenderingModel(BaseModel):
-    ''' A base rendering model that provides the basic loss functions, 
-        selctions of different rendering functions, ray generation functions, 
-        blending functions (for collocated and non-collocated ray marching), 
-        and functions to setup encoder and decoders. 
+    ''' A base rendering model that provides the basic loss functions,
+        selctions of different rendering functions, ray generation functions,
+        blending functions (for collocated and non-collocated ray marching),
+        and functions to setup encoder and decoders.
         A sub model needs to at least re-implement create_network_models() and run_network_models() for actual rendering.
         Examples are: hirarchical_volumetric_model etc.
 
-        The model collects 
+        The model collects
     '''
     @staticmethod
     def modify_commandline_options(parser, is_train=True):
@@ -205,14 +205,14 @@ class BaseRenderingModel(BaseModel):
         return parser
 
     def add_default_color_losses(self, opt):
-        ''' if no color loss terms are specified, this function is called to 
+        ''' if no color loss terms are specified, this function is called to
             add default supervision into opt.color_loss_items
         '''
 
         opt.color_loss_items = []  # add this to actual names in subclasses
 
     def add_default_visual_items(self, opt):
-        ''' if no visual terms are specified, this function is called to 
+        ''' if no visual terms are specified, this function is called to
             add default visualization items
         '''
         opt.visual_items = ['gt_image'
@@ -402,7 +402,7 @@ class BaseRenderingModel(BaseModel):
 
         self.gt_mask = self.input['gt_mask'].to(
             self.device) if 'gt_mask' in input else None
-        
+
 
     def set_visuals(self):
         for key, item in self.output.items():
@@ -413,7 +413,7 @@ class BaseRenderingModel(BaseModel):
             setattr(self, key, self.output[key])
 
     def check_setup_renderFunc_channels(self, opt):
-        ''' Find render functions; 
+        ''' Find render functions;
             the function is often used by subclasses when creating rendering networks.
         '''
 
@@ -593,6 +593,10 @@ class BaseRenderingModel(BaseModel):
                 # img = csave.view(512, 640, 3).detach().numpy()
                 # self.save_image(img, filepath)
                 # print("psnrkey recal:",mse2psnr(torch.nn.MSELoss().to("cuda")(masked_output, masked_gt)) )
+
+            elif name=="loss_alpha" or name=="loss_rgb":
+                loss = self.output[name]
+
             else:
                 if name not in self.output:
                     print(fmt.YELLOW + "No required color loss item: " + name +
@@ -604,6 +608,7 @@ class BaseRenderingModel(BaseModel):
             # loss.register_hook(lambda grad: print(torch.any(torch.isnan(grad)), grad, opt.color_loss_weights[i]))
 
             setattr(self, "loss_" + name, loss)
+            #setattr(self, "loss_" + name, loss)
         # print(torch.sum(self.output["ray_mask"]))
 
         #depth losses
@@ -627,18 +632,18 @@ class BaseRenderingModel(BaseModel):
             setattr(self, "loss_" + name, loss)
 
         #zero_one regularization losses
-        for i, name in enumerate(opt.zero_one_loss_items):
-            if name not in self.output:
-                print(fmt.YELLOW + "No required zero_one loss item: " + name +
-                      fmt.END)
-                # setattr(self, "loss_" + name, torch.zeros([1], device="cuda", dtype=torch.float32))
-            else:
-                val = torch.clamp(self.output[name], self.opt.zero_epsilon,
-                                  1 - self.opt.zero_epsilon)
-                # print("self.output[name]",torch.min(self.output[name]), torch.max(self.output[name]))
-                loss = torch.mean(torch.log(val) + torch.log(1 - val))
-                self.loss_total += loss * opt.zero_one_loss_weights[i]
-                setattr(self, "loss_" + name, loss)
+        #for i, name in enumerate(opt.zero_one_loss_items):
+        #    if name not in self.output:
+        #        print(fmt.YELLOW + "No required zero_one loss item: " + name +
+        #              fmt.END)
+        #        # setattr(self, "loss_" + name, torch.zeros([1], device="cuda", dtype=torch.float32))
+        #    else:
+        #        val = torch.clamp(self.output[name], self.opt.zero_epsilon,
+        #                          1 - self.opt.zero_epsilon)
+        #        # print("self.output[name]",torch.min(self.output[name]), torch.max(self.output[name]))
+        #        loss = torch.mean(torch.log(val) + torch.log(1 - val))
+        #        self.loss_total += loss * opt.zero_one_loss_weights[i]
+        #        setattr(self, "loss_" + name, loss)
 
         # l2 square regularization losses
         for i, name in enumerate(opt.l2_size_loss_items):

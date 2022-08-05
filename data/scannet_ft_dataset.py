@@ -1,4 +1,5 @@
 from models.mvs.mvs_utils import read_pfm
+from pytorch3d.ops import ball_query
 import os
 import numpy as np
 import cv2
@@ -11,18 +12,22 @@ import json
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
 import torch
-import os
 from PIL import Image
 import h5py
 import models.mvs.mvs_utils as mvs_utils
 from data.base_dataset import BaseDataset
 import configparser
-
+from cprint import *
 from os.path import join
-import cv2
-# import torch.nn.functional as F
 from .data_utils import get_dtu_raydir
 from plyfile import PlyData, PlyElement
+
+import io
+from petrel_client.client import Client
+conf_path = '~/petreloss.conf'
+client = Client(conf_path)
+import logging
+LOG = logging.getLogger('petrel_client.test')
 
 FLIP_Z = np.asarray([
     [1,0,0],
@@ -91,6 +96,7 @@ class ScannetFtDataset(BaseDataset):
         self.opt = opt
         self.data_dir = opt.data_root
         self.scan = opt.scan
+        self.scans = opt.scans
         self.split = opt.split
 
         self.img_wh = (int(opt.img_wh[0] * downSample), int(opt.img_wh[1] * downSample))
@@ -115,7 +121,11 @@ class ScannetFtDataset(BaseDataset):
 
         self.define_transforms()
 
-        self.build_init_metas()
+        self.id_list, self.id_list_name, self.image_paths, self.seq_ids = [],[],[],[]
+        for seq_id, scan in enumerate(self.scans):
+            seq_len = self.build_init_metas(scan)
+            self.seq_ids.extend([seq_id]*seq_len)
+        self.view_id_list=[]
 
         self.norm_w2c, self.norm_c2w = torch.eye(4, device="cuda", dtype=torch.float32), torch.eye(4, device="cuda", dtype=torch.float32)
         # if opt.normview > 0:
@@ -125,18 +135,40 @@ class ScannetFtDataset(BaseDataset):
         #     self.norm_w2c, self.norm_c2w = torch.as_tensor(norm_w2c, device="cuda", dtype=torch.float32), torch.as_tensor(norm_c2w, device="cuda", dtype=torch.float32)
         #     norm_w2c, norm_c2w = None, None
         # self.proj_mats, self.intrinsics, self.world2cams, self.cam2worlds = self.build_proj_mats()
-        self.intrinsic = np.loadtxt(os.path.join(self.data_dir, self.scan, "exported/intrinsic/intrinsic_color.txt")).astype(np.float32)[:3,:3]
-        self.depth_intrinsic = np.loadtxt(
-            os.path.join(self.data_dir, self.scan, "exported/intrinsic/intrinsic_depth.txt")).astype(np.float32)[:3, :3]
-        img = Image.open(self.image_paths[0])
+        f_url_intrinsic = os.path.join(self.data_dir, self.scan, "exported/intrinsic/intrinsic_color.txt")
+        f_url_depth_intrinsic = os.path.join(self.data_dir, self.scan, "exported/intrinsic/intrinsic_depth.txt")
+        if self.opt.load_type == 'ceph':
+            body = client.get(f_url_intrinsic, update_cache=True)
+            f_url_intrinsic = io.BytesIO(body)
+
+            body_depth_intrinsic = client.get(f_url_depth_intrinsic, update_cache=True)
+            f_url_depth_intrinsic = io.BytesIO(body_depth_intrinsic)
+
+        self.intrinsic = np.loadtxt(f_url_intrinsic).astype(np.float32)[:3,:3]
+        self.depth_intrinsic = np.loadtxt(f_url_depth_intrinsic).astype(np.float32)[:3, :3]
+
+        #self.intrinsic = np.loadtxt(os.path.join(self.data_dir, self.scan, "exported/intrinsic/intrinsic_color.txt")).astype(np.float32)[:3,:3]
+        #self.depth_intrinsic = np.loadtxt(os.path.join(self.data_dir, self.scan, "exported/intrinsic/intrinsic_depth.txt")).astype(np.float32)[:3, :3]
+        #img = Image.open(self.image_paths[0])
+        if self.opt.load_type == 'ceph':
+            img_bytes = client.get(self.image_paths[0])
+            assert(img_bytes is not None)
+            img_mem_view = memoryview(img_bytes)
+            img_array = np.frombuffer(img_mem_view, np.uint8)
+            img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+            #img = self.transform(img)
+        else:
+            # debug img2 = Image.open('/mnt/cache/caiyingjie/data/scannet/scans/scene0006_00/exported/color/0.jpg')
+            img = Image.open(self.image_paths[0])
+            #img = self.transform(img)
         ori_img_shape = list(self.transform(img).shape)  # (4, h, w)
+        #cprint.info('ceph & normal img shape is {} and {}.'.format(ori_img_shape_1, ori_img_shape_2))
+        #exit()
         self.intrinsic[0, :] *= (self.width / ori_img_shape[2])
         self.intrinsic[1, :] *= (self.height / ori_img_shape[1])
         # print(self.intrinsic)
         self.total = len(self.id_list)
         print("dataset total:", self.split, self.total)
-
-
 
     @staticmethod
     def modify_commandline_options(parser, is_train):
@@ -291,44 +323,91 @@ class ScannetFtDataset(BaseDataset):
             return list
 
 
-    def build_init_metas(self):
-        colordir = os.path.join(self.data_dir, self.scan, "exported/color")
-        self.image_paths = [f for f in os.listdir(colordir) if os.path.isfile(os.path.join(colordir, f))]
-        self.image_paths = [os.path.join(self.data_dir, self.scan, "exported/color/{}.jpg".format(i)) for i in range(len(self.image_paths))]
-        self.all_id_list = self.filter_valid_id(list(range(len(self.image_paths))))
-        if len(self.all_id_list) > 2900: # neural point-based graphics' configuration
-            self.test_id_list = self.all_id_list[::100]
-            self.train_id_list = [self.all_id_list[i] for i in range(len(self.all_id_list)) if (((i % 100) > 19) and ((i % 100) < 81 or (i//100+1)*100>=len(self.all_id_list)))]
-        else:  # nsvf configuration
-            step=5
-            self.train_id_list = self.all_id_list[::step]
-            self.test_id_list = [self.all_id_list[i] for i in range(len(self.all_id_list)) if (i % step) !=0] if self.opt.test_num_step != 1 else self.all_id_list
+    def build_init_metas(self, scan=None):
+        #self.image_paths = []
+        #with open(os.path.join("/mnt/cache/caiyingjie/data/scannet/scans", self.scan, "exported/color/meta.txt")) as file:
+        #    lines = file.readlines()
+        #file.close()
+        #for line in lines:
+        #    self.image_paths.append(line.strip())
 
-        print("all_id_list",len(self.all_id_list))
-        print("test_id_list",len(self.test_id_list), self.test_id_list)
-        print("train_id_list",len(self.train_id_list))
-        self.train_id_list = self.remove_blurry(self.train_id_list)
-        self.id_list = self.train_id_list if self.split=="train" else self.test_id_list
-        self.view_id_list=[]
+        colordir = os.path.join(self.data_dir, scan, "exported/color")
+        colordir = os.path.join("/mnt/cache/caiyingjie/data/scannet/scans", scan, "exported/color")
+        image_paths = [f for f in os.listdir(colordir) if os.path.isfile(os.path.join(colordir, f))]
 
+        image_paths = [os.path.join(self.data_dir, scan, "exported/color/{}.jpg".format(i)) for i in range(len(image_paths))]
+        self.image_paths.extend(image_paths)
+        all_id_list = self.filter_valid_id(list(range(len(image_paths))), scan)
+        step=5
+        train_id_list = all_id_list[::step]
+#        test_id_list = [all_id_list[i] for i in range(len(all_id_list)) if (i % step) !=0] if self.opt.test_num_step != 1 else all_id_list
 
-    def filter_valid_id(self, id_list):
+        test_id_list = [all_id_list[i] for i in range(len(all_id_list)) if (i % step) !=0] if self.opt.test_num_step != 0 else all_id_list
+        test_id_list = test_id_list[::50]
+        #print (len(test_id_list))
+        #exit()
+
+        id_list = train_id_list if self.split=="train" else test_id_list
+
+        print("all_id_list",len(all_id_list))
+        print("test_id_list",len(test_id_list))
+        print("train_id_list",len(train_id_list))
+
+        self.id_list.extend(id_list)
+        self.id_list_name.extend([scan]*len(id_list))
+
+        return len(id_list)
+        #self.all_id_list = self.filter_valid_id(list(range(len(self.image_paths))), scan)
+        #if len(self.all_id_list) > 2900: # neural point-based graphics' configuration
+        #    self.test_id_list = self.all_id_list[::100]
+        #    self.train_id_list = [self.all_id_list[i] for i in range(len(self.all_id_list)) if (((i % 100) > 19) and ((i % 100) < 81 or (i//100+1)*100>=len(self.all_id_list)))]
+        #else:  # nsvf configuration
+        #    step=5
+        #    self.train_id_list = self.all_id_list[::step]
+        #    self.test_id_list = [self.all_id_list[i] for i in range(len(self.all_id_list)) if (i % step) !=0] if self.opt.test_num_step != 1 else self.all_id_list
+
+        #self.train_id_list = self.remove_blurry(self.train_id_list)
+
+        ##self.train_id_list = self.filter_exist_id(self.train_id_list)
+        ##self.all_id_list = self.filter_exist_id(self.all_id_list)
+        ##self.test_id_list = self.filter_exist_id(self.test_id_list)
+        #self.test_id_list = self.all_id_list
+
+        #print("all_id_list",len(self.all_id_list))
+        #print("test_id_list",len(self.test_id_list))
+        #print("train_id_list",len(self.train_id_list), self.train_id_list)
+
+        #self.id_list = self.train_id_list if self.split=="train" else self.test_id_list
+        #self.view_id_list=[]
+
+    def filter_valid_id(self, id_list, scan):
         empty_lst=[]
         for id in id_list:
-            c2w = np.loadtxt(os.path.join(self.data_dir, self.scan, "exported/pose", "{}.txt".format(id))).astype(np.float32)
+            f_url = os.path.join(self.data_dir, scan, "exported/pose", "{}.txt".format(id))
+            if self.opt.load_type == 'ceph':
+                body = client.get(f_url, update_cache=True)
+                f_url = io.BytesIO(body)
+            c2w = np.loadtxt(f_url).astype(np.float32)
+            #c2w = np.loadtxt(os.path.join(self.data_dir, self.scan, "exported/pose", "{}.txt".format(id))).astype(np.float32)
             if np.max(np.abs(c2w)) < 30:
                 empty_lst.append(id)
         return empty_lst
 
-    def get_campos_ray(self):
+    def get_campos_ray(self, scan=None):
         centerpixel=np.asarray(self.img_wh).astype(np.float32)[None,:] // 2
         camposes=[]
         centerdirs=[]
-        for id in self.id_list:
-            c2w = np.loadtxt(os.path.join(self.data_dir, self.scan, "exported/pose", "{}.txt".format(id))).astype(np.float32)  #@ self.blender2opencv
+        for id, scan_name in zip(self.id_list, self.id_list_name):
+            if scan_name!=scan:
+                continue
+            f_url = os.path.join(self.data_dir, scan, "exported/pose", "{}.txt".format(id))
+            if self.opt.load_type == 'ceph':
+                body = client.get(f_url, update_cache=True)
+                f_url = io.BytesIO(body)
+            c2w = np.loadtxt(f_url).astype(np.float32)
             campos = c2w[:3, 3]
             camrot = c2w[:3,:3]
-            raydir = get_dtu_raydir(centerpixel, self.intrinsic, camrot, True)
+            _, raydir = get_dtu_raydir(centerpixel, self.intrinsic, camrot, True)
             camposes.append(campos)
             centerdirs.append(raydir)
         camposes=np.stack(camposes, axis=0) # 2091, 3
@@ -439,8 +518,10 @@ class ScannetFtDataset(BaseDataset):
             cam_xyz = torch.cat([cam_xyz, torch.ones_like(cam_xyz[...,:1])], dim=-1)
             world_xyz = (cam_xyz.view(-1,4) @ c2w.t())[...,:3]
             # print("cam_xyz", torch.min(cam_xyz, dim=-2)[0], torch.max(cam_xyz, dim=-2)[0])
+            # print("world_xyz", world_xyz.shape) #, torch.min(world_xyz.view(-1,3), dim=-2)[0], torch.max(world_xyz.view(-1,3), dim=-2)[0])
             if vox_res > 0:
                 world_xyz = mvs_utils.construct_vox_points_xyz(world_xyz, vox_res)
+                # print("world_xyz", world_xyz.shape)
             world_xyz_all = torch.cat([world_xyz_all, world_xyz], dim=0)
         if self.opt.ranges[0] > -99.0:
             ranges = torch.as_tensor(self.opt.ranges, device=world_xyz_all.device, dtype=torch.float32)
@@ -545,14 +626,33 @@ class ScannetFtDataset(BaseDataset):
 
         item = {}
         vid = self.id_list[id]
-        image_path = os.path.join(self.data_dir, self.scan, "exported/color/{}.jpg".format(vid))
+        scan = self.id_list_name[id]
+        seq_id = self.seq_ids[id]
+        item["seq_id"] = seq_id
+        image_path = os.path.join(self.data_dir, scan, "exported/color/{}.jpg".format(vid))
         # print("vid",vid)
-        img = Image.open(image_path)
-        img = img.resize(self.img_wh, Image.LANCZOS)
+        if self.opt.load_type == 'ceph':
+            img_bytes = client.get(image_path)
+            assert(img_bytes is not None)
+            img_mem_view = memoryview(img_bytes)
+            img_array = np.frombuffer(img_mem_view, np.uint8)
+            img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+            img = cv2.resize(img,  (self.width, self.height), interpolation=cv2.INTER_AREA)
+        else:
+            img = Image.open(image_path)
+            img = img.resize(self.img_wh, Image.LANCZOS)
         img = self.transform(img)  # (4, h, w)
-        c2w = np.loadtxt(os.path.join(self.data_dir, self.scan, "exported/pose", "{}.txt".format(vid))).astype(np.float32)
+
+        f_url = os.path.join(self.data_dir, scan, "exported/pose", "{}.txt".format(vid))
+        if self.opt.load_type == 'ceph':
+            body = client.get(f_url, update_cache=True)
+            f_url = io.BytesIO(body)
+        c2w = np.loadtxt(f_url).astype(np.float32)
+        #c2w = np.loadtxt(os.path.join(self.data_dir, self.scan, "exported/pose", "{}.txt".format(vid))).astype(np.float32)
         # w2c = np.linalg.inv(c2w)
         intrinsic = self.intrinsic
+        #cprint.err('/home/xschen/yjcai/code/offical/pointnerf/run/results_pointnerf_scanenet006_{}.npz'.format(vid))
+        #npz_data = np.load('/home/xschen/yjcai/code/offical/pointnerf/run/results_pointnerf_scanenet006_{}.npz'.format(vid))
 
         # print("gt_image", gt_image.shape)
         width, height = img.shape[2], img.shape[1]
@@ -617,11 +717,11 @@ class ScannetFtDataset(BaseDataset):
         # raydir = get_cv_raydir(pixelcoords, self.height, self.width, focal, camrot)
         item["pixel_idx"] = pixelcoords
         # print("pixelcoords", pixelcoords.reshape(-1,2)[:10,:])
-        raydir = get_dtu_raydir(pixelcoords, item["intrinsic"], camrot, self.opt.dir_norm > 0)
+        local_raydir, raydir = get_dtu_raydir(pixelcoords, item["intrinsic"], camrot, self.opt.dir_norm > 0)
         raydir = np.reshape(raydir, (-1, 3))
         item['raydir'] = torch.from_numpy(raydir).float()
+        item['local_raydir'] = torch.from_numpy(local_raydir).float().reshape(-1,3)
         gt_image = gt_image[py.astype(np.int32), px.astype(np.int32)]
-        # gt_mask = gt_mask[py.astype(np.int32), px.astype(np.int32), :]
         gt_image = np.reshape(gt_image, (-1, 3))
         item['gt_image'] = gt_image
 
@@ -635,9 +735,68 @@ class ScannetFtDataset(BaseDataset):
             else:
                 item['bg_color'] = torch.FloatTensor(self.bg_color)
 
+        if self.opt.progressive_distill:
+            #f_url = 's3://caiyingjie/scannet/scene0006_00/pseudo_gt/results_pointnerf_scanenet006_'+str(vid)+'.npz'
+            #f_url = 's3://caiyingjie/scannet/'+scan+'/pseudo_gt/results_pointnerf_scanenet'+scan[6:9]+'_'+str(vid)+'.npz'
+            f_url = 's3://caiyingjie/scannet/'+scan+'/pseudo_gt/results_pointnerf_'+str(scan)+'_'+str(vid)+'.npz'
+            body = client.get(f_url, update_cache=True)
+            if not body:
+                LOG.warn('can not get content from %s', f_url)
+            f = io.BytesIO(body)
+            data = np.load(f)
+            item["sample_loc_loaded"] = data['sample_loc'][py.astype(np.int32), px.astype(np.int32),...].reshape(-1, self.opt.SR, 3)
+            item["sample_loc_w_loaded"]=data["sample_loc_w"][py.astype(np.int32), px.astype(np.int32),...].reshape(-1, self.opt.SR, 3)
+            item["ray_valid_loaded"] = data["ray_valid"][py.astype(np.int32), px.astype(np.int32),...].reshape(-1, self.opt.SR)
+            item["decoded_features_loaded"] = data["decoded_features"][py.astype(np.int32), px.astype(np.int32),...].reshape(-1, self.opt.SR, 4)
         return item
 
+    def get_candicates(self, scan=None):
+        if scan==None:
+            scan = self.scan
+        file_path = os.path.join(self.opt.data_root, scan, 'init_candidates.npy')
+        cprint.info(file_path)
+        if self.opt.load_type=='ceph':
+            body = client.get(file_path, update_cache=True)
+            if not body:
+                LOG.warn('can not get content from %s', file_path)
+            file_path = io.BytesIO(body)
+            filtered_candidates = torch.from_numpy(np.load(file_path)).cuda()
+            return filtered_candidates
+        elif os.path.exists(file_path):
+            filtered_candidates = torch.from_numpy(np.load(file_path)).cuda()
+            return filtered_candidates
+        center = torch.tensor([3.7269, 3.4063, 1.2413]).cuda()
+        whl = torch.tensor([8.2886, 8.1767, 3.0916]).cuda()
 
+        range_min,range_max = center-whl/2, center+whl/2
+
+        xs = torch.arange(range_min[0], range_max[0], self.opt.gap, device='cuda')
+        ys = torch.arange(range_min[1], range_max[1], self.opt.gap, device='cuda')
+        zs = torch.arange(range_min[2], range_max[2], self.opt.gap, device='cuda')
+
+        candidates = torch.cartesian_prod(xs, ys, zs)
+
+        idx_flag = torch.zeros(len(candidates)).cuda()
+        for vid in self.id_list:
+            #f_url = 's3://caiyingjie/scannet/scene0006_00/pseudo_gt/results_pointnerf_scanenet006_'+str(vid)+'.npz'
+            #f_url = 's3://caiyingjie/scannet/'+scan+'/pseudo_gt/results_pointnerf_scanenet'+scan[6:9]+'_'+str(vid)+'.npz'
+            f_url = 's3://caiyingjie/scannet/'+scan+'/pseudo_gt/results_pointnerf_'+str(scan)+'_'+str(vid)+'.npz'
+            cprint.info("candidates data loader {}.".format(f_url))
+            body = client.get(f_url, update_cache=True)
+            if not body:
+                LOG.warn('can not get content from %s', f_url)
+            f = io.BytesIO(body)
+            data = np.load(f)
+            sample_loc_w_loaded = data["sample_loc_w"]
+            ray_valid_loaded = data["ray_valid"]
+            sample_loc_w_loaded = torch.tensor(sample_loc_w_loaded[ray_valid_loaded]).cuda()
+            idx = ball_query(candidates[None,...], sample_loc_w_loaded[None,...], K=1, radius=0.2).idx.squeeze() #N*p1*1
+            idx_flag[idx>0]=1
+        filtered_candidates = candidates[idx_flag>0]
+        np.save(file_path, filtered_candidates.cpu().numpy())
+        cprint.info('scene {} INIT candidates points.....{}.'.format(scan, filtered_candidates.shape))
+        exit()
+        return filtered_candidates
 
     def get_item(self, idx, crop=False, full_img=False):
         item = self.__getitem__(idx, crop=crop, full_img=full_img)
@@ -648,8 +807,6 @@ class ScannetFtDataset(BaseDataset):
                     value = torch.as_tensor(value)
                 item[key] = value.unsqueeze(0)
         return item
-
-
 
     def get_dummyrot_item(self, idx, crop=False):
 

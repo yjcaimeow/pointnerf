@@ -133,7 +133,7 @@ class PointAggregator(torch.nn.Module):
         parser.add_argument(
             '--shading_color_channel_num',
             type=int,
-            default=128,
+            default=3,
             help='color channel num')
 
         parser.add_argument(
@@ -340,7 +340,7 @@ class PointAggregator(torch.nn.Module):
             color_block.append(nn.Linear(in_channels, out_channels))
             color_block.append(self.act(inplace=True))
             in_channels = out_channels
-        #color_block.append(nn.Linear(in_channels, 3))
+        color_block.append(nn.Linear(in_channels, 3))
         self.color_branch = nn.Sequential(*color_block)
         block_init_lst.append(self.color_branch)
 
@@ -631,10 +631,8 @@ class PointAggregator(torch.nn.Module):
             if self.opt.agg_color_xyz_mode != "None":
                 color_in = torch.cat([color_in, pts], dim=-1)
 
-            #import pdb; pdb.set_trace()
             color_in = torch.cat([color_in, viewdirs], dim=-1)
-            color_output = self.color_branch(color_in)
-            #color_output = self.raw2out_color(self.color_branch(color_in))
+            color_output = self.raw2out_color(self.color_branch(color_in))
             # color_output = torch.sigmoid(color_output)
 
             # output_placeholder = torch.cat([alpha, color_output], dim=-1)
@@ -744,7 +742,7 @@ class PointAggregator(torch.nn.Module):
         total_len = len(ray_valid)
         in_shape = sample_loc_w.shape
         if total_len == 0 or torch.sum(ray_valid) == 0:
-            print("skip since no valid ray, total_len:", total_len, torch.sum(ray_valid))
+            # print("skip since no valid ray, total_len:", total_len, torch.sum(ray_valid))
             return torch.zeros(in_shape[:-1] + (self.opt.shading_color_channel_num + 1,), device=ray_valid.device, dtype=torch.float32), ray_valid.view(in_shape[:-1]), None, None
 
         if self.opt.agg_dist_pers < 0:

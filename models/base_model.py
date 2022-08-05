@@ -2,8 +2,7 @@ import torch
 from torch import nn
 import os
 from .helpers.networks import get_scheduler
-import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
+
 
 class BaseModel:
     @staticmethod
@@ -17,15 +16,15 @@ class BaseModel:
         self.opt = opt
         self.gpu_ids = opt.gpu_ids
         self.is_train = opt.is_train
-        self.device = torch.device('cuda:{}'.format(self.gpu_ids[0]) if self.
-                                   gpu_ids else torch.device('cpu'))
+        self.device = torch.device("cuda")
+        #self.device = torch.device('cuda:{}'.format(self.gpu_ids[0]) if self.
+        #                           gpu_ids else torch.device('cpu'))
         self.save_dir = os.path.join(opt.checkpoints_dir, opt.name)
         torch.backends.cudnn.benchmark = True
 
         self.loss_names = []  # losses to report
         self.model_names = []  # models that will be used
         self.visual_names = []  # visuals to show at test time
-
 
     def set_input(self, input: dict):
         self.input = input
@@ -43,7 +42,7 @@ class BaseModel:
         if not self.is_train or opt.resume_dir:
             print("opt.resume_iter!!!!!!!!!", opt.resume_iter)
             self.load_networks(opt.resume_iter)
-        #self.print_networks(opt.verbose)
+        self.print_networks(opt.verbose)
 
     def eval(self):
         '''turn on eval mode'''
@@ -57,18 +56,6 @@ class BaseModel:
     def test(self):
         with torch.no_grad():
             self.forward()
-
-    def set_ddp(self):
-        import pdb; pdb.set_trace()
-        for name in self.model_names:
-            assert isinstance(name, str)
-            net = getattr(self, 'net_{}'.format(name))
-            assert isinstance(net, nn.Module)
-            print("get rank {}".format(dist.get_rank()))
-            local_rank = dist.get_rank()
-            net = DDP(net, device_ids=[torch.cuda.current_device()])
-#            net = DDP(net, device_ids=[local_rank], output_device=local_rank)
-            setattr(self, 'net_{}'.format(name), net)
 
     def get_networks(self) -> [nn.Module]:
         ret = []
@@ -126,7 +113,8 @@ class BaseModel:
                 print('cannot load', load_path)
                 continue
 
-            state_dict = torch.load(load_path, map_location=self.device)
+            state_dict = torch.load(load_path, map_location='cpu')
+            #state_dict = torch.load(load_path, map_location=self.device)
             if isinstance(net, nn.DataParallel):
                 net = net.module
 
@@ -156,7 +144,6 @@ class BaseModel:
     def update_learning_rate(self, **kwargs):
         for scheduler in self.schedulers:
             scheduler.step()
-    def print_lr(self, **kwargs):
         for i, optim in enumerate(self.optimizers):
             lr = optim.param_groups[0]['lr']
             if "opt" in kwargs:
