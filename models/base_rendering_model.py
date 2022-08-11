@@ -294,10 +294,6 @@ class BaseRenderingModel(BaseModel):
             self.model_names = ['ray_marching']
             self.net_ray_marching = network_torch_model(self.opt)
 
-            if self.opt.gpu_ids:
-                self.net_ray_marching.to(self.device)
-                self.net_ray_marching = torch.nn.DataParallel(
-                    self.net_ray_marching, self.opt.gpu_ids)
         '''
         pass
 

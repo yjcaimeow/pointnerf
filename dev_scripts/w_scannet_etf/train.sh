@@ -1,15 +1,13 @@
 #!/bin/bash
 
 nrCheckpoint="../checkpoints"
-#nrDataRoot="s3://caiyingjie"
 nrDataRoot="/mnt/cache/caiyingjie/data/scannet"
 name=$2
-
 resume_iter=latest
 
 data_root="${nrDataRoot}/scans/"
-scan="scene0006_00"
-scans="scene0006_00 "
+scan="scene0032_00"
+scans=$3
 #scans="scene0003_00 scene0005_00 scene0006_00 scene0101_00 scene0032_00 scene0034_00 scene0035_00 scene0036_00 scene0039_00"
 #scans="scene0032_00 scene0006_00 "
 
@@ -120,29 +118,31 @@ lr_decay_exp=0.1
 checkpoints_dir="${nrCheckpoint}/scannet/"
 resume_dir="${nrCheckpoint}/init/dtu_dgt_d012_img0123_conf_agg2_32_dirclr20"
 
-save_iter_freq=10000
 save_point_freq=10000 #301840 #1
 maximum_step=800000 #500000 #250000 #800000
 
 niter=10000 #1000000
 niter_decay=10000 #250000
-n_threads=10
 
 train_and_test=0 #1
 test_num=10
-test_freq=10000 #  #100 #1200 #1200 #30184 #30184 #50000
 print_freq=40
 test_num_step=1
 
 prob_maximum_step=150002 #500000 #250000 #800000
-prob_freq=-1 #10001
-prob_num_step=4
+prob_freq=100
+prob_num_step=2
 prob_kernel_size=" 3 3 3 1 1 1 "
-prob_tiers=" 100 30000 60000 100000 150000 400000"
+
+maximum_epoch=2000 #500000 #250000 #800000
+#prob_tiers="300 600 900 1200 1500"
+prob_tiers=$4
+test_freq=100 #  #100 #1200 #1200 #30184 #30184 #50000
+save_iter_freq=100
+
 prob_mode=0 # 0, n, 1 t, 10 t&n
 prob_thresh=0.9
 prob_mul=0.4
-
 zero_epsilon=1e-3
 
 visual_items='coarse_raycolor gt_image'
@@ -157,18 +157,26 @@ test_color_loss_items='coarse_raycolor ray_miss_coarse_raycolor ray_masked_coars
 bg_color="white" #"0.0,0.0,0.0,1.0,1.0,1.0"
 split="train"
 
+n_threads=20
 PART=pat_taurus
-GPUNUM=1
-NODENUM=2
+GPUNUM=$5
+PROCESSNUM=$6
 agg_type='attention'
+embed_init_type='model'
 progressive_distill=1
+port=$1
 
 cd run
 
-TOOLS="srun --partition=$PART --quotatype=auto --preempt --gres=gpu:${GPUNUM} -n$NODENUM --ntasks-per-node=1 --cpus-per-task=10"
-$TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch --nnodes=$NODENUM --nproc_per_node=$GPUNUM --node_rank \$SLURM_PROCID --master_addr=\$(sinfo -Nh -n \$SLURM_NODELIST | head -n 1 | cut -d ' ' -f 1) --master_port $1 train_ft.py \
+for i in $prob_tiers
+
+do
+
+TOOLS="srun --partition=$PART --quotatype=auto --preempt -n${PROCESSNUM} --gres=gpu:${GPUNUM} --ntasks-per-node=${GPUNUM} --cpus-per-task=5"
+$TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch train_ft.py \
         --progressive_distill ${progressive_distill} \
-        --ddp_train \
+        --embed_init_type ${embed_init_type} \
+        --ddp_train --port ${port} \
         --name $name \
         --scan $scan \
         --scans $scans \
@@ -184,6 +192,7 @@ $TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch --nnodes=$N
         --random_sample $random_sample \
         --random_sample_size $random_sample_size \
         --batch_size $batch_size \
+        --maximum_epoch $maximum_epoch \
         --maximum_step $maximum_step \
         --prob_maximum_step $prob_maximum_step \
         --plr $plr \
@@ -291,3 +300,4 @@ $TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch --nnodes=$N
         --prob_tiers $prob_tiers \
         --query_size $query_size \
         --debug"
+done

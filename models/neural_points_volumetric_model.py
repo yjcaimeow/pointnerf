@@ -5,8 +5,7 @@ from .aggregators.point_aggregators import PointAggregator
 import os
 from .helpers.networks import positional_encoding
 from cprint import *
-#from torch_cluster import knn
-from pytorch3d.ops import knn_points, ball_query
+from pytorch3d.ops import knn_points
 import time
 class NeuralPointsVolumetricModel(BaseRenderingModel):
 
@@ -168,11 +167,6 @@ class NeuralPointsVolumetricModel(BaseRenderingModel):
         self.model_names = ['ray_marching'] if getattr(self, "model_names", None) is None else self.model_names + ['ray_marching']
 
         # parallel
-        if self.opt.gpu_ids:
-            self.net_ray_marching.to(self.device)
-            self.net_ray_marching = torch.nn.DataParallel(
-                self.net_ray_marching, self.opt.gpu_ids)
-
 
     def check_getAggregator(self, opt, **kwargs):
         aggregator = PointAggregator(opt)
@@ -192,8 +186,8 @@ class NeuralPointsVolumetricModel(BaseRenderingModel):
             net = getattr(self, 'net_' + name)
             param_lst = list(net.named_parameters())
 
-            net_params = net_params + [par[1] for par in param_lst if not par[0].startswith("module.neural_points")]
-            neural_params = neural_params + [par[1] for par in param_lst if par[0].startswith("module.neural_points")]
+            net_params = net_params + [par[1] for par in param_lst if not par[0].startswith("neural_points")]
+            neural_params = neural_params + [par[1] for par in param_lst if par[0].startswith("neural_points")]
 
         self.net_params = net_params
         self.neural_params = neural_params
@@ -267,7 +261,7 @@ class NeuralPointsRayMarching(nn.Module):
                                                       dropout=0.0,
                                                       )
             self.perceiver_decoder = PerceiverDecoder(num_latent_channels=opt.light_D, \
-                                                      num_output_query_channels=284, \
+                                                      num_output_query_channels=290, \
                                                       #num_output_query_channels=opt.shading_color_channel_num, \
                                                       num_cross_attention_heads=1,
                                                       dropout=0.0,
@@ -307,13 +301,14 @@ class NeuralPointsRayMarching(nn.Module):
                 sample_loc_loaded=None,
                 ray_valid_loaded=None,
                 decoded_features_loaded=None,
+                vid=None,
                 **kargs):
         output = {}
         # B, channel, 292, 24, 32;      B, 3, 294, 24, 32;     B, 294, 24;     B, 291, 2
         weight = None
         if self.opt.progressive_distill:
             self.neural_points({"pixel_idx": pixel_idx, "camrotc2w": camrotc2w, "campos": campos, "near": near, "far": far,"focal": focal, "h": h, "w": w, "intrinsic": intrinsic,"gt_image":gt_image, "raydir":raydir, "c2w":c2w, \
-                                "local_raydir":local_raydir, "seq_id":seq_id})
+                                "local_raydir":local_raydir, "seq_id":seq_id, "vid":vid})
             ray_valid = ray_valid_loaded
             sample_loc_w = sample_loc_w_loaded
             sample_loc = sample_loc_loaded
@@ -339,6 +334,8 @@ class NeuralPointsRayMarching(nn.Module):
                 dists, assign_index, ref_xyz = knn_points(p1=query_points, p2=self.neural_points.xyz_fov[None, ...], K=self.opt.knn_k, return_nn=True)
                 ref_xyz = ref_xyz.reshape(1, -1, self.opt.knn_k, 3)
                 ref_fea = self.neural_points.points_embeding_fov.squeeze()[assign_index.squeeze()].reshape(-1, self.opt.knn_k, self.neural_points.points_embeding_fov.shape[-1])
+                ref_col = self.neural_points.points_color_fov.squeeze()[assign_index.squeeze()].reshape(-1, self.opt.knn_k, self.neural_points.points_color_fov.shape[-1])
+                ref_dir = self.neural_points.points_dir_fov.squeeze()[assign_index.squeeze()].reshape(-1, self.opt.knn_k, self.neural_points.points_dir_fov.shape[-1])
                 ref_xyz_pers = self.w2pers(ref_xyz.view(-1,3), camrotc2w, campos).reshape(1, -1, self.opt.knn_k, 3)
                 #  torch_cluster knn
                 #assign_index = knn(self.neural_points.xyz_fov.squeeze(), query_points.squeeze().view(-1,3), 8)[1]
@@ -356,7 +353,6 @@ class NeuralPointsRayMarching(nn.Module):
             dists = torch.stack([xdist, ydist, zdist], dim=-1)
             dists = torch.cat([ref_xyz - query_points[..., None, :], dists], dim=-1)
             B, nq, k, _ = dists.shape
-            #B, valid_R, SR, _ = sample_pnt_mask.shape
 
             dists_flat = dists.view(-1, dists.shape[-1])
             dists_flat /= (1.0 if self.opt.dist_xyz_deno == 0. else float(self.opt.dist_xyz_deno * np.linalg.norm(vsize)))
@@ -367,7 +363,7 @@ class NeuralPointsRayMarching(nn.Module):
             # --- memory position encoding for the neighbors ----#
             ref_fea = torch.cat([ref_fea, positional_encoding(ref_fea, self.opt.num_feat_freqs)], dim=-1)
 
-            memory = self.perceiver_encoder(torch.cat((ref_fea, dists_flat.view(nq, k, dists_flat.shape[-1])), dim=-1))
+            memory = self.perceiver_encoder(torch.cat((ref_fea, dists_flat.view(nq, k, dists_flat.shape[-1]), ref_col, ref_dir), dim=-1))
             # --- obtain the feature for sample loc ---#
             if self.opt.progressive_distill:
                 sample_ray_dirs = raydir.reshape(1,-1,1,3).expand(-1, -1, self.opt.SR, -1).contiguous()
@@ -382,7 +378,6 @@ class NeuralPointsRayMarching(nn.Module):
             else:
                 query_pcd_fea, query_pcd_alpha = self.perceiver_decoder(memory, positional_encoding(query_points_local.squeeze(), 6)[:, None,:], tmp_ray_dir)
 
-            #decoded_features = torch.zeros([B*valid_R*SR, 4], dtype=torch.float32, device=ray_valid.device)
             decoded_features = torch.zeros([torch.numel(ray_valid), 4], dtype=torch.float32, device=ray_valid.device)
             decoded_features[ray_valid.view(-1)] = torch.cat([query_pcd_alpha, query_pcd_fea], dim=-1).squeeze()
             decoded_features = decoded_features.reshape(1, -1, self.opt.SR, 4)
@@ -436,12 +431,8 @@ class NeuralPointsRayMarching(nn.Module):
             else:
                 opacity_loss = self.bceloss(opacity, opacity_gt)
                 rgb_loss = self.bceloss(rgb, rgb_gt)
-                #opacity_loss = self.bceloss(opacity, opacity_gt)
-                #rgb_loss = torch.mean(self.bceloss(rgb, rgb_gt), dim=-1, keepdim=True)
             loss = opacity_loss + rgb_loss
-#            print (torch.min(loss).item(), torch.max(loss).item(), torch.mean(loss).item(), '-----loss')
             failed_index = loss > torch.max(loss).item()*self.opt.prob_thresh
-            #failed_index = loss > self.opt.prob_thresh
             failed_sample_loc = query_points.squeeze()[failed_index.squeeze()]
             output['failed_sample_loc'] = failed_sample_loc
             output['loss_alpha'] = torch.mean(opacity_loss)
@@ -458,14 +449,11 @@ class NeuralPointsRayMarching(nn.Module):
             output["weight"] = weight.detach()
             output["blend_weight"] = blend_weight.detach()
             output["conf_coefficient"] = conf_coefficient
-
         return output
 
     def w2pers(self, point_xyz, camrotc2w, campos):
-        #----- torch.Size([105261, 3]) torch.Size([1, 3, 3]) torch.Size([1, 3])
         point_xyz_shift = point_xyz[None, ...] - campos[:, None, :]
         xyz = torch.sum(camrotc2w[:, None, :, :] * point_xyz_shift[:, :, :, None], dim=-2)
-        # print(xyz.shape, (point_xyz_shift[:, None, :] * camrot.T).shape)
         xper = xyz[:, :, 0] / xyz[:, :, 2]
         yper = xyz[:, :, 1] / xyz[:, :, 2]
         return torch.stack([xper, yper, xyz[:, :, 2]], dim=-1)

@@ -192,7 +192,11 @@ def test(model, data_loader, visualizer, opt, bg_info, test_steps=0, gen_vid=Fal
     for i, data in enumerate(data_loader):
         raydir = data['raydir'].clone()
         seq_id = data['seq_id'].item()
+        if seq_id==0:
+            continue
         vid = data['vid'].item()
+        #if vid!=200:
+        #    continue
         vids.append(vid)
         seq_ids.append(seq_id)
         local_raydir = data['local_raydir'].clone()
@@ -253,7 +257,7 @@ def test(model, data_loader, visualizer, opt, bg_info, test_steps=0, gen_vid=Fal
             ray_masks = torch.cat(ray_masks, dim=1)
         pixel_idx=pixel_idx.to(torch.long)
         gt_image = torch.zeros((height*width, 3), dtype=torch.float32)
-        gt_image[edge_mask, :] = tmpgts['gt_image'].clone()
+        #gt_image[edge_mask, :] = tmpgts['gt_image'].clone()
         if 'gt_image' in model.visual_names:
             visuals['gt_image'] = gt_image
         if 'gt_mask' in curr_visuals:
@@ -319,11 +323,11 @@ def test(model, data_loader, visualizer, opt, bg_info, test_steps=0, gen_vid=Fal
             visualizer.print_details("{} loss:{}, PSNR:{}".format("ray_depth_masked_coarse_raycolor", loss, mse2psnr(loss)))
         visualizer.accumulate_losses(acc_dict)
         count+=1
-
+    exit()
     visualizer.print_losses(count)
-    psnr = visualizer.get_psnr(opt.test_color_loss_items[0])
-    psnr_ray_masked = visualizer.get_psnr(opt.test_color_loss_items[-1])
-    visualizer.reset()
+    #psnr = visualizer.get_psnr(opt.test_color_loss_items[0])
+    #psnr_ray_masked = visualizer.get_psnr(opt.test_color_loss_items[-1])
+    #visualizer.reset()
 
     print('--------------------------------Finish Test Rendering--------------------------------')
 
@@ -608,7 +612,13 @@ def main():
     opt = TrainOptions().parse()
     basedir = "/mnt/lustre/caiyingjie/logs/checkpoints/"
     init_distributed_mode(opt, False)
-    cudnn.benchmark = True
+    #if opt.ddp_train:
+    #    local_rank = int(os.environ["LOCAL_RANK"])
+    #    world_size = int(os.environ['WORLD_SIZE'])
+    #    torch.cuda.set_device(local_rank)
+    #    dist.init_process_group(backend="nccl", world_size=world_size, init_method='env://')
+    #    torch.manual_seed(local_rank)
+    #    cudnn.benchmark = True
     local_rank = int(os.environ["LOCAL_RANK"])
     writer=None
     #writer = SummaryWriter(os.path.join(basedir, 'summaries', opt.name)) if local_rank==0 else None
@@ -677,10 +687,14 @@ def main():
                 add_embedding = torch.zeros([0, opt.point_features_dim], device="cuda", dtype=torch.float32)
                 add_color = torch.zeros([0, 3], device="cuda", dtype=torch.float32)
                 add_dir = torch.zeros([0, 3], device="cuda", dtype=torch.float32)
-                files = glob.glob(os.path.join(opt.resume_dir, "*seqid"+str(scan_idx)+'.npz'))
+                files = glob.glob(os.path.join(opt.resume_dir, "*chair*seqid"+str(scan_idx)+'.npz'))
                 for file_name in files:
                     data = np.load(file_name)
                     add_xyz       = torch.cat([add_xyz, torch.as_tensor(data["xyz"]).cuda()], dim=0)
+
+                    add_x, add_y = add_xyz[...,0]-1, add_xyz[...,1]-3
+                    add_xyz = torch.stack([add_x, add_y, add_xyz[...,2]], -1)
+
                     add_embedding = torch.cat([add_embedding, torch.as_tensor(data["embed"]).cuda()],dim=0)
                     add_color = torch.cat([add_color, torch.as_tensor(data["color"]).cuda()],dim=0)
                     add_dir = torch.cat([add_dir, torch.as_tensor(data["dir"]).cuda()],dim=0)
@@ -798,7 +812,7 @@ def main():
     real_start=total_steps
     train_random_sample_size = opt.random_sample_size
     #for epoch in range(epoch_count, opt.niter + opt.niter_decay + 1):
-    if False==True:
+    if True:
         torch.cuda.empty_cache()
         #test_dataset = create_test_dataset(test_opt, opt, total_steps, test_num_step=opt.test_num_step)
         model.opt.is_train = 0
@@ -838,6 +852,32 @@ def main():
                     visualizer.print_losses(total_steps, writer, epoch)
                 visualizer.reset()
 
+            #if local_rank==0 and total_steps == (real_start+40):
+            #    other_states = {
+            #        "best_PSNR": best_PSNR,
+            #        "best_iter": best_iter,
+            #        'epoch_count': epoch,
+            #        'total_steps': total_steps,
+            #        'gap': opt.gap,
+            #    }
+            #    visualizer.print_details('saving model ({}, epoch {}, total_steps {})'.format(opt.name, epoch, total_steps))
+            #    model.save_networks(total_steps, epoch)
+            #if total_steps == (real_start+40):
+            #    torch.cuda.empty_cache()
+            #    model.opt.is_train = 0
+            #    model.opt.no_loss = 1
+            #    with torch.no_grad():
+            #        test_psnr, test_psnr_ray_mask = test(model, test_data_loader, Visualizer(test_opt), test_opt, test_bg_info, test_steps=total_steps, lpips=False, writer=writer, epoch=epoch, height=test_dataset.height, width=test_dataset.width)
+            #    model.opt.no_loss = 0
+            #    model.opt.is_train = 1
+            #    best_iter = total_steps if test_psnr > best_PSNR else best_iter
+            #    best_PSNR = max(test_psnr, best_PSNR)
+            #    best_iter_ray_mask = total_steps if test_psnr_ray_mask > best_PSNR_ray_mask else best_iter_ray_mask
+            #    best_PSNR_ray_mask = max(test_psnr_ray_mask, best_PSNR_ray_mask)
+            #    visualizer.print_details(f"test at iter {total_steps}, PSNR: {test_psnr}, best_PSNR: {best_PSNR}, best_iter: {best_iter}")
+            #    visualizer.print_details(f"test at iter {total_steps}, PSNR_ray_mask: {test_psnr_ray_mask}, best_PSNR_ray_mask: {best_PSNR_ray_mask}, best_iter: {best_iter_ray_mask}")
+            #    exit()
+
             model.train()
         #if local_rank==0:
         #    cprint.warn("epoch training time is {}.".format(time.time()-epoch_start_time))
@@ -853,14 +893,17 @@ def main():
             }
             visualizer.print_details('saving model ({}, epoch {}, total_steps {})'.format(opt.name, epoch, total_steps))
             model.save_networks(total_steps, epoch, other_states)
+        # test during training
         if  epoch!=epoch_count and epoch % opt.test_freq == 0 and total_steps < (opt.maximum_step - 1) and total_steps > 0:
             torch.cuda.empty_cache()
+            #test_dataset = create_test_dataset(test_opt, opt, total_steps, test_num_step=opt.test_num_step)
             model.opt.is_train = 0
             model.opt.no_loss = 1
             with torch.no_grad():
                 test_psnr, test_psnr_ray_mask = test(model, test_data_loader, Visualizer(test_opt), test_opt, test_bg_info, test_steps=total_steps, lpips=False, writer=writer, epoch=epoch, height=test_dataset.height, width=test_dataset.width)
             model.opt.no_loss = 0
             model.opt.is_train = 1
+            #del test_dataset
             best_iter = total_steps if test_psnr > best_PSNR else best_iter
             best_PSNR = max(test_psnr, best_PSNR)
             best_iter_ray_mask = total_steps if test_psnr_ray_mask > best_PSNR_ray_mask else best_iter_ray_mask

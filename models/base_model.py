@@ -2,7 +2,9 @@ import torch
 from torch import nn
 import os
 from .helpers.networks import get_scheduler
-
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+from cprint import *
 
 class BaseModel:
     @staticmethod
@@ -14,11 +16,9 @@ class BaseModel:
 
     def initialize(self, opt):
         self.opt = opt
-        self.gpu_ids = opt.gpu_ids
         self.is_train = opt.is_train
-        self.device = torch.device("cuda")
-        #self.device = torch.device('cuda:{}'.format(self.gpu_ids[0]) if self.
-        #                           gpu_ids else torch.device('cpu'))
+        self.local_rank = int(os.environ["LOCAL_RANK"])
+        self.device = torch.device('cuda:{}'.format(self.local_rank))
         self.save_dir = os.path.join(opt.checkpoints_dir, opt.name)
         torch.backends.cudnn.benchmark = True
 
@@ -28,6 +28,16 @@ class BaseModel:
 
     def set_input(self, input: dict):
         self.input = input
+
+
+    def set_ddp(self):
+        for name in self.model_names:
+            assert isinstance(name, str)
+            net = getattr(self, 'net_{}'.format(name))
+            assert isinstance(net, nn.Module)
+            net = nn.SyncBatchNorm.convert_sync_batchnorm(net.cuda())
+            net = DDP(net, device_ids=[self.local_rank], output_device=self.local_rank, find_unused_parameters=True)
+            setattr(self, 'net_{}'.format(name), net)
 
     def forward(self):
         '''Run the forward pass. Read from self.input, set self.output'''
@@ -83,20 +93,20 @@ class BaseModel:
             ret[name] = getattr(self, 'loss_' + name)
         return ret
 
-    def save_networks(self, epoch, other_states={}, back_gpu=True):
+    def save_networks(self, iteration, epoch, other_states={}, back_gpu=True):
         for name, net in zip(self.model_names, self.get_networks()):
             save_filename = '{}_net_{}.pth'.format(epoch, name)
             save_path = os.path.join(self.save_dir, save_filename)
-
-            try:
-                if isinstance(net, nn.DataParallel):
-                    net = net.module
-                net.cpu()
-                torch.save(net.state_dict(), save_path)
-                if back_gpu:
-                    net.cuda()
-            except Exception as e:
-                print("savenet:", e)
+            torch.save(net.state_dict(), save_path)
+            #try:
+            #    if isinstance(net, nn.DataParallel):
+            #        net = net.module
+            #    net.cpu()
+            #    torch.save(net.state_dict(), save_path)
+            #    if back_gpu:
+            #        net.cuda()
+            #except Exception as e:
+            #    print("savenet:", e)
 
         save_filename = '{}_states.pth'.format(epoch)
         save_path = os.path.join(self.save_dir, save_filename)
@@ -144,6 +154,8 @@ class BaseModel:
     def update_learning_rate(self, **kwargs):
         for scheduler in self.schedulers:
             scheduler.step()
+        if int(os.environ["LOCAL_RANK"])!=0:
+            return
         for i, optim in enumerate(self.optimizers):
             lr = optim.param_groups[0]['lr']
             if "opt" in kwargs:

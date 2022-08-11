@@ -113,8 +113,6 @@ lr_policy="iter_exponential_decay"
 lr_decay_iters=1000000
 lr_decay_exp=0.1
 
-gpu_ids="0"
-
 checkpoints_dir="${nrCheckpoint}/scannet/"
 resume_dir="${nrCheckpoint}/init/dtu_dgt_d012_img0123_conf_agg2_32_dirclr20"
 
@@ -183,7 +181,6 @@ CUDA_VISIBLE_DEVICES=$1 python3 test_ft.py \
         --lr_policy $lr_policy \
         --lr_decay_iters $lr_decay_iters \
         --lr_decay_exp $lr_decay_exp \
-        --gpu_ids $gpu_ids \
         --checkpoints_dir $checkpoints_dir \
         --save_iter_freq $save_iter_freq \
         --niter $niter \

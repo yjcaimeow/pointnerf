@@ -293,7 +293,7 @@ def gen_render_path(c2ws, N_views=30):
 from scipy.interpolate import CubicSpline
 
 #################################################  MVS  helper functions   #####################################
-from kornia.utils import create_meshgrid
+#from kornia.utils import create_meshgrid
 
 
 def homo_warp_nongrid(c2w, w2c, intrinsic, ref_cam_xyz, HD, WD, filter=True, **kwargs):

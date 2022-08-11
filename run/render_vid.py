@@ -83,7 +83,6 @@ def main():
     torch.backends.cudnn.benchmark = True
     opt = TestOptions().parse()
     opt.no_loss = True
-    opt.gpu_ids='0'
 
     if opt.debug:
         torch.autograd.set_detect_anomaly(True)

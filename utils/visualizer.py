@@ -1,6 +1,6 @@
 import numpy as np
 import os
-
+from cprint import *
 from PIL import Image
 import shutil
 from collections import OrderedDict
@@ -66,11 +66,12 @@ class Visualizer:
             image = (image / 255).astype(dtype)
         return image
 
-    def display_current_results(self, visuals, total_steps, opt=None):
+    #def display_current_results(self, visuals, total_steps, opt=None):
+    def display_current_results(self, visuals, seq_id, vid, opt=None):
         for name, img in visuals.items():
             if opt is not None and name in opt.visual_items:
                 img = np.array(img)
-                filename = 'step-{:04d}-{}.png'.format(total_steps, name)
+                filename = 'step-{:04d}-{:04d}-{}.png'.format(seq_id, vid, name)
                 filepath = os.path.join(self.image_dir, filename)
                 save_image(img, filepath)
 
@@ -157,7 +158,7 @@ class Visualizer:
     def get_psnr(self, key):
         return self.acc_losses[key + "_psnr"] / self.acc_iterations
 
-    def print_losses(self, total_steps, writer=None, epoch=None):
+    def print_losses(self, total_steps, writer=None, epoch=None, cost_time=None):
         m = 'End of epoch {} iteration {} \t Number of batches {} \t Time taken: {:.2f}s\n'.format(
             epoch, total_steps, self.acc_iterations, (time.time() - self.start_time))
         m += '[Average Loss] '

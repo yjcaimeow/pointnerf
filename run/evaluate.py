@@ -18,10 +18,7 @@ import torch
 from skimage.metrics import mean_squared_error
 import lpips
 
-
-
 parser = argparse.ArgumentParser(description="compute scores")
-
 parser.add_argument('-i', '--imgFolder', help="The folder that contain output images.")
 parser.add_argument('-g', '--gtFolder', default=None, help="The folder that contain gt images. By default it uses imgFolder")
 parser.add_argument('-o', '--outFolder', default=None, help="The folder that contain output files. By default it uses imgFolder")
@@ -34,7 +31,7 @@ parser.add_argument('-l', '--id_list', nargs='+', default=list(range(999)),  hel
 parser.add_argument('-m', '--metrics', nargs='+', default=["psnr", "ssim", "lpips", "vgglpips"],  help="The list of metrics to compute. By default it computes psnr, ssim and rmse.")
 
 
-def report_metrics(gtFolder, imgFolder, outFolder, metrics, id_list, imgStr="step-%04d-fine_raycolor.png", gtStr="step-%04d-gt_image.png", use_gpu=False, print_info=True, writer=None, iteration=None, epoch=None):
+def report_metrics(gtFolder, imgFolder, outFolder, metrics, seq_id_list, id_list, imgStr="step-%04d-fine_raycolor.png", gtStr="step-%04d-gt_image.png", use_gpu=False, print_info=True, writer=None, iteration=None, epoch=None):
     total ={}
     loss_fn, loss_fn_vgg = None, None
     if print_info:
@@ -47,14 +44,12 @@ def report_metrics(gtFolder, imgFolder, outFolder, metrics, id_list, imgStr="ste
     if "vgglpips" in metrics:
         loss_fn_vgg = lpips.LPIPS(net='vgg', version='0.1') #lpips.LPIPS(net='vgg')
         loss_fn_vgg = loss_fn_vgg.cuda() if use_gpu else loss_fn_vgg
-    for i in id_list:
-
-        img = cv2.imread(imgFolder+"/"+imgStr%i)
-        gt = cv2.imread(gtFolder+"/"+gtStr%i)
+    for k, i in zip(seq_id_list, id_list):
+        img = cv2.imread(imgFolder+"/"+imgStr%(k,i))
+        gt = cv2.imread(gtFolder+"/"+gtStr%(k,i))
         # print("img", imgFolder+"/"+imgStr%i)
         if img is None or gt is None:
             break
-
         img = np.asarray(img, np.float32)/255.0
         gt = np.asarray(gt, np.float32)/255.0
         for key in metrics:
@@ -101,8 +96,6 @@ def report_metrics(gtFolder, imgFolder, outFolder, metrics, id_list, imgStr="ste
         print(outStr)
         with open(outFolder+"/scores.txt", "w") as f:
             f.write(outStr)
-
-
 
 ############################
 if __name__ == '__main__':

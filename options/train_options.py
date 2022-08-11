@@ -50,6 +50,10 @@ class TrainOptions(BaseOptions):
                             type=int,
                             default=None,
                             help='maximum # of training iterations')
+        parser.add_argument('--maximum_epoch',
+                            type=int,
+                            default=None,
+                            help='maximum # of training iterations')
         parser.add_argument('--maximum_step',
                             type=int,
                             default=None,

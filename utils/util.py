@@ -13,8 +13,62 @@ from scipy.spatial.transform import Rotation as R
 from pytorch3d.ops import ball_query
 import itertools
 from cprint import *
+import subprocess
+def setup_for_distributed(is_master):
+    """
+    This function disables printing when not in master process
+    """
+    import builtins as __builtin__
+    builtin_print = __builtin__.print
 
-def add_flour(failed_sample_loc, candidates=None, gap=0.2, radius=0.2, embed=None):
+    def print(*args, **kwargs):
+        force = kwargs.pop('force', False)
+        if is_master or force:
+            builtin_print(*args, **kwargs)
+
+    __builtin__.print = print
+
+def init_distributed_mode(args, verbose=True):
+    cprint.info("MASTER_PORT is {}.".format(str(getattr(args, 'port', '29529'))))
+    if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
+        args.rank = int(os.environ["RANK"])
+        args.world_size = int(os.environ['WORLD_SIZE'])
+        args.gpu = int(os.environ['LOCAL_RANK'])
+        os.environ['MASTER_PORT'] = str(getattr(args, 'port', '29529'))
+    if 'USE_MULTIPLE_JOBS' in os.environ:
+        from init_multinode import init_multinode
+        init_multinode(args)
+    elif 'SLURM_PROCID' in os.environ:
+        args.rank = int(os.environ['SLURM_PROCID'])
+        args.gpu = args.rank % torch.cuda.device_count()
+        args.world_size = int(os.environ['SLURM_NTASKS'])
+        node_list = os.environ['SLURM_NODELIST']
+        num_gpus = torch.cuda.device_count()
+        addr = subprocess.getoutput(
+            f'scontrol show hostname {node_list} | head -n1')
+        os.environ['MASTER_PORT'] = str(getattr(args, 'port', '29529'))
+        os.environ['MASTER_ADDR'] = addr
+        os.environ['WORLD_SIZE'] = str(args.world_size)
+        os.environ['LOCAL_RANK'] = str(args.rank % num_gpus)
+        os.environ['RANK'] = str(args.rank)
+    else:
+        print('Not using distributed mode')
+        args.distributed = False
+        return
+
+    args.distributed = True
+
+    torch.cuda.set_device(args.gpu)
+    args.dist_backend = 'nccl'
+    print('| distributed init (rank {}): {}, gpu {}'.format(
+        args.rank, args.dist_url, args.gpu), flush=True)
+    torch.distributed.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
+                                         world_size=args.world_size, rank=args.rank)
+    torch.distributed.barrier()
+    if verbose:
+        setup_for_distributed(args.rank == 0)
+
+def add_flour(failed_sample_loc, candidates=None, gap=0.2, radius=0.2, embed=None, color=None, dir=None):
     if candidates is None:
         center = torch.tensor([3.7269, 3.4063, 1.2413]).cuda()
         whl = torch.tensor([8.2886, 8.1767, 3.0916]).cuda()
@@ -36,18 +90,22 @@ def add_flour(failed_sample_loc, candidates=None, gap=0.2, radius=0.2, embed=Non
 
         new_candidates = []
         new_embed = []
-#        candidates = torch.cat(list(candidates))
+        new_color, new_dir = [],[]
         for neighbor_pcd in neighbor_pcds:
             pcd = candidates + (neighbor_pcd * gap).reshape(1,3)
             new_embed.append(embed.squeeze())
+            new_color.append(color.squeeze())
+            new_dir.append(dir.squeeze())
             new_candidates.append(pcd)
         candidates = torch.cat(new_candidates)
         embed  = torch.cat(new_embed)
+        color  = torch.cat(new_color)
+        dir  = torch.cat(new_dir)
 
     idx = ball_query(candidates[None,...], failed_sample_loc[None,...], K=1, radius=radius).idx.squeeze() #N*p1*1
     valid_idx = idx>0
-    candidates, embed = candidates[valid_idx], embed[valid_idx]
-    return candidates, embed
+    candidates, embed, color, dir = candidates[valid_idx], embed[valid_idx], color[valid_idx], dir[valid_idx]
+    return candidates, embed, color, dir
     #print (candidates.shape, embed.shape, 'before unique')
     unique_candidates, unique_index = np.unique(candidates.cpu().numpy(), axis=0, return_index=True)
     unique_embed = embed[unique_index]

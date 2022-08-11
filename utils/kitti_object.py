@@ -157,12 +157,14 @@ def get_lidar_in_image_fov(pc_velo, pose, calib, xmin, ymin, xmax, ymax,
 
     if mask is not None:
         src = torch.from_numpy(mask.reshape(-1)).cuda()
-        idx = pts_2d[:,1].long() * 96 + pts_2d[:,0].long()
-        idx = torch.clamp(idx, 0, 6143)
+        #idx = pts_2d[:,1].long() * 96 + pts_2d[:,0].long()
+        #idx = torch.clamp(idx, 0, 6143)
+        idx = pts_2d[:,1].long() * 640 + pts_2d[:,0].long()
+        idx = torch.clamp(idx, 0, 640*480-1)
         mask_flag = src[idx]
 
         fov_inds = (pts_2d[:,0]<xmax) & (pts_2d[:,0]>=xmin) & \
-            (pts_2d[:,1]<ymax) & (pts_2d[:,1]>=ymin) & (mask_flag==0)
+            (pts_2d[:,1]<ymax) & (pts_2d[:,1]>=ymin) & (mask_flag==1)
     else:
         fov_inds = (pts_2d[:,0]<xmax) & (pts_2d[:,0]>=xmin) & \
             (pts_2d[:,1]<ymax) & (pts_2d[:,1]>=ymin)

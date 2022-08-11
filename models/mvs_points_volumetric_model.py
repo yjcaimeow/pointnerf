@@ -9,6 +9,7 @@ import os
 import torch.nn.functional as F
 import time
 from utils import format as fmt
+from cprint import *
 
 
 class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
@@ -16,7 +17,6 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
     def __init__(self,):
         super().__init__()
         self.optimizer, self.neural_point_optimizer, self.output, self.raygen_func, self.render_func, self.blend_func, self.coarse_raycolor, self.gt_image, self.input, self.l1loss, self.l2loss, self.tonemap_func, self.top_ray_miss_ids, self.top_ray_miss_loss, self.loss_ray_masked_coarse_raycolor, self.loss_ray_miss_coarse_raycolor, self.loss_total, self.loss_coarse_raycolor, self.loss_conf_coefficient = None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
-
     #
     @staticmethod
     def modify_commandline_options(parser, is_train=True):
@@ -48,7 +48,6 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
             This assumes network modules have been added to self.model_names
             By default, it uses an adam optimizer for all parameters.
         '''
-
         net_params = []
         neural_params = []
         mvs_params = []
@@ -56,15 +55,13 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
         for name in self.model_names:
             net = getattr(self, 'net_' + name)
             if name == "mvs":
-                # print([[par[0], torch.typename(par[1])] for par in net.named_parameters()])
                 param_lst = list(net.named_parameters())
                 mvs_params = mvs_params + [par[1] for par in param_lst]
             else:
                 param_lst = list(net.named_parameters())
 
-                net_params = net_params + [par[1] for par in param_lst if not par[0].startswith("module.neural_points")]
-                neural_params = neural_params + [par[1] for par in param_lst if par[0].startswith("module.neural_points")]
-
+                net_params = net_params + [par[1] for par in param_lst if not par[0].startswith("neural_points")]
+                neural_params = neural_params + [par[1] for par in param_lst if par[0].startswith("neural_points")]
         self.net_params = net_params
         self.neural_params = neural_params
         self.mvs_params = mvs_params
@@ -87,7 +84,7 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
                                           lr=opt.plr, #/ 5.0,
                                           betas=(0.9, 0.999))
             self.optimizers.append(self.neural_point_optimizer)
-            print("neural_params", [(par[0], par[1].shape, par[1].requires_grad)  for par in param_lst if par[0].startswith("module.neural_points")])
+            print("neural_params", [(par[0], par[1].shape, par[1].requires_grad)  for par in param_lst if par[0].startswith("neural_points")])
         else:
             # When not doing per-scene optimization
             print("no neural points as nn.Parameter")
@@ -96,8 +93,6 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
     def backward(self, iters):
         [optimizer.zero_grad() for optimizer in self.optimizers]
         if self.opt.is_train:
-            # print("self.loss_total", self.ray_masked_coarse_color.grad)
-            # print("self.loss_total", self.loss_total)
             if self.loss_total != 0:
                 self.loss_total.backward()
             else:
@@ -119,7 +114,6 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
     def forward(self):
         if self.opt.mode != 2:
             points_xyz, points_embedding, points_colors, points_dirs, points_conf = self.net_mvs(self.input)
-            # print("volume_feature", volume_feature.shape)
             self.neural_points.set_points(points_xyz, points_embedding, points_color=points_colors, points_dir=points_dirs, points_conf=points_conf, parameter=self.opt.feedforward==0) # if feedforward, no neural points optimization
         self.output = self.run_network_models()
         if "depths_h" in self.input:
@@ -163,25 +157,25 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
         self.top_ray_miss_loss = torch.zeros([self.num_probe + 1], dtype=torch.float32, device=self.device)
         self.top_ray_miss_ids = torch.arange(self.num_probe + 1, dtype=torch.int32, device=self.device)
 
-    def set_points(self, points_xyz, points_embedding, points_color=None, points_dir=None, points_conf=None, Rw2c=None, eulers=None, editing=False):
+    def set_points(self, points_xyz, points_embedding, points_color=None, points_dir=None, points_conf=None, Rw2c=None, eulers=None, editing=False, setup_optimizer=True):
         if not editing:
             self.neural_points.set_points(points_xyz, points_embedding, points_color=points_color, points_dir=points_dir, points_conf=points_conf, parameter=self.opt.feedforward == 0, Rw2c=Rw2c, eulers=eulers)
         else:
             self.neural_points.editing_set_points(points_xyz, points_embedding, points_color=points_color, points_dir=points_dir, points_conf=points_conf, parameter=self.opt.feedforward == 0, Rw2c=Rw2c, eulers=eulers)
-        if self.opt.feedforward == 0 and self.opt.is_train:
+        if self.opt.feedforward == 0 and self.opt.is_train and setup_optimizer:
             self.setup_optimizer(self.opt)
-
 
     def prune_points(self, thresh):
         self.neural_points.prune(thresh)
 
-    def clean_optimizer_scheduler(self):
+    def clean_optimizer_scheduler(self, iteration=None):
         # self.neural_points.querier.clean_up()
         self.optimizers.clear()
         self.schedulers.clear()
         self.neural_params.clear()
         self.mvs_params.clear()
         # self.optimizer.cpu(), self.neural_point_optimizer.cpu()
+        print (iteration, 'optimizers', len(self.optimizers))
         del self.optimizer, self.neural_point_optimizer, self.optimizers, self.schedulers, self.mvs_params, self.neural_params
 
 
@@ -233,8 +227,8 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
         return self.net_mvs.query_embedding(HDWD, cam_xyz, photometric_confidence, img_feats, c2ws, w2cs, intrinsics, cam_vid, pointdir_w=pointdir_w)
 
 
-    def grow_points(self, points_xyz, points_embedding, points_color, points_dir, points_conf):
-        self.neural_points.grow_points(points_xyz, points_embedding, points_color, points_dir, points_conf)
+    def grow_points(self, points_xyz, points_embedding, points_color, points_dir, points_conf, dstdir=None, epoch=None):
+        self.neural_points.grow_points(points_xyz, points_embedding, points_color, points_dir, points_conf, dstdir=dstdir, epoch=epoch)
         # self.neural_points.reset_querier()
         self.setup_optimizer(self.opt)
 
@@ -314,18 +308,28 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
             assert isinstance(name, str)
             load_filename = '{}_net_{}.pth'.format(epoch, name)
             load_path = os.path.join(self.opt.resume_dir, load_filename)
-            print('loading', name, " from ", load_path)
+            cprint.info('loading {} from {}.'.format(name, load_path))
             if not os.path.isfile(load_path):
                 print('cannot load', load_path)
                 continue
             state_dict = torch.load(load_path, map_location='cpu')
-            #state_dict = torch.load(load_path, map_location=self.device)
             if epoch=="best" and name == "ray_marching" and self.opt.default_conf > 0.0 and self.opt.default_conf <= 1.0 and self.neural_points.points_conf is not None:
                 assert "neural_points.points_conf" not in state_dict
-                state_dict["neural_points.points_conf"] = torch.ones_like(self.net_ray_marching.module.neural_points.points_conf) * self.opt.default_conf
-            if isinstance(net, nn.DataParallel):
-                net = net.module
-            net.load_state_dict(state_dict, strict=True)
+                state_dict["neural_points.points_conf"] = torch.ones_like(self.net_ray_marching.neural_points.points_conf) * self.opt.default_conf
+            #cprint.info(net)
+            #net.load_state_dict(state_dict, strict=True)
+            try:
+                net.load_state_dict(state_dict, strict=True)
+                cprint.info("| load model totally. | {}".format(load_path))
+            except:
+                keys=[]
+                for k,v in state_dict.items():
+                    if k.startswith('module.neural_points'):
+                        continue
+                    keys.append(k)
+                new_dict = {k:state_dict[k] for k in keys}
+                net.load_state_dict(new_dict, strict=False)
+                cprint.info("| load model WITHOUT NeuralPoints. | {}".format(load_path))
 
     def test(self, gen_points=False):
         with torch.no_grad():

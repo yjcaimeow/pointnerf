@@ -2,11 +2,11 @@ import os
 import numpy as np
 from numpy import dot
 from math import sqrt
-import pycuda
-import pycuda.autoinit
-from pycuda.compiler import SourceModule
-import pycuda.driver as drv
-import pycuda.gpuarray as gpuarray
+#import pycuda
+#import pycuda.autoinit
+#from pycuda.compiler import SourceModule
+#import pycuda.driver as drv
+#import pycuda.gpuarray as gpuarray
 import matplotlib.pyplot as plt
 import torch
 import pickle
@@ -18,14 +18,14 @@ from data.load_blender import load_blender_data
 # X = torch.cuda.FloatTensor(8)
 
 
-class Holder(pycuda.driver.PointerHolderBase):
-    def __init__(self, t):
-        super(Holder, self).__init__()
-        self.t = t
-        self.gpudata = t.data_ptr()
-
-    def get_pointer(self):
-        return self.t.data_ptr()
+#class Holder(pycuda.driver.PointerHolderBase):
+#    def __init__(self, t):
+#        super(Holder, self).__init__()
+#        self.t = t
+#        self.gpudata = t.data_ptr()
+#
+#    def get_pointer(self):
+#        return self.t.data_ptr()
 
 class lighting_fast_querier():
 
@@ -34,10 +34,7 @@ class lighting_fast_querier():
         print("querier device", device, device.index)
         self.gpu = device.index
         self.opt = opt
-        #drv.init()
-        # self.device = drv.Device(gpu)
-        #self.ctx = drv.Device(self.gpu).make_context()
-        self.claim_occ, self.map_coor2occ, self.fill_occ2pnts, self.mask_raypos, self.get_shadingloc, self.query_along_ray = self.build_cuda()
+        #self.claim_occ, self.map_coor2occ, self.fill_occ2pnts, self.mask_raypos, self.get_shadingloc, self.query_along_ray = self.build_cuda()
         self.inverse = self.opt.inverse
         self.count=0
 
@@ -104,7 +101,7 @@ class lighting_fast_querier():
         y_pers = xyz_c[..., 1] / xyz_c[..., 2]
         return torch.stack([x_pers, y_pers, z_pers], dim=-1)
 
-
+    '''
     def build_cuda(self):
 
         mod = SourceModule(
@@ -724,14 +721,14 @@ def load_pnts(point_path, point_num):
     return point_xyz[:min(len(point_xyz), point_num), :]
 
 
-def np_to_gpuarray(*args):
-    result = []
-    for x in args:
-        if isinstance(x, np.ndarray):
-            result.append(pycuda.gpuarray.to_gpu(x))
-        else:
-            print("trans",x)
-    return result
+#def np_to_gpuarray(*args):
+#    result = []
+#    for x in args:
+#        if isinstance(x, np.ndarray):
+#            result.append(pycuda.gpuarray.to_gpu(x))
+#        else:
+#            print("trans",x)
+#    return result
 
 
 def save_points(xyz, dir, filename):
@@ -849,9 +846,7 @@ def vis_vox(ranges_np, scaled_vsize_np, coor_2_occ_tensor):
 
 def save_queried_points(point_xyz_tensor, point_xyz_pers_tensor, sample_pidx_tensor, pixel_idx_tensor, pixel_idx_cur_tensor, vdim, vsize, ranges):
     B, R, SR, K = sample_pidx_tensor.shape
-    # pixel_inds = torch.as_tensor([3210, 3217,3218,3219,3220, 3221,3222,3223,3224,3225,3226,3227,3228,3229,3230, 3231,3232,3233,3234,3235, 3236,3237,3238,3239,3240], device=sample_pidx_tensor.device, dtype=torch.int64)
     point_inds = sample_pidx_tensor[0, :, :, :]
-    # point_inds = sample_pidx_tensor[0, pixel_inds, :, :]
     mask = point_inds > -1
     point_inds = torch.masked_select(point_inds, mask).to(torch.int64)
     queried_point_xyz_tensor = point_xyz_tensor[0, point_inds, :]
@@ -860,61 +855,5 @@ def save_queried_points(point_xyz_tensor, point_xyz_pers_tensor, sample_pidx_ten
           queried_point_xyz.shape)
     print("pixel_idx_cur_tensor", pixel_idx_cur_tensor.shape)
     render_pixel_mask(pixel_idx_cur_tensor.cpu().numpy(), vdim[0], vdim[1])
-
     render_mask_pers_points(point_xyz_pers_tensor[0, point_inds, :].cpu().numpy(), vsize, ranges, vdim[0], vdim[1])
-
     plt.show()
-
-def load_init_points(scan, data_dir="/home/xharlie/user_space/data/nrData/nerf/nerf_synthetic_colmap"):
-    points_path = os.path.join(data_dir, scan, "colmap_results/dense/fused.ply")
-    # points_path = os.path.join(self.data_dir, self.scan, "exported/pcd_te_1_vs_0.01_jit.ply")
-    assert os.path.exists(points_path)
-    from plyfile import PlyData, PlyElement
-    plydata = PlyData.read(points_path)
-    # plydata (PlyProperty('x', 'double'), PlyProperty('y', 'double'), PlyProperty('z', 'double'), PlyProperty('nx', 'double'), PlyProperty('ny', 'double'), PlyProperty('nz', 'double'), PlyProperty('red', 'uchar'), PlyProperty('green', 'uchar'), PlyProperty('blue', 'uchar'))
-    print("plydata", plydata.elements[0])
-    x,y,z=torch.as_tensor(plydata.elements[0].data["x"].astype(np.float32), device="cuda", dtype=torch.float32), torch.as_tensor(plydata.elements[0].data["y"].astype(np.float32), device="cuda", dtype=torch.float32), torch.as_tensor(plydata.elements[0].data["z"].astype(np.float32), device="cuda", dtype=torch.float32)
-    points_xyz = torch.stack([x,y,z], dim=-1).to(torch.float32)
-    return points_xyz
-
-if __name__ == "__main__":
-    obj = "lego"
-    # point_file = "{}.pkl".format(obj)
-    # point_dir = os.path.expandvars("${nrDataRoot}/nerf/nerf_synthetic_points/")
-    r = 0.36000002589322094
-    ranges = np.array([-1., -1.3, -1.2, 1., 1.3, 1.2], dtype=np.float32)
-    vdim = np.array([400, 400, 400], dtype=np.int32)
-    # vsize = np.array([2 * r / vdim[0], 2 * r / vdim[1], 4. / vdim[2]], dtype=np.float32)
-    vsize = np.array([0.005, 0.005, 0.005], dtype=np.float32)
-    vscale = np.array([2, 2, 2], dtype=np.int32)
-    SR = 24
-    P = 128
-    K = 8
-    NN = 2
-    ray_num = 2048
-    kernel_size = np.array([5, 5, 5], dtype=np.int32)
-    radius_limit = 0  # r / 400 * 5 #r / 400 * 5
-    depth_limit = 0  # 4. / 400 * 1.5 # r / 400 * 2
-    max_o = 500000
-    near_depth, far_depth = 2., 6.
-    shading_count = 400
-
-    xrange = np.arange(0, 800, 1, dtype=np.int32)
-    yrange = np.arange(0, 800, 1, dtype=np.int32)
-    xv, yv = np.meshgrid(xrange, yrange, sparse=False, indexing='ij')
-    inds = np.arange(len(xv.reshape(-1)), dtype=np.int32)
-    np.random.shuffle(inds)
-    inds = inds[:ray_num, ...]
-    pixel_idx = np.stack([xv, yv], axis=-1).reshape(-1, 2)[inds]  # 20000 * 2
-    gpu = 0
-    imgidx = 3
-    split = ["train"]
-
-    if gpu < 0:
-        import pycuda.autoinit
-    else:
-        drv.init()
-        dev1 = drv.Device(gpu)
-        ctx1 = dev1.make_context()
-    try_build(ranges, vsize, vdim, vscale, max_o, P, kernel_size, SR, K, pixel_idx, obj,
-              radius_limit, depth_limit, near_depth, far_depth, shading_count, split=split, imgidx=imgidx, gpu=0, NN=NN)

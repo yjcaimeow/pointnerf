@@ -1,13 +1,17 @@
 #!/bin/bash
 
 nrCheckpoint="../checkpoints"
-nrDataRoot="/mnt/cache/caiyingjie/data"
-name=$1
+#nrDataRoot="s3://caiyingjie"
+nrDataRoot="/mnt/cache/caiyingjie/data/scannet"
+name=$2
 
-resume_iter=best #latest
+resume_iter=latest
 
-data_root="${nrDataRoot}/scannet/scans/"
-scan="scene0006_00"
+data_root="${nrDataRoot}/scans/"
+scan="scene0005_00"
+scans="scene0005_00 "
+#scans="scene0003_00 scene0005_00 scene0006_00 scene0101_00 scene0032_00 scene0034_00 scene0035_00 scene0036_00 scene0039_00"
+#scans="scene0032_00 scene0006_00 "
 
 load_points=2
 feat_grad=1
@@ -106,20 +110,19 @@ random_sample_size=56 # 32 * 32 = 1024
 
 batch_size=1
 
-plr=0.002
+plr=0.02
 lr=0.0005 # 0.0005 #0.00015
 lr_policy="iter_exponential_decay"
 lr_decay_iters=1000000
 lr_decay_exp=0.1
 
-gpu_ids="0"
 
 checkpoints_dir="${nrCheckpoint}/scannet/"
 resume_dir="${nrCheckpoint}/init/dtu_dgt_d012_img0123_conf_agg2_32_dirclr20"
 
 save_iter_freq=10000
 save_point_freq=10000 #301840 #1
-maximum_step=200000 #500000 #250000 #800000
+maximum_step=800000 #500000 #250000 #800000
 
 niter=10000 #1000000
 niter_decay=10000 #250000
@@ -127,16 +130,17 @@ n_threads=2
 
 train_and_test=0 #1
 test_num=10
-test_freq=500 #  #100 #1200 #1200 #30184 #30184 #50000
+test_freq=10000 #  #100 #1200 #1200 #30184 #30184 #50000
 print_freq=40
-test_num_step=1000
+test_num_step=1
 
-prob_freq=10000000000 #10001
-prob_num_step=100
+prob_maximum_step=150002 #500000 #250000 #800000
+prob_freq=2000 #10001
+prob_num_step=4
 prob_kernel_size=" 3 3 3 1 1 1 "
-prob_tiers=" 40000 120000 "
+prob_tiers=" 100 30000 60000 100000 150000 400000"
 prob_mode=0 # 0, n, 1 t, 10 t&n
-prob_thresh=0.7
+prob_thresh=0.9
 prob_mul=0.4
 
 zero_epsilon=1e-3
@@ -147,33 +151,35 @@ zero_one_loss_items='conf_coefficient' #regularize background to be either 0 or 
 zero_one_loss_weights=" 0.0001 "
 sparse_loss_weight=0
 
-color_loss_weights=" 1.0 0.0 0.0 "
-color_loss_items='ray_masked_coarse_raycolor ray_miss_coarse_raycolor coarse_raycolor'
-#color_loss_weights="1.0 1.0 10.0 "
-#color_loss_items='loss_rgb loss_alpha ray_masked_coarse_raycolor '
+#color_loss_weights=" 1.0 0.0 0.0 "
+#color_loss_items='ray_masked_coarse_raycolor ray_miss_coarse_raycolor coarse_raycolor'
+color_loss_weights="0.1 0.1 1.0 "
+color_loss_items='loss_rgb loss_alpha ray_masked_coarse_raycolor '
 test_color_loss_items='coarse_raycolor ray_miss_coarse_raycolor ray_masked_coarse_raycolor'
-
-
 
 bg_color="white" #"0.0,0.0,0.0,1.0,1.0,1.0"
 split="train"
 
-PART=3dv-share
-GPUNUM=1
+PART=pat_taurus
+GPUNUM=3
 NODENUM=1
-JOBNAME=
+agg_type='attention'
+progressive_distill=1
 
 cd run
 
-#for i in $(seq 1 $prob_freq $maximum_step)
+for i in ${prob_tiers}
 
-#do
+do
 
-#CUDA_VISIBLE_DEVICES=$1 python3 train_progressive_distill.py \
-TOOLS="srun --partition=$PART --gres=gpu:${GPUNUM} -n$NODENUM --ntasks-per-node=1"
-$TOOLS --job-name=$JOBNAME sh -c "python train_ft.py \
+TOOLS="srun --partition=$PART --quotatype=auto --preempt --gres=gpu:${GPUNUM} -n$NODENUM --ntasks-per-node=1 --cpus-per-task=4"
+$TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch --nnodes=$NODENUM --nproc_per_node=$GPUNUM --node_rank \$SLURM_PROCID --master_addr=\$(sinfo -Nh -n \$SLURM_NODELIST | head -n 1 | cut -d ' ' -f 1) --master_port $1 train_ft.py \
+        --progressive_distill ${progressive_distill} \
+        --ddp_train \
         --name $name \
         --scan $scan \
+        --scans $scans \
+        --agg_type ${agg_type} \
         --data_root $data_root \
         --dataset_name $dataset_name \
         --model $model \
@@ -186,12 +192,12 @@ $TOOLS --job-name=$JOBNAME sh -c "python train_ft.py \
         --random_sample_size $random_sample_size \
         --batch_size $batch_size \
         --maximum_step $maximum_step \
+        --prob_maximum_step $prob_maximum_step \
         --plr $plr \
         --lr $lr \
         --lr_policy $lr_policy \
         --lr_decay_iters $lr_decay_iters \
         --lr_decay_exp $lr_decay_exp \
-        --gpu_ids $gpu_ids \
         --checkpoints_dir $checkpoints_dir \
         --save_iter_freq $save_iter_freq \
         --niter $niter \
@@ -292,3 +298,4 @@ $TOOLS --job-name=$JOBNAME sh -c "python train_ft.py \
         --prob_tiers $prob_tiers \
         --query_size $query_size \
         --debug"
+done

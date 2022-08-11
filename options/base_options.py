@@ -12,6 +12,25 @@ class BaseOptions:
                             type=str,
                             required=True,
                             help='name of the experiment')
+        parser.add_argument('--all_frames',
+                            action='store_true',
+                            help='indicate a debug run')
+        parser.add_argument('--ddp_train',
+                            action='store_true',
+                            help='indicate a debug run')
+
+        parser.add_argument('--port',
+                type=int,
+                default=16666,
+                help='local_rank init value')
+        parser.add_argument('--local_rank',
+                type=int,
+                default=0,
+                help='local_rank init value')
+        parser.add_argument('--world_size', default=1, type=int,
+                                                 help='number of distributed processes')
+        parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
+
         parser.add_argument(
             '--verbose',
             action='store_true',
@@ -21,6 +40,11 @@ class BaseOptions:
             action='store_true',
             help='suffix the experiment name with current timestamp')
         #================================ model aggregator========================#
+        parser.add_argument(
+            '--embed_init_type',
+            type=str,
+            default="random",
+            help='name of dataset, determine which dataset class to use')
         parser.add_argument(
             '--loss_type',
             type=str,
@@ -60,8 +84,8 @@ class BaseOptions:
         parser.add_argument('--gap', type=float, default=0.2, help='name of the experiment')
         parser.add_argument('--knn_k', type=int, default=8, help='name of the experiment')
         parser.add_argument('--light_N', type=int, default=8, help='name of the experiment')
-        parser.add_argument('--light_D', type=int, default=284, help='name of the experiment')
-        parser.add_argument('--light_C', type=int, default=284, help='name of the experiment')
+        parser.add_argument('--light_D', type=int, default=290, help='name of the experiment')
+        parser.add_argument('--light_C', type=int, default=290, help='name of the experiment')
         parser.add_argument('--light_num_self_attention_heads', type=int, default=2, help='name of the experiment')
         parser.add_argument('--light_num_self_attention_blocks', type=int, default=2, help='name of the experiment')
         parser.add_argument('--light_num_self_attention_layers_per_block', type=int, default=2, help='name of the experiment')
@@ -120,10 +144,6 @@ class BaseOptions:
                             type=int,
                             default=0,
                             help='feed batches in order without shuffling')
-        parser.add_argument('--gpu_ids',
-                            type=str,
-                            default='0',
-                            help='gpu ids: e.g. 0  0,1,2, 0,2. use -1 for CPU')
         parser.add_argument('--checkpoints_dir',
                             type=str,
                             default='./checkpoints',
@@ -214,13 +234,6 @@ class BaseOptions:
             opt.name = opt.name + '_' + now
 
         self.print_and_save_options(opt)
-
-        str_ids = opt.gpu_ids.split(',')
-        opt.gpu_ids = [
-            int(x) for x in opt.gpu_ids.split(',') if x.strip() and int(x) >= 0
-        ]
-#        if len(opt.gpu_ids) > 0:
-#            torch.cuda.set_device(opt.gpu_ids[0])
 
         self.opt = opt
         return self.opt

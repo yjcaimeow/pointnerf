@@ -220,7 +220,7 @@ class PointAggregator(torch.nn.Module):
 
         super(PointAggregator, self).__init__()
         self.act = getattr(nn, opt.act_type, None)
-        print("opt.act_type!!!!!!!!!", opt.act_type)
+        #print("opt.act_type!!!!!!!!!", opt.act_type)
         self.point_hyper_dim=opt.point_hyper_dim if opt.point_hyper_dim < opt.point_features_dim else opt.point_features_dim
 
         block_init_lst = []

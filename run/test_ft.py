@@ -318,8 +318,6 @@ def main():
     torch.backends.cudnn.benchmark = True
 
     opt = TrainOptions().parse()
-    cur_device = torch.device('cuda:{}'.format(opt.gpu_ids[0]) if opt.
-                              gpu_ids else torch.device('cpu'))
     print("opt.color_loss_items ", opt.color_loss_items)
 
     if opt.debug:

@@ -36,10 +36,10 @@ def get_option_setter(dataset_name):
     return dataset_class.modify_commandline_options
 
 
-def create_dataset(opt):
+def create_dataset(opt, frame_ids=None):
     dataset = find_dataset_class_by_name(opt.dataset_name)
     instance = dataset()
-    instance.initialize(opt)
+    instance.initialize(opt, frame_ids)
     print("dataset [{}] was created".format(instance.name()))
     return instance
 

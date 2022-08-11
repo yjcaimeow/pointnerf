@@ -526,7 +526,8 @@ def ray_march(ray_dist,
     point_color = render_func(ray_features)
 
     # we are essentially predicting predict 1 - e^-sigma
-    sigma = ray_features[..., 0] * ray_valid.float()
+    #sigma = ray_features[..., 0] * ray_valid.float()
+    sigma = ray_features[..., 0]
     opacity = 1 - torch.exp(-sigma * ray_dist)
 
     opacity_gt = None
