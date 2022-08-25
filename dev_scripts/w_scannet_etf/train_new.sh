@@ -157,8 +157,8 @@ bg_color="white" #"0.0,0.0,0.0,1.0,1.0,1.0"
 split="train"
 
 n_threads=20
-PART=pat_taurus
-GPUNUM=4
+PART=openxdlab3
+GPUNUM=2
 PROCESSNUM=8
 embed_init_type='model'
 
@@ -179,7 +179,7 @@ port=$1
 
 cd run
 
-TOOLS="srun --partition=$PART --quotatype=reserved --preempt -n${PROCESSNUM} --gres=gpu:${GPUNUM} --ntasks-per-node=${GPUNUM} --cpus-per-task=4"
+TOOLS="srun --partition=$PART --quotatype=auto --preempt -n${PROCESSNUM} --gres=gpu:${GPUNUM} --ntasks-per-node=${GPUNUM} --cpus-per-task=4"
 $TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch train.py \
         --progressive_distill ${progressive_distill} \
         --embed_init_type ${embed_init_type} \
