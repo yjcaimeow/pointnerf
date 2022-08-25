@@ -131,12 +131,11 @@ test_num_step=1
 
 prob_maximum_step=150002 #500000 #250000 #800000
 prob_freq=100
-prob_num_step=2
+prob_num_step=4
 prob_kernel_size=" 3 3 3 1 1 1 "
 
 maximum_epoch=2000 #500000 #250000 #800000
-#prob_tiers="300 600 900 1200 1500"
-prob_tiers=$4
+prob_tiers="300 600 900 1200 1500"
 test_freq=100 #  #100 #1200 #1200 #30184 #30184 #50000
 save_iter_freq=100
 
@@ -157,25 +156,27 @@ test_color_loss_items='coarse_raycolor ray_miss_coarse_raycolor ray_masked_coars
 bg_color="white" #"0.0,0.0,0.0,1.0,1.0,1.0"
 split="train"
 
-n_threads=$7
+n_threads=20
 PART=pat_taurus
-GPUNUM=$5
-PROCESSNUM=$6
-agg_type='attention'
+GPUNUM=1
+PROCESSNUM=1
+NODENUM=1
+agg_type='mlp'
 embed_init_type='model'
-progressive_distill=1
+progressive_distill=0
+ddp_init_type='old'
+k_type='voxel'
+
 port=$1
 
 cd run
 
-for i in $prob_tiers
-
-do
-
-TOOLS="srun --partition=$PART --quotatype=auto --preempt -n${PROCESSNUM} --gres=gpu:${GPUNUM} --ntasks-per-node=${GPUNUM} --cpus-per-task=5"
-$TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch train_ft.py \
+TOOLS="srun --partition=$PART --quotatype=auto --preempt --gres=gpu:${GPUNUM} -n$NODENUM --ntasks-per-node=1 --cpus-per-task=8"
+$TOOLS --job-name=$JOBNAME sh -c "CUDA_LAUNCH_BLOCKING=1 python -m torch.distributed.launch --nnodes=$NODENUM --nproc_per_node=$GPUNUM --node_rank \$SLURM_PROCID --master_addr=\$(sinfo -Nh -n \$SLURM_NODELIST | head -n 1 | cut -d ' ' -f 1) --master_port $1 test_yjcai.py \
         --progressive_distill ${progressive_distill} \
         --embed_init_type ${embed_init_type} \
+        --ddp_init_type ${ddp_init_type} \
+        --k_type ${k_type} \
         --ddp_train --port ${port} \
         --name $name \
         --scan $scan \
@@ -300,4 +301,3 @@ $TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch train_ft.py
         --prob_tiers $prob_tiers \
         --query_size $query_size \
         --debug"
-done

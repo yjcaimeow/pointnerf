@@ -532,7 +532,8 @@ def ray_march(ray_dist,
 
     opacity_gt = None
     if pseudo_gt is not None:
-        opacity_gt = 1 - torch.exp(-(pseudo_gt[..., 0] * ray_valid.float()) * ray_dist)
+        opacity_gt = 1 - torch.exp(-(pseudo_gt[..., 0]) * ray_dist)
+        #opacity_gt = 1 - torch.exp(-(pseudo_gt[..., 0] * ray_valid.float()) * ray_dist)
 
     # cumprod exclusive
     acc_transmission = torch.cumprod(1. - opacity + 1e-10, dim=-1)

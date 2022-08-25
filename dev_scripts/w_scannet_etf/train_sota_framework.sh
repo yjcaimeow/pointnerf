@@ -137,8 +137,8 @@ prob_kernel_size=" 3 3 3 1 1 1 "
 maximum_epoch=2000 #500000 #250000 #800000
 #prob_tiers="300 600 900 1200 1500"
 prob_tiers=$4
-test_freq=100 #  #100 #1200 #1200 #30184 #30184 #50000
-save_iter_freq=100
+test_freq=50 #  #100 #1200 #1200 #30184 #30184 #50000
+save_iter_freq=50
 
 prob_mode=0 # 0, n, 1 t, 10 t&n
 prob_thresh=0.9
@@ -163,17 +163,17 @@ GPUNUM=$5
 PROCESSNUM=$6
 agg_type='attention'
 embed_init_type='model'
-progressive_distill=1
+progressive_distill=0
 port=$1
 
 cd run
 
-for i in $prob_tiers
+#for i in $prob_tiers
 
-do
+#do
 
 TOOLS="srun --partition=$PART --quotatype=auto --preempt -n${PROCESSNUM} --gres=gpu:${GPUNUM} --ntasks-per-node=${GPUNUM} --cpus-per-task=5"
-$TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch train_ft.py \
+$TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch train_ft_without_new.py \
         --progressive_distill ${progressive_distill} \
         --embed_init_type ${embed_init_type} \
         --ddp_train --port ${port} \
@@ -300,4 +300,3 @@ $TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch train_ft.py
         --prob_tiers $prob_tiers \
         --query_size $query_size \
         --debug"
-done

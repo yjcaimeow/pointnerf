@@ -99,7 +99,7 @@ class TrainOptions(BaseOptions):
                             help='saving frequency')
         parser.add_argument('--prob_mode',
                             type=int,
-                            default=0,
+                            default=1,
                             help='saving frequency')
         parser.add_argument('--prob_top',
                             type=int,

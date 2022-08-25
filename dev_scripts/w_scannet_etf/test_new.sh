@@ -1,15 +1,14 @@
 #!/bin/bash
-
 nrCheckpoint="../checkpoints"
 nrDataRoot="/mnt/cache/caiyingjie/data/scannet"
 name=$2
 resume_iter=latest
 
 data_root="${nrDataRoot}/scans/"
-scan="scene0032_00"
-scans=$3
+scan="scene0006_00"
+scans="scene0101_00 scene0006_00 "
 #scans="scene0003_00 scene0005_00 scene0006_00 scene0101_00 scene0032_00 scene0034_00 scene0035_00 scene0036_00 scene0039_00"
-#scans="scene0032_00 scene0006_00 "
+#scans=$3
 
 load_points=2
 feat_grad=1
@@ -52,7 +51,7 @@ depth_limit_scale=0
 vscale=" 2 2 2 "
 kernel_size=" 3 3 3 "
 query_size=" 3 3 3 "
-vsize=" 0.008 0.008 0.008 " #" 0.005 0.005 0.005 "
+vsize=" 0.064 0.064 0.064 " #" 0.005 0.005 0.005 "
 wcoord_query=1
 z_depth_dim=400
 max_o=610000
@@ -114,7 +113,6 @@ lr_policy="iter_exponential_decay"
 lr_decay_iters=1000000
 lr_decay_exp=0.1
 
-
 checkpoints_dir="${nrCheckpoint}/scannet/"
 resume_dir="${nrCheckpoint}/init/dtu_dgt_d012_img0123_conf_agg2_32_dirclr20"
 
@@ -135,17 +133,17 @@ prob_num_step=2
 prob_kernel_size=" 3 3 3 1 1 1 "
 
 maximum_epoch=2000 #500000 #250000 #800000
-#prob_tiers="300 600 900 1200 1500"
-prob_tiers=$4
-test_freq=100 #  #100 #1200 #1200 #30184 #30184 #50000
-save_iter_freq=100
+prob_tiers="100 200 300 2000"
+#prob_tiers="30 90 150 210 270 2000"
+test_freq=50 #  #100 #1200 #1200 #30184 #30184 #50000
+save_iter_freq=50
 
-prob_mode=0 # 0, n, 1 t, 10 t&n
+prob_mode=1 # 0, n, 1 t, 10 t&n
 prob_thresh=0.9
 prob_mul=0.4
 zero_epsilon=1e-3
 
-visual_items='coarse_raycolor gt_image'
+visual_items='coarse_raycolor gt_image sample_loc sample_loc_w ray_valid decoded_features'
 zero_one_loss_items='conf_coefficient' #regularize background to be either 0 or 1
 zero_one_loss_weights=" 0.0001 "
 sparse_loss_weight=0
@@ -157,25 +155,28 @@ test_color_loss_items='coarse_raycolor ray_miss_coarse_raycolor ray_masked_coars
 bg_color="white" #"0.0,0.0,0.0,1.0,1.0,1.0"
 split="train"
 
-n_threads=$7
+n_threads=20
 PART=pat_taurus
-GPUNUM=$5
-PROCESSNUM=$6
-agg_type='attention'
+GPUNUM=1
+PROCESSNUM=1
 embed_init_type='model'
+
 progressive_distill=1
+agg_type='attention'
+k_type='knn'
+ddp_init_type='new'
+
 port=$1
 
 cd run
 
-for i in $prob_tiers
-
-do
-
 TOOLS="srun --partition=$PART --quotatype=auto --preempt -n${PROCESSNUM} --gres=gpu:${GPUNUM} --ntasks-per-node=${GPUNUM} --cpus-per-task=5"
-$TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch train_ft.py \
+$TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch train.py \
         --progressive_distill ${progressive_distill} \
+        --only_render \
         --embed_init_type ${embed_init_type} \
+        --ddp_init_type ${ddp_init_type} \
+        --k_type ${k_type} \
         --ddp_train --port ${port} \
         --name $name \
         --scan $scan \
@@ -300,4 +301,3 @@ $TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch train_ft.py
         --prob_tiers $prob_tiers \
         --query_size $query_size \
         --debug"
-done

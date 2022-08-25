@@ -18,7 +18,14 @@ class BaseModel:
         self.opt = opt
         self.is_train = opt.is_train
         self.local_rank = int(os.environ["LOCAL_RANK"])
-        self.device = torch.device('cuda:{}'.format(self.local_rank))
+        torch.cuda.set_device(self.local_rank)
+
+        if self.opt.ddp_train:
+            self.device = torch.device('cuda:{}'.format(self.local_rank))
+        else:
+            self.device = torch.device('cuda:{}'.format(0))
+            cprint.err(self.device)
+
         self.save_dir = os.path.join(opt.checkpoints_dir, opt.name)
         torch.backends.cudnn.benchmark = True
 
@@ -35,8 +42,11 @@ class BaseModel:
             assert isinstance(name, str)
             net = getattr(self, 'net_{}'.format(name))
             assert isinstance(net, nn.Module)
-            net = nn.SyncBatchNorm.convert_sync_batchnorm(net.cuda())
-            net = DDP(net, device_ids=[self.local_rank], output_device=self.local_rank, find_unused_parameters=True)
+            if self.opt.ddp_train:
+                net = nn.SyncBatchNorm.convert_sync_batchnorm(net.to(self.device))
+                net = DDP(net, device_ids=[self.local_rank], output_device=self.local_rank, find_unused_parameters=True)
+            else:
+                net = torch.nn.DataParallel(net.cuda())
             setattr(self, 'net_{}'.format(name), net)
 
     def forward(self):
@@ -76,12 +86,16 @@ class BaseModel:
             ret.append(net)
         return ret
 
-    def get_current_visuals(self, data=None):
+    def get_current_visuals(self, data=None, no_extra=False):
         ret = {}
         for name in self.visual_names:
             assert isinstance(name, str)
             if name not in ["gt_image_ray_masked", "ray_depth_masked_gt_image", "ray_depth_masked_coarse_raycolor", "ray_masked_coarse_raycolor"]:
-                ret[name] = getattr(self, name)
+                if no_extra:
+                    if name not in ["sample_loc", "sample_loc_w", "ray_valid", "decoded_features"]:
+                        ret[name] = getattr(self, name)
+                else:
+                    ret[name] = getattr(self, name)
         if "coarse_raycolor" not in self.visual_names:
             ret["coarse_raycolor"] = getattr(self, "coarse_raycolor")
         return ret

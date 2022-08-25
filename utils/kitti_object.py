@@ -14,6 +14,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(BASE_DIR)
 sys.path.append(os.path.join(ROOT_DIR, 'mayavi'))
 import torch
+from cprint import *
+import time
 try:
     raw_input          # Python 2
 except NameError:
@@ -139,6 +141,7 @@ def trans_world2nerf(global_frame_points, pose_nerf2world):
 #    import pdb; pdb.set_trace()
     pose_world2nerf = torch.linalg.inv(pose_nerf2world)
     #point_at_nerf_frame = pose_world2nerf[:3,:3] @ global_frame_points.T + pose_world2nerf[:3, 3][:, None]
+    #cprint.err("pose_world2nerf.device{}, {}, {}".format(pose_world2nerf.device, global_frame_points.device, pose_world2nerf.device))
     point_at_nerf_frame = pose_world2nerf[:3,:3].double() @ global_frame_points.T.double() + pose_world2nerf[:3, 3][:, None].double()
     return point_at_nerf_frame.T.float()
 

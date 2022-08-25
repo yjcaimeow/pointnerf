@@ -66,13 +66,15 @@ class Visualizer:
             image = (image / 255).astype(dtype)
         return image
 
-    #def display_current_results(self, visuals, total_steps, opt=None):
-    def display_current_results(self, visuals, seq_id, vid, opt=None):
+    def display_current_results(self, visuals, seq_id, vid, opt=None, dirname=None):
         for name, img in visuals.items():
             if opt is not None and name in opt.visual_items:
                 img = np.array(img)
                 filename = 'step-{:04d}-{:04d}-{}.png'.format(seq_id, vid, name)
-                filepath = os.path.join(self.image_dir, filename)
+                if dirname is not None:
+                    filepath = os.path.join(dirname, filename)
+                else:
+                    filepath = os.path.join(self.image_dir, filename)
                 save_image(img, filepath)
 
     def display_video(self, visual_lst, total_steps):

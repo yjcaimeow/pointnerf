@@ -404,9 +404,9 @@ class BaseRenderingModel(BaseModel):
         for key, item in self.output.items():
             if key in self.visual_names:
                 setattr(self, key, item)
-        if "coarse_raycolor" not in self.visual_names:
-            key = "coarse_raycolor"
-            setattr(self, key, self.output[key])
+        #if "coarse_raycolor" not in self.visual_names:
+        #    key = "coarse_raycolor"
+        #    setattr(self, key, self.output[key])
 
     def check_setup_renderFunc_channels(self, opt):
         ''' Find render functions;

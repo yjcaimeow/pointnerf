@@ -6,7 +6,6 @@ import cv2
 import torch
 from torchvision import transforms as T
 import torchvision.transforms.functional as F
-import time
 import json
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
@@ -21,12 +20,6 @@ from os.path import join
 from .data_utils import get_dtu_raydir
 from plyfile import PlyData, PlyElement
 import io
-
-#from petrel_client.client import Client
-#conf_path = '~/petreloss.conf'
-#client = Client(conf_path)
-#import logging
-#LOG = logging.getLogger('petrel_client.test')
 
 FLIP_Z = np.asarray([
     [1,0,0],
@@ -85,7 +78,6 @@ class ScannetFtDataset(BaseDataset):
     def initialize(self, opt, frame_ids=None, img_wh=[1296, 968], downSample=1.0, max_len=-1, norm_w2c=None, norm_c2w=None):
         self.opt = opt
         self.data_dir = opt.data_root
-        self.scan = opt.scan
         self.scans = opt.scans
         self.split = opt.split
 
@@ -113,7 +105,6 @@ class ScannetFtDataset(BaseDataset):
 
         self.id_list, self.id_list_name, self.image_paths, self.seq_ids = [],[],[],[]
         self.intrinsics, self.depth_intrinsics = [],[]
-
         for seq_id, scan in enumerate(self.scans):
             seq_len = self.build_init_metas(scan)
             self.seq_ids.extend([seq_id]*seq_len)
@@ -266,59 +257,30 @@ class ScannetFtDataset(BaseDataset):
     def variance_of_laplacian(self, image):
         return cv2.Laplacian(image, cv2.CV_64F).var()
 
-    def detect_blurry(self, list):
-        blur_score = []
-        for id in list:
-            image_path = os.path.join(self.data_dir, self.scan, "exported/color/{}.jpg".format(id))
-            image = cv2.imread(image_path)
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            fm = self.variance_of_laplacian(gray)
-            blur_score.append(fm)
-        blur_score = np.asarray(blur_score)
-        ids = blur_score.argsort()[:150]
-        allind = np.asarray(list)
-        print("most blurry images", allind[ids])
-
-    def remove_blurry(self, list):
-        blur_path = os.path.join(self.data_dir, self.scan, "exported/blur_list.txt")
-        if os.path.exists(blur_path):
-            blur_lst = []
-            with open(blur_path) as f:
-                lines = f.readlines()
-                print("blur files", len(lines))
-                for line in lines:
-                    info = line.strip()
-                    blur_lst.append(int(info))
-            return [i for i in list if i not in blur_lst]
-        else:
-            print("no blur list detected, use all training frames!")
-            return list
-
-
     def build_init_metas(self, scan=None):
         colordir = os.path.join(self.data_dir, scan, "exported/color")
-        colordir = os.path.join("/mnt/cache/caiyingjie/data/scannet/scans", scan, "exported/color")
         image_paths = [f for f in os.listdir(colordir) if os.path.isfile(os.path.join(colordir, f))]
 
         image_paths = [os.path.join(self.data_dir, scan, "exported/color/{}.jpg".format(i)) for i in range(len(image_paths))]
         self.image_paths.extend(image_paths)
         all_id_list = self.filter_valid_id(list(range(len(image_paths))), scan)
+        self.all_id_list=all_id_list #### hahahahaha
         step=5
         train_id_list = all_id_list[::step]
 #        test_id_list = [all_id_list[i] for i in range(len(all_id_list)) if (i % step) !=0] if self.opt.test_num_step != 1 else all_id_list
 
         test_id_list = [all_id_list[i] for i in range(len(all_id_list)) if (i % step) !=0] if self.opt.test_num_step != 0 else all_id_list
         test_id_list = test_id_list[::50]
+        #train_id_list = test_id_list #DEBUG
 
-        if self.opt.all_frames:
+        if self.opt.all_frames or self.opt.only_render:
             id_list = train_id_list+test_id_list
         else:
             id_list = train_id_list if self.split=="train" or self.split=="diy" else test_id_list
-        if int(os.environ["LOCAL_RANK"])==0:
-            cprint.info("scane {}'s data info.".format(scan))
-            print("all_id_list",len(all_id_list))
-            print("test_id_list",len(test_id_list))
-            print("train_id_list",len(train_id_list))
+        cprint.warn("scane {}'s data info.".format(scan))
+        print("all_id_list",len(all_id_list))
+        print("test_id_list",len(test_id_list))
+        print("train_id_list",len(train_id_list))
         self.id_list.extend(id_list)
         self.id_list_name.extend([scan]*len(id_list))
         return len(id_list)
@@ -391,44 +353,6 @@ class ScannetFtDataset(BaseDataset):
     def define_transforms(self):
         self.transform = T.ToTensor()
 
-
-    def parse_mesh(self):
-        points_path = os.path.join(self.data_dir, self.scan, "exported/pcd.ply")
-        mesh_path = os.path.join(self.data_dir, self.scan, self.scan + "_vh_clean.ply")
-        plydata = PlyData.read(mesh_path)
-        print("plydata 0", plydata.elements[0], plydata.elements[0].data["blue"].dtype)
-
-        vertices = np.empty(len( plydata.elements[0].data["blue"]), dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4'), ('red', 'u1'), ('green', 'u1'), ('blue', 'u1')])
-        vertices['x'] = plydata.elements[0].data["x"].astype('f4')
-        vertices['y'] = plydata.elements[0].data["y"].astype('f4')
-        vertices['z'] = plydata.elements[0].data["z"].astype('f4')
-        vertices['red'] = plydata.elements[0].data["red"].astype('u1')
-        vertices['green'] = plydata.elements[0].data["green"].astype('u1')
-        vertices['blue'] = plydata.elements[0].data["blue"].astype('u1')
-
-        # save as ply
-        ply = PlyData([PlyElement.describe(vertices, 'vertex')], text=False)
-        ply.write(points_path)
-
-
-    def load_init_points(self):
-        points_path = os.path.join(self.data_dir, self.scan, "exported/pcd.ply")
-        # points_path = os.path.join(self.data_dir, self.scan, "exported/pcd_te_1_vs_0.01_jit.ply")
-        if not os.path.exists(points_path):
-            if not os.path.exists(points_path):
-                self.parse_mesh()
-        plydata = PlyData.read(points_path)
-        # plydata (PlyProperty('x', 'double'), PlyProperty('y', 'double'), PlyProperty('z', 'double'), PlyProperty('nx', 'double'), PlyProperty('ny', 'double'), PlyProperty('nz', 'double'), PlyProperty('red', 'uchar'), PlyProperty('green', 'uchar'), PlyProperty('blue', 'uchar'))
-        x,y,z=torch.as_tensor(plydata.elements[0].data["x"].astype(np.float32), device="cuda", dtype=torch.float32), torch.as_tensor(plydata.elements[0].data["y"].astype(np.float32), device="cuda", dtype=torch.float32), torch.as_tensor(plydata.elements[0].data["z"].astype(np.float32), device="cuda", dtype=torch.float32)
-        points_xyz = torch.stack([x,y,z], dim=-1)
-        if self.opt.ranges[0] > -99.0:
-            ranges = torch.as_tensor(self.opt.ranges, device=points_xyz.device, dtype=torch.float32)
-            mask = torch.prod(torch.logical_and(points_xyz >= ranges[None, :3], points_xyz <= ranges[None, 3:]), dim=-1) > 0
-            points_xyz = points_xyz[mask]
-        # np.savetxt(os.path.join(self.data_dir, self.scan, "exported/pcd.txt"), points_xyz.cpu().numpy(), delimiter=";")
-
-        return points_xyz
-
     def read_depth(self, filepath):
         depth_im = cv2.imread(filepath, -1).astype(np.float32)
         depth_im /= 1000
@@ -437,29 +361,30 @@ class ScannetFtDataset(BaseDataset):
         return depth_im
 
 
-    def load_init_depth_points(self, device="cuda", vox_res=0):
+    def load_init_depth_points(self, device="cuda", vox_res=0, scan=None, seq_id=None):
+        file_path = os.path.join(self.data_dir, scan, scan+'_voxelized_pcd.npy')
+        if os.path.exists(file_path):
+            print(file_path, '------- exist------')
+            world_xyz_all = torch.from_numpy(np.load(file_path)).to(device)
+            return world_xyz_all
+
         py, px = torch.meshgrid(
             torch.arange(0, 480, dtype=torch.float32, device=device),
             torch.arange(0, 640, dtype=torch.float32, device=device))
-        # print("max py, px", torch.max(py), torch.max(px))
-        # print("min py, px", torch.min(py), torch.min(px))
         img_xy = torch.stack([px, py], dim=-1) # [480, 640, 2]
-        # print(img_xy.shape, img_xy[:10])
-        reverse_intrin = torch.inverse(torch.as_tensor(self.depth_intrinsic)).t().to(device)
+        reverse_intrin = torch.inverse(torch.as_tensor(self.depth_intrinsics[seq_id])).t().to(device)
         world_xyz_all = torch.zeros([0,3], device=device, dtype=torch.float32)
         for i in tqdm(range(len(self.all_id_list))):
             id = self.all_id_list[i]
-            c2w = torch.as_tensor(np.loadtxt(os.path.join(self.data_dir, self.scan, "exported/pose", "{}.txt".format(id))).astype(np.float32), device=device, dtype=torch.float32)  #@ self.blender2opencv
+            c2w = torch.as_tensor(np.loadtxt(os.path.join(self.data_dir, scan, "exported/pose", "{}.txt".format(id))).astype(np.float32), device=device, dtype=torch.float32)  #@ self.blender2opencv
             # 480, 640, 1
-            depth = torch.as_tensor(self.read_depth(os.path.join(self.data_dir, self.scan, "exported/depth/{}.png".format(id))), device=device)[..., None]
+            depth = torch.as_tensor(self.read_depth(os.path.join(self.data_dir, scan, "exported/depth/{}.png".format(id))), device=device)[..., None]
             cam_xy =  img_xy * depth
             cam_xyz = torch.cat([cam_xy, depth], dim=-1)
             cam_xyz = cam_xyz @ reverse_intrin
             cam_xyz = cam_xyz[cam_xyz[...,2] > 0,:]
             cam_xyz = torch.cat([cam_xyz, torch.ones_like(cam_xyz[...,:1])], dim=-1)
             world_xyz = (cam_xyz.view(-1,4) @ c2w.t())[...,:3]
-            # print("cam_xyz", torch.min(cam_xyz, dim=-2)[0], torch.max(cam_xyz, dim=-2)[0])
-            # print("world_xyz", world_xyz.shape) #, torch.min(world_xyz.view(-1,3), dim=-2)[0], torch.max(world_xyz.view(-1,3), dim=-2)[0])
             if vox_res > 0:
                 world_xyz = mvs_utils.construct_vox_points_xyz(world_xyz, vox_res)
                 # print("world_xyz", world_xyz.shape)
@@ -570,7 +495,6 @@ class ScannetFtDataset(BaseDataset):
         seq_id = self.seq_ids[id]
         item["seq_id"] = seq_id
         image_path = os.path.join(self.data_dir, scan, "exported/color/{}.jpg".format(vid))
-        # print("vid",vid)
         if self.opt.load_type == 'ceph':
             img_bytes = client.get(image_path)
             assert(img_bytes is not None)
@@ -595,7 +519,6 @@ class ScannetFtDataset(BaseDataset):
         campos = c2w[0:3, 3]
 
         item["intrinsic"] = intrinsic
-        # item["intrinsic"] = sample['intrinsics'][0, ...]
         item["campos"] = torch.from_numpy(campos).float()
         item["c2w"] = torch.from_numpy(c2w).float()
         item["camrotc2w"] = torch.from_numpy(camrot).float() # @ FLIP_Z
@@ -668,7 +591,7 @@ class ScannetFtDataset(BaseDataset):
                     item['bg_color'] = torch.FloatTensor([0, 0, 0])
             else:
                 item['bg_color'] = torch.FloatTensor(self.bg_color)
-        if self.opt.progressive_distill and npz:
+        if self.opt.progressive_distill and npz and self.opt.pseudo_gt_load_type!='online':
             data = np.load(os.path.join(self.opt.data_root, scan, 'pseudo_gt', 'results_pointnerf_'+str(scan)+'_'+str(vid)+'.npz'))
             item["sample_loc_loaded"] = data['sample_loc'][py.astype(np.int32), px.astype(np.int32),...].reshape(-1, self.opt.SR, 3)
             item["sample_loc_w_loaded"]=data["sample_loc_w"][py.astype(np.int32), px.astype(np.int32),...].reshape(-1, self.opt.SR, 3)
@@ -677,10 +600,8 @@ class ScannetFtDataset(BaseDataset):
         return item
 
     def get_candicates(self, scan=None):
-        if scan==None:
-            scan = self.scan
         file_path = os.path.join(self.opt.data_root, scan, 'init_candidates.npy')
-        cprint.info(file_path)
+        cprint.warn(file_path)
         if self.opt.load_type=='ceph':
             body = client.get(file_path, update_cache=True)
             if not body:
@@ -712,7 +633,7 @@ class ScannetFtDataset(BaseDataset):
             idx_flag[idx>0]=1
         filtered_candidates = candidates[idx_flag>0]
         np.save(file_path, filtered_candidates.cpu().numpy())
-        cprint.info('scene {} INIT candidates points.....{}.'.format(scan, filtered_candidates.shape))
+        cprint.warn('scene {} INIT candidates points.....{}.'.format(scan, filtered_candidates.shape))
         exit()
         return filtered_candidates
 

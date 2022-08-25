@@ -4,7 +4,6 @@ from models import find_model_class_by_name
 from data import find_dataset_class_by_name
 import torch
 
-
 class BaseOptions:
     def initialize(self, parser: argparse.ArgumentParser):
         #================================ global ================================#
@@ -12,6 +11,9 @@ class BaseOptions:
                             type=str,
                             required=True,
                             help='name of the experiment')
+        parser.add_argument('--only_render',
+                            action='store_true',
+                            help='indicate a debug run')
         parser.add_argument('--all_frames',
                             action='store_true',
                             help='indicate a debug run')
@@ -41,9 +43,19 @@ class BaseOptions:
             help='suffix the experiment name with current timestamp')
         #================================ model aggregator========================#
         parser.add_argument(
+            '--pseudo_visual_items',
+            type=str,
+            default="aaaaa",
+            help='name of dataset, determine which dataset class to use')
+        parser.add_argument(
+            '--pseudo_gt_load_type',
+            type=str,
+            default="online",
+            help='name of dataset, determine which dataset class to use')
+        parser.add_argument(
             '--embed_init_type',
             type=str,
-            default="random",
+            default="model",
             help='name of dataset, determine which dataset class to use')
         parser.add_argument(
             '--loss_type',
@@ -61,9 +73,14 @@ class BaseOptions:
             default="normal",
             help='name of dataset, determine which dataset class to use')
         parser.add_argument(
+                        '--ddp_init_type',
+                        type=str,
+                        default="old",
+                        help='name of dataset, determine which dataset class to use')
+        parser.add_argument(
                         '--k_type',
                         type=str,
-                        default="knn",
+                        default="voxel",
                         help='name of dataset, determine which dataset class to use')
         parser.add_argument('--scans',
                             type=str,
@@ -80,7 +97,19 @@ class BaseOptions:
             type=str,
             default="mlp",
             help='name of dataset, determine which dataset class to use')
+        parser.add_argument(
+            '--load_init_pcd_type',
+            type=str,
+            default="grid",
+            help='name of dataset, determine which dataset class to use')
+        parser.add_argument(
+            '--ray_dir_type',
+            type=str,
+            default="global",
+            help='name of dataset, determine which dataset class to use')
+        parser.add_argument('--all_sample_loc',type=int,default=0,help='1 for render_only dataset')
         parser.add_argument('--progressive_distill',type=int,default=0,help='1 for render_only dataset')
+        parser.add_argument('--embed_color',type=int,default=0,help='1 for render_only dataset')
         parser.add_argument('--gap', type=float, default=0.2, help='name of the experiment')
         parser.add_argument('--knn_k', type=int, default=8, help='name of the experiment')
         parser.add_argument('--light_N', type=int, default=8, help='name of the experiment')
@@ -216,6 +245,7 @@ class BaseOptions:
         #     expr_dir = os.path.join(opt.checkpoints_dir, opt.name)
         # else:
         #     expr_dir = os.path.join(opt.resume_dir, opt.name)
+        opt.name = opt.name[20:]
         expr_dir = os.path.join(opt.checkpoints_dir, opt.name)
 
         os.makedirs(expr_dir, exist_ok=True)

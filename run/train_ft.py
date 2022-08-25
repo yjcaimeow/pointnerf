@@ -610,6 +610,7 @@ def main():
     init_distributed_mode(opt, False)
     cudnn.benchmark = True
     local_rank = int(os.environ["LOCAL_RANK"])
+    world_size = int(os.environ['WORLD_SIZE'])
     writer=None
     #writer = SummaryWriter(os.path.join(basedir, 'summaries', opt.name)) if local_rank==0 else None
     visualizer = Visualizer(opt)

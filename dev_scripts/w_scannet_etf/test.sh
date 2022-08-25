@@ -1,13 +1,14 @@
 #!/bin/bash
 
 nrCheckpoint="../checkpoints"
-nrDataRoot="../data_src"
-name='scene006_trained'
+nrDataRoot="/mnt/cache/caiyingjie/data"
+name="scene0032_00"
 
 resume_iter=best #latest
 
 data_root="${nrDataRoot}/scannet/scans/"
-scan="scene0006_00"
+scan="scene0032_00"
+scans="scene0032_00 "
 
 load_points=2
 feat_grad=1
@@ -140,8 +141,8 @@ prob_mul=0.4
 
 zero_epsilon=1e-3
 
-#visual_items='coarse_raycolor gt_image'
-visual_items='coarse_raycolor gt_image sample_loc sample_loc_w ray_valid decoded_features ray_dist '
+visual_items='coarse_raycolor gt_image'
+#visual_items='coarse_raycolor gt_image sample_loc sample_loc_w ray_valid decoded_features '
 zero_one_loss_items='conf_coefficient' #regularize background to be either 0 or 1
 zero_one_loss_weights=" 0.0001 "
 sparse_loss_weight=0
@@ -150,135 +151,135 @@ color_loss_weights=" 1.0 0.0 0.0 "
 color_loss_items='ray_masked_coarse_raycolor ray_miss_coarse_raycolor coarse_raycolor'
 test_color_loss_items='coarse_raycolor ray_miss_coarse_raycolor ray_masked_coarse_raycolor'
 
-
-
 bg_color="white" #"0.0,0.0,0.0,1.0,1.0,1.0"
 split="train"
 
+PART=pat_taurus
+GPUNUM=1
+NODENUM=1
+
 cd run
 
-#for i in $(seq 1 $prob_freq $maximum_step)
-
-#do
-
-CUDA_VISIBLE_DEVICES=$1 python3 test_ft.py \
-        --name $name \
-        --scan $scan \
-        --data_root $data_root \
-        --dataset_name $dataset_name \
-        --model $model \
-        --which_render_func $which_render_func \
-        --which_blend_func $which_blend_func \
-        --out_channels $out_channels \
-        --num_pos_freqs $num_pos_freqs \
-        --num_viewdir_freqs $num_viewdir_freqs \
-        --random_sample $random_sample \
-        --random_sample_size $random_sample_size \
-        --batch_size $batch_size \
-        --maximum_step $maximum_step \
-        --plr $plr \
-        --lr $lr \
-        --lr_policy $lr_policy \
-        --lr_decay_iters $lr_decay_iters \
-        --lr_decay_exp $lr_decay_exp \
-        --checkpoints_dir $checkpoints_dir \
-        --save_iter_freq $save_iter_freq \
-        --niter $niter \
-        --niter_decay $niter_decay \
-        --n_threads $n_threads \
-        --pin_data_in_memory $pin_data_in_memory \
-        --train_and_test $train_and_test \
-        --test_num $test_num \
-        --test_freq $test_freq \
-        --test_num_step $test_num_step \
-        --test_color_loss_items $test_color_loss_items \
-        --prob_freq $prob_freq \
-        --prob_num_step $prob_num_step \
-        --print_freq $print_freq \
-        --bg_color $bg_color \
-        --split $split \
-        --which_ray_generation $which_ray_generation \
-        --near_plane $near_plane \
-        --far_plane $far_plane \
-        --dir_norm $dir_norm \
-        --which_tonemap_func $which_tonemap_func \
-        --load_points $load_points \
-        --resume_dir $resume_dir \
-        --resume_iter $resume_iter \
-        --feature_init_method $feature_init_method \
-        --agg_axis_weight $agg_axis_weight \
-        --agg_distance_kernel $agg_distance_kernel \
-        --radius_limit_scale $radius_limit_scale \
-        --depth_limit_scale $depth_limit_scale  \
-        --vscale $vscale    \
-        --kernel_size $kernel_size  \
-        --SR $SR  \
-        --K $K  \
-        --P $P \
-        --NN $NN \
-        --agg_feat_xyz_mode $agg_feat_xyz_mode \
-        --agg_alpha_xyz_mode $agg_alpha_xyz_mode \
-        --agg_color_xyz_mode $agg_color_xyz_mode  \
-        --save_point_freq $save_point_freq  \
-        --raydist_mode_unit $raydist_mode_unit  \
-        --agg_dist_pers $agg_dist_pers \
-        --agg_intrp_order $agg_intrp_order \
-        --shading_feature_mlp_layer0 $shading_feature_mlp_layer0 \
-        --shading_feature_mlp_layer1 $shading_feature_mlp_layer1 \
-        --shading_feature_mlp_layer2 $shading_feature_mlp_layer2 \
-        --shading_feature_mlp_layer3 $shading_feature_mlp_layer3 \
-        --shading_feature_num $shading_feature_num \
-        --dist_xyz_freq $dist_xyz_freq \
-        --shpnt_jitter $shpnt_jitter \
-        --shading_alpha_mlp_layer $shading_alpha_mlp_layer \
-        --shading_color_mlp_layer $shading_color_mlp_layer \
-        --which_agg_model $which_agg_model \
-        --color_loss_weights $color_loss_weights \
-        --num_feat_freqs $num_feat_freqs \
-        --dist_xyz_deno $dist_xyz_deno \
-        --apply_pnt_mask $apply_pnt_mask \
-        --point_features_dim $point_features_dim \
-        --color_loss_items $color_loss_items \
-        --feedforward $feedforward \
-        --trgt_id $trgt_id \
-        --depth_vid $depth_vid \
-        --ref_vid $ref_vid \
-        --manual_depth_view $manual_depth_view \
-        --pre_d_est $pre_d_est \
-        --depth_occ $depth_occ \
-        --manual_std_depth $manual_std_depth \
-        --visual_items $visual_items \
-        --appr_feature_str0 $appr_feature_str0 \
-        --init_view_num $init_view_num \
-        --feat_grad $feat_grad \
-        --conf_grad $conf_grad \
-        --dir_grad $dir_grad \
-        --color_grad $color_grad \
-        --depth_conf_thresh $depth_conf_thresh \
-        --bgmodel $bgmodel \
-        --vox_res $vox_res \
-        --act_type $act_type \
-        --geo_cnsst_num $geo_cnsst_num \
-        --point_conf_mode $point_conf_mode \
-        --point_dir_mode $point_dir_mode \
-        --point_color_mode $point_color_mode \
-        --normview $normview \
-        --prune_thresh $prune_thresh \
-        --prune_iter $prune_iter \
-        --sparse_loss_weight $sparse_loss_weight \
-        --zero_one_loss_items $zero_one_loss_items \
-        --zero_one_loss_weights $zero_one_loss_weights \
-        --default_conf $default_conf \
-        --edge_filter $edge_filter \
-        --vsize $vsize \
-        --wcoord_query $wcoord_query \
-        --ranges $ranges \
-        --z_depth_dim $z_depth_dim \
-        --max_o $max_o \
-        --prob_thresh $prob_thresh \
-        --prob_mul $prob_mul \
-        --prob_kernel_size $prob_kernel_size \
-        --prob_tiers $prob_tiers \
-        --query_size $query_size \
-        --debug
-#done
+#srun --partition=pat_taurus --gres=gpu:1 --quotatype=auto --job-name=tb_ft python test_ft.py --name ${name} \
+TOOLS="srun --partition=$PART --quotatype=auto --preempt --gres=gpu:${GPUNUM} -n$NODENUM --ntasks-per-node=1 --cpus-per-task=8"
+$TOOLS --job-name=$JOBNAME sh -c "CUDA_LAUNCH_BLOCKING=1 python -m torch.distributed.launch --nnodes=$NODENUM --nproc_per_node=$GPUNUM --node_rank \$SLURM_PROCID --master_addr=\$(sinfo -Nh -n \$SLURM_NODELIST | head -n 1 | cut -d ' ' -f 1) --master_port $1 test_ft.py \
+    --name ${name} \
+    --scan $scan \
+    --scans $scans \
+    --data_root $data_root \
+    --dataset_name $dataset_name \
+    --model $model \
+    --which_render_func $which_render_func \
+    --which_blend_func $which_blend_func \
+    --out_channels $out_channels \
+    --num_pos_freqs $num_pos_freqs \
+    --num_viewdir_freqs $num_viewdir_freqs \
+    --random_sample $random_sample \
+    --random_sample_size $random_sample_size \
+    --batch_size $batch_size \
+    --maximum_step $maximum_step \
+    --plr $plr \
+    --lr $lr \
+    --lr_policy $lr_policy \
+    --lr_decay_iters $lr_decay_iters \
+    --lr_decay_exp $lr_decay_exp \
+    --checkpoints_dir $checkpoints_dir \
+    --save_iter_freq $save_iter_freq \
+    --niter $niter \
+    --niter_decay $niter_decay \
+    --n_threads $n_threads \
+    --pin_data_in_memory $pin_data_in_memory \
+    --train_and_test $train_and_test \
+    --test_num $test_num \
+    --test_freq $test_freq \
+    --test_num_step $test_num_step \
+    --test_color_loss_items $test_color_loss_items \
+    --prob_freq $prob_freq \
+    --prob_num_step $prob_num_step \
+    --print_freq $print_freq \
+    --bg_color $bg_color \
+    --split $split \
+    --which_ray_generation $which_ray_generation \
+    --near_plane $near_plane \
+    --far_plane $far_plane \
+    --dir_norm $dir_norm \
+    --which_tonemap_func $which_tonemap_func \
+    --load_points $load_points \
+    --resume_dir $resume_dir \
+    --resume_iter $resume_iter \
+    --feature_init_method $feature_init_method \
+    --agg_axis_weight $agg_axis_weight \
+    --agg_distance_kernel $agg_distance_kernel \
+    --radius_limit_scale $radius_limit_scale \
+    --depth_limit_scale $depth_limit_scale  \
+    --vscale $vscale    \
+    --kernel_size $kernel_size  \
+    --SR $SR  \
+    --K $K  \
+    --P $P \
+    --NN $NN \
+    --agg_feat_xyz_mode $agg_feat_xyz_mode \
+    --agg_alpha_xyz_mode $agg_alpha_xyz_mode \
+    --agg_color_xyz_mode $agg_color_xyz_mode  \
+    --save_point_freq $save_point_freq  \
+    --raydist_mode_unit $raydist_mode_unit  \
+    --agg_dist_pers $agg_dist_pers \
+    --agg_intrp_order $agg_intrp_order \
+    --shading_feature_mlp_layer0 $shading_feature_mlp_layer0 \
+    --shading_feature_mlp_layer1 $shading_feature_mlp_layer1 \
+    --shading_feature_mlp_layer2 $shading_feature_mlp_layer2 \
+    --shading_feature_mlp_layer3 $shading_feature_mlp_layer3 \
+    --shading_feature_num $shading_feature_num \
+    --dist_xyz_freq $dist_xyz_freq \
+    --shpnt_jitter $shpnt_jitter \
+    --shading_alpha_mlp_layer $shading_alpha_mlp_layer \
+    --shading_color_mlp_layer $shading_color_mlp_layer \
+    --which_agg_model $which_agg_model \
+    --color_loss_weights $color_loss_weights \
+    --num_feat_freqs $num_feat_freqs \
+    --dist_xyz_deno $dist_xyz_deno \
+    --apply_pnt_mask $apply_pnt_mask \
+    --point_features_dim $point_features_dim \
+    --color_loss_items $color_loss_items \
+    --feedforward $feedforward \
+    --trgt_id $trgt_id \
+    --depth_vid $depth_vid \
+    --ref_vid $ref_vid \
+    --manual_depth_view $manual_depth_view \
+    --pre_d_est $pre_d_est \
+    --depth_occ $depth_occ \
+    --manual_std_depth $manual_std_depth \
+    --visual_items $visual_items \
+    --appr_feature_str0 $appr_feature_str0 \
+    --init_view_num $init_view_num \
+    --feat_grad $feat_grad \
+    --conf_grad $conf_grad \
+    --dir_grad $dir_grad \
+    --color_grad $color_grad \
+    --depth_conf_thresh $depth_conf_thresh \
+    --bgmodel $bgmodel \
+    --vox_res $vox_res \
+    --act_type $act_type \
+    --geo_cnsst_num $geo_cnsst_num \
+    --point_conf_mode $point_conf_mode \
+    --point_dir_mode $point_dir_mode \
+    --point_color_mode $point_color_mode \
+    --normview $normview \
+    --prune_thresh $prune_thresh \
+    --prune_iter $prune_iter \
+    --sparse_loss_weight $sparse_loss_weight \
+    --zero_one_loss_items $zero_one_loss_items \
+    --zero_one_loss_weights $zero_one_loss_weights \
+    --default_conf $default_conf \
+    --edge_filter $edge_filter \
+    --vsize $vsize \
+    --wcoord_query $wcoord_query \
+    --ranges $ranges \
+    --z_depth_dim $z_depth_dim \
+    --max_o $max_o \
+    --prob_thresh $prob_thresh \
+    --prob_mul $prob_mul \
+    --prob_kernel_size $prob_kernel_size \
+    --prob_tiers $prob_tiers \
+    --query_size $query_size \
+    --debug"
