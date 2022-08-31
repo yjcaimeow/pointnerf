@@ -522,18 +522,24 @@ def ray_march(ray_dist,
     # blend_weight: N x Rays x Samples x 1
     # background_transmission: N x Rays x 1
 
+    if ray_features is None:
+        opacity_gt = None
+        if pseudo_gt is not None:
+            opacity_gt = 1 - torch.exp(-(pseudo_gt[..., 0] * ray_valid.float()) * ray_dist)
+        opacity = torch.zeros_like(opacity_gt)
+        return opacity[...,0:3], None, opacity, None, None, None, None, opacity_gt
 
     point_color = render_func(ray_features)
 
     # we are essentially predicting predict 1 - e^-sigma
-    #sigma = ray_features[..., 0] * ray_valid.float()
-    sigma = ray_features[..., 0]
+    sigma = ray_features[..., 0] * ray_valid.float()
+    #sigma = ray_features[..., 0]
     opacity = 1 - torch.exp(-sigma * ray_dist)
 
     opacity_gt = None
     if pseudo_gt is not None:
-        opacity_gt = 1 - torch.exp(-(pseudo_gt[..., 0]) * ray_dist)
-        #opacity_gt = 1 - torch.exp(-(pseudo_gt[..., 0] * ray_valid.float()) * ray_dist)
+        #opacity_gt = 1 - torch.exp(-(pseudo_gt[..., 0]) * ray_dist)
+        opacity_gt = 1 - torch.exp(-(pseudo_gt[..., 0] * ray_valid.float()) * ray_dist)
 
     # cumprod exclusive
     acc_transmission = torch.cumprod(1. - opacity + 1e-10, dim=-1)

@@ -76,7 +76,38 @@ def hash_indices(indices):
 
     return ids
 
-def zy_add_flour(failed_sample_loc, candidates=None, gap=0.2, radius=0.2, embed=None, color=None, dir=None, explicit_create_pcd=True):
+def new_add_flour(failed_sample_loc, candidates=None, gap=0.2, radius=0.2, embed=None, color=None, dir=None, explicit_create_pcd=True, version=2, chunk=1000000):
+
+    remained_indices_all = []
+    for i in range(0, len(failed_sample_loc), chunk):
+        locs = failed_sample_loc[i:i+chunk] / gap
+        indices = torch.floor(locs).int()
+        N, _ = indices.shape
+        directions = torch.tensor([[1,1,1],[1,1,0],[1,0,1],[0,1,1],[0,0,1],[0,1,0],[1,0,0],[0,0,0]]).cuda() # 8x3
+
+        expanded_indices = indices[:, None, :] + directions[None, :, :]
+        expanded_indices = expanded_indices.reshape(N*8, 3)
+
+        remained_indices, inverse_indices = torch.unique(expanded_indices, dim=0, sorted=False, return_inverse=True)
+        remained_indices_all.append(remained_indices)
+    expanded_indices = torch.cat(remained_indices_all)
+    cprint.warn("===== concatenate expanded_indices shape =====".format(expanded_indices.shape))
+    remained_indices, inverse_indices = torch.unique(expanded_indices, dim=0, sorted=False, return_inverse=True)
+
+    new_pcds = remained_indices * gap
+
+    if embed==None:
+        return new_pcds, embed, color, dir
+    else:
+        cprint.warn('| embed from FATHER.')
+        _, assign_index, _ = knn_points(p1=new_pcds[None, ...], p2=candidates[None,...], K=1, return_nn=False)
+        embed = embed.squeeze(0)[assign_index.squeeze()]
+        color = color.squeeze(0)[assign_index.squeeze()]
+        dir = dir.squeeze(0)[assign_index.squeeze()]
+
+    return new_pcds, embed, color, dir
+
+def zy_add_flour(failed_sample_loc, candidates=None, gap=0.2, radius=0.2, embed=None, color=None, dir=None, explicit_create_pcd=True, version=2, chunk=1000000):
 
     locs = failed_sample_loc / gap
     indices = torch.floor(locs).int()
@@ -85,19 +116,32 @@ def zy_add_flour(failed_sample_loc, candidates=None, gap=0.2, radius=0.2, embed=
     expanded_indices = indices[:, None, :] + directions[None, :, :]
     expanded_indices = expanded_indices.reshape(N*8, 3)
 
-    remained_indices = batchify_hash(expanded_indices)
-    #hash_values = hash_indices(expanded_indices)
-    #output, inverse_indices = torch.unique(hash_values, sorted=False, return_inverse=True)
-    #inverse_indices = inverse_indices[:output.shape[0]]
+    if version==2:
+        remained_indices_all = []
+        for i in range(0, expanded_indices.shape[0], chunk):
+            remained_indices, inverse_indices = torch.unique(expanded_indices[i:i+chunk], dim=0, sorted=False, return_inverse=True)
+            remained_indices_all.append(remained_indices)
+        expanded_indices = torch.cat(remained_indices_all)
+        cprint.warn("===== concatenate expanded_indices shape =====".format(expanded_indices.shape))
+        remained_indices, inverse_indices = torch.unique(expanded_indices, dim=0, sorted=False, return_inverse=True)
+    else:
+        #### THE HASH UNIQUE HAS BUG
+        remained_indices = batchify_hash(expanded_indices)
 
-    #remained_indices = expanded_indices[inverse_indices, :]
+        #hash_values = hash_indices(expanded_indices)
+        #output, inverse_indices = torch.unique(hash_values, sorted=False, return_inverse=True)
+        #inverse_indices = inverse_indices[:output.shape[0]]
+        #remained_indices = expanded_indices[inverse_indices, :]
 
     new_pcds = remained_indices * gap
 
-    _, assign_index, _ = knn_points(p1=new_pcds[None, ...], p2=candidates[None,...], K=1, return_nn=False)
-    embed = embed.squeeze(0)[assign_index.squeeze()]
-    color = color.squeeze(0)[assign_index.squeeze()]
-    dir = dir.squeeze(0)[assign_index.squeeze()]
+    if embed==None:
+        return new_pcds, embed, color, dir
+    else:
+        _, assign_index, _ = knn_points(p1=new_pcds[None, ...], p2=candidates[None,...], K=1, return_nn=False)
+        embed = embed.squeeze(0)[assign_index.squeeze()]
+        color = color.squeeze(0)[assign_index.squeeze()]
+        dir = dir.squeeze(0)[assign_index.squeeze()]
 
     return new_pcds, embed, color, dir
 
@@ -161,9 +205,13 @@ def add_flour(failed_sample_loc, candidates=None, gap=0.2, radius=0.2, embed=Non
     if candidates is None:
         ##===========================================###
         ## totally create in the whole space, not use ##
-        center = torch.tensor([3.7269, 3.4063, 1.2413]).cuda()
-        whl = torch.tensor([8.2886, 8.1767, 3.0916]).cuda()
-        range_min,range_max = center-whl/2, center+whl/2
+        #center = torch.tensor([3.7269, 3.4063, 1.2413]).cuda()
+        #whl = torch.tensor([8.2886, 8.1767, 3.0916]).cuda()
+        #range_min,range_max = center-whl/2, center+whl/2
+
+        range_min, range_max = torch.min(failed_sample_loc, dim=0)[0], torch.max(failed_sample_loc, dim=0)[0]
+        #print("===== range_min ====", range_min)
+        #print("===== range_max ====", range_max)
 
         xs = torch.arange(range_min[0], range_max[0], gap, device='cuda')
         ys = torch.arange(range_min[1], range_max[1], gap, device='cuda')
@@ -197,7 +245,13 @@ def add_flour(failed_sample_loc, candidates=None, gap=0.2, radius=0.2, embed=Non
 
     idx = ball_query(candidates[None,...], failed_sample_loc[None,...], K=1, radius=radius).idx.squeeze() #N*p1*1
     valid_idx = idx>0
-    candidates, embed, color, dir = candidates[valid_idx], embed[valid_idx], color[valid_idx], dir[valid_idx]
+
+    if embed==None:
+        candidates = candidates[valid_idx]
+        pcd_num = len(candidates)
+        embed, color, dir = torch.zeros((pcd_num, 32)).cuda(), torch.zeros((pcd_num, 3)).cuda(), torch.zeros((pcd_num, 3)).cuda()
+    else:
+        candidates, embed, color, dir = candidates[valid_idx], embed[valid_idx], color[valid_idx], dir[valid_idx]
     return candidates, embed, color, dir
     #print (candidates.shape, embed.shape, 'before unique')
     unique_candidates, unique_index = np.unique(candidates.cpu().numpy(), axis=0, return_index=True)

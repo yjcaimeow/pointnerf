@@ -109,7 +109,7 @@ class BaseModel:
 
     def save_networks(self, iteration, epoch, other_states={}, back_gpu=True):
         for name, net in zip(self.model_names, self.get_networks()):
-            save_filename = '{}_net_{}.pth'.format(epoch, name)
+            save_filename = '{}_{}_net_{}.pth'.format(epoch, os.getpid(), name)
             save_path = os.path.join(self.save_dir, save_filename)
             torch.save(net.state_dict(), save_path)
             #try:
@@ -122,7 +122,7 @@ class BaseModel:
             #except Exception as e:
             #    print("savenet:", e)
 
-        save_filename = '{}_states.pth'.format(epoch)
+        save_filename = '{}_{}_states.pth'.format(epoch, os.getpid())
         save_path = os.path.join(self.save_dir, save_filename)
         torch.save(other_states, save_path)
 

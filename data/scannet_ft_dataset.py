@@ -265,15 +265,19 @@ class ScannetFtDataset(BaseDataset):
         self.image_paths.extend(image_paths)
         all_id_list = self.filter_valid_id(list(range(len(image_paths))), scan)
         self.all_id_list=all_id_list #### hahahahaha
-        step=5
-        train_id_list = all_id_list[::step]
-#        test_id_list = [all_id_list[i] for i in range(len(all_id_list)) if (i % step) !=0] if self.opt.test_num_step != 1 else all_id_list
 
-        test_id_list = [all_id_list[i] for i in range(len(all_id_list)) if (i % step) !=0] if self.opt.test_num_step != 0 else all_id_list
-        test_id_list = test_id_list[::50]
+        if len(self.all_id_list) > 2900 and 1==2:
+            train_id_list = [self.all_id_list[i] for i in range(len(self.all_id_list)) if (((i % 100) > 19) and ((i % 100) < 81 or (i//100+1)*100>=len(self.all_id_list)))]
+            test_id_list = self.all_id_list[::100]
+        else:
+            step=5
+            train_id_list = all_id_list[::step]
+            test_id_list = [all_id_list[i] for i in range(len(all_id_list)) if (i % step) !=0] if self.opt.test_num_step != 0 else all_id_list
+            test_id_list = test_id_list[::50]
+
         #train_id_list = test_id_list #DEBUG
 
-        if self.opt.all_frames or self.opt.only_render:
+        if self.opt.all_frames:
             id_list = train_id_list+test_id_list
         else:
             id_list = train_id_list if self.split=="train" or self.split=="diy" else test_id_list

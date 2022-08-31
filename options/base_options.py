@@ -3,13 +3,22 @@ import os
 from models import find_model_class_by_name
 from data import find_dataset_class_by_name
 import torch
+import yaml
 
 class BaseOptions:
     def initialize(self, parser: argparse.ArgumentParser):
         #================================ global ================================#
+        parser.add_argument(
+                '-c',
+                '--config_yaml',
+                default=
+                './configs/train.yaml',
+                type=str,
+                metavar='FILE',
+                help='YAML config file specifying default arguments')
         parser.add_argument('--name',
                             type=str,
-                            required=True,
+                            default='exp',
                             help='name of the experiment')
         parser.add_argument('--only_render',
                             action='store_true',
@@ -21,6 +30,10 @@ class BaseOptions:
                             action='store_true',
                             help='indicate a debug run')
 
+        parser.add_argument('--PROCESSNUM',
+                type=int,
+                default=4,
+                help='local_rank init value')
         parser.add_argument('--port',
                 type=int,
                 default=16666,
@@ -213,7 +226,7 @@ class BaseOptions:
             formatter_class=argparse.ArgumentDefaultsHelpFormatter)
         parser = self.initialize(parser)
 
-        opt, _ = parser.parse_known_args()
+        opt, remaining = parser.parse_known_args()
 
         model_name = opt.model
         find_model_class_by_name(model_name).modify_commandline_options(
@@ -224,6 +237,12 @@ class BaseOptions:
             find_dataset_class_by_name(
                 dataset_name).modify_commandline_options(
                     parser, self.is_train)
+
+        ### load from config
+        if opt.config_yaml:
+            with open(os.path.join(os.getcwd(), '../', opt.config_yaml), 'r', encoding='utf-8') as f:
+                cfg = yaml.safe_load(f)
+                parser.set_defaults(**cfg)
 
         self.parser = parser
 
@@ -262,6 +281,9 @@ class BaseOptions:
             import datetime
             now = datetime.datetime.now().strftime('%y-%m-%d_%H:%M:%S')
             opt.name = opt.name + '_' + now
+        sstr = "-".join(opt.scans)
+        opt.name = opt.name+'.'+sstr
+        #opt.name = opt.name+'.'+sstr+'.gpu'+str(opt.PROCESSNUM)
 
         self.print_and_save_options(opt)
 

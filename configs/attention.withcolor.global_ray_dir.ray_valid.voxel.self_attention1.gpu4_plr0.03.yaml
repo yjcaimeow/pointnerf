@@ -1,0 +1,31 @@
+name: "checkpoints/scannet/sota_framework/seq0006.withcolor.global_ray_dir.ray_valid.voxel.self_attention1.gpu4_plr0.03"
+
+data_root: "/mnt/cache/caiyingjie/data/scannet/scans/"
+pre_d_est: "../checkpoints/MVSNet/model_000014.ckpt"
+checkpoints_dir: "../checkpoints/scannet/"
+resume_dir: "../checkpoints/init/dtu_dgt_d012_img0123_conf_agg2_32_dirclr20"
+
+plr: 0.03
+lr: 0.0005
+
+embed_init_type: 'model'
+progressive_distill: 0
+
+# ddp init type
+ddp_init_type: 'new'
+
+agg_type: 'attention' # another is mlp
+k_type: 'voxel'
+light_D: 290
+light_C: 290
+embed_color: 1
+light_num_self_attention_blocks: 1
+ray_dir_type: 'global'
+perceiver_io_type: 'each_sample_loc'
+
+load_init_pcd_type: 'pointnerf' 
+
+color_loss_weights: [1.0, 0.0, 0.0]
+color_loss_items: ['ray_masked_coarse_raycolor', 'ray_miss_coarse_raycolor', 'coarse_raycolor']
+
+scans: ["scene0006_00",]

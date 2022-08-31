@@ -48,7 +48,11 @@ class TrainOptions(BaseOptions):
 
         parser.add_argument('--prob_maximum_step',
                             type=int,
-                            default=None,
+                            default=150002,
+                            help='maximum # of training iterations')
+        parser.add_argument('--minimum_epoch',
+                            type=int,
+                            default=2000,
                             help='maximum # of training iterations')
         parser.add_argument('--maximum_epoch',
                             type=int,
@@ -91,7 +95,7 @@ class TrainOptions(BaseOptions):
                             help='saving frequency')
         parser.add_argument('--prob_freq',
                             type=int,
-                            default=0,
+                            default=100,
                             help='saving frequency')
         parser.add_argument('--prob_num_step',
                             type=int,

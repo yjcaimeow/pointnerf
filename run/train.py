@@ -21,7 +21,7 @@ import random
 import cv2
 from PIL import Image
 from tqdm import tqdm
-from utils.util import zy_add_flour, init_distributed_mode, setup_for_distributed
+from utils.util import new_add_flour, init_distributed_mode, setup_for_distributed
 import gc
 from tensorboardX import SummaryWriter
 import torch.backends.cudnn as cudnn
@@ -51,7 +51,6 @@ def nearest_view(campos, raydir, xyz):
     return cam_ind
 
 def test(t_models, model, data_loader, visualizer, opt, bg_info, test_steps=0, gen_vid=False, lpips=False, writer=None, epoch=None, height=480, width=640, dirname=None):
-    print('-----------------------------------Testing-----------------------------------')
     if int(os.environ["LOCAL_RANK"])==0:
         os.makedirs(dirname, exist_ok=True)
     model.eval()
@@ -197,8 +196,8 @@ def test(t_models, model, data_loader, visualizer, opt, bg_info, test_steps=0, g
         print('--------------------------------Finish generating vid--------------------------------')
     return torch.tensor([psnr, psnr_ray_masked]).cuda(), torch.tensor(psnr_list_new).cuda(), torch.tensor(psnr_list_ray_masked_new).cuda()
 
-def progressive_distill(t_models, model, dataset, visualizer, opt, bg_info, test_steps=0, opacity_thresh=0.7, epoch=0):
-    cprint.warn('-----------------------------------Progressive Distill-----------------------------------')
+def progressive_distill(t_models, model, dataset, visualizer, opt, bg_info, test_steps=0, opacity_thresh=0.7, epoch=0, mvs_model=None):
+    cprint.info('-----------------------------------Progressive Distill-----------------------------------')
     add_xyz_list, add_embedding_list = [],[]
     model.opt.prob = 1
 
@@ -216,7 +215,7 @@ def progressive_distill(t_models, model, dataset, visualizer, opt, bg_info, test
         shuffle=(pro_distill_sampler is None), \
         batch_size=opt.batch_size, \
         num_workers=int(opt.n_threads))
-    cprint.warn("len of pro_distill_data_loader is {}.".format(len(pro_distill_data_loader)))
+    cprint.info("len of pro_distill_data_loader is {}.".format(len(pro_distill_data_loader)))
 
     for index, data in enumerate(pro_distill_data_loader):
         failed_sample_loc = []
@@ -266,12 +265,52 @@ def progressive_distill(t_models, model, dataset, visualizer, opt, bg_info, test
         add_color = torch.zeros([0, 3], device="cuda", dtype=torch.float32)
         add_embedding = torch.zeros([0, opt.point_features_dim], device="cuda", dtype=torch.float32)
 
-        cprint.warn("seqid {}'s failed_sample_loc shape is ....{}".format(seq_id, failed_sample_loc.shape))
+        cprint.info("seqid {}'s failed_sample_loc shape is ....{}".format(seq_id, failed_sample_loc.shape))
 
-        to_add_pcd_xyz, to_add_pcd_embed, to_add_pcd_color, to_add_pcd_dir = zy_add_flour(failed_sample_loc, candidates=model.neural_points.xyz[seq_id], gap=opt.gap, radius=opt.gap, \
+        if epoch>1:
+            to_add_pcd_xyz, to_add_pcd_embed, to_add_pcd_color, to_add_pcd_dir = new_add_flour(failed_sample_loc, candidates=model.neural_points.xyz[seq_id], gap=opt.gap, radius=opt.gap, \
                                      embed = model.neural_points.points_embeding[seq_id], color=model.neural_points.points_color[seq_id], dir=model.neural_points.points_dir[seq_id], explicit_create_pcd=False)
+        else:
+            #'''
+            points_xyz_all, *_ = new_add_flour(failed_sample_loc)
+            if opt.embed_init_type=='random':
+                points_embedding_all = torch.randn([1, len(points_xyz_all), opt.point_features_dim], device=points_xyz_all.device, dtype=torch.float32)
+                points_color_all = torch.randn([1, len(points_xyz_all), 3], device=points_xyz_all.device, dtype=torch.float32)
+                points_dir_all = torch.randn([1, len(points_xyz_all), 3], device=points_xyz_all.device, dtype=torch.float32)
+            else:
+                campos, camdir = dataset.get_campos_ray(opt.scans[seq_id], seq_id)
+                base_num = torch.sum(torch.tensor(dataset.seq_ids) < seq_id)
+                cam_ind = nearest_view(campos, camdir, points_xyz_all)+base_num
+                unique_cam_ind = torch.unique(cam_ind)
+                print(seq_id,"====== extract unique_cam_ind=======", unique_cam_ind.shape, unique_cam_ind)
+                points_xyz_all = [points_xyz_all[cam_ind[:,0]==unique_cam_ind[i], :] for i in range(len(unique_cam_ind))]
+                featuredim = opt.point_features_dim
+                points_embedding_all = torch.zeros([1, 0, featuredim], device=unique_cam_ind.device, dtype=torch.float32)
+                points_color_all = torch.zeros([1, 0, 3], device=unique_cam_ind.device, dtype=torch.float32)
+                points_dir_all = torch.zeros([1, 0, 3], device=unique_cam_ind.device, dtype=torch.float32)
+                print("extract points embeding & colors", )
+                for i in tqdm(range(len(unique_cam_ind))):
+                    id = unique_cam_ind[i]
+                    batch = dataset.get_item(id, full_img=True, npz=False)
+                    HDWD = [dataset.height, dataset.width]
+                    c2w = batch["c2w"][0].cuda()
+                    w2c = torch.inverse(c2w)
+                    intrinsic = batch["intrinsic"].cuda()
+                    # cam_xyz_all 252, 4
+                    cam_xyz_all = (torch.cat([points_xyz_all[i], torch.ones_like(points_xyz_all[i][...,-1:])], dim=-1) @ w2c.transpose(0,1))[..., :3]
+                    embedding, color, dir, conf = mvs_model.query_embedding(HDWD, cam_xyz_all[None,...], None, batch['images'].cuda(), c2w[None, None,...], w2c[None, None,...], intrinsic[:, None,...], 0, pointdir_w=True)
+                    points_embedding_all = torch.cat([points_embedding_all, embedding], dim=1)
+                    points_color_all = torch.cat([points_color_all, color], dim=1)
+                    points_dir_all = torch.cat([points_dir_all, dir], dim=1)
+                points_xyz_all=torch.cat(points_xyz_all, dim=0)
 
-        cprint.warn("add level {} res flour xyz {} and embed {} and {} color and {} dir number.".format(opt.gap, to_add_pcd_xyz.shape, to_add_pcd_embed.shape, to_add_pcd_color.shape, to_add_pcd_dir.shape))
+            to_add_pcd_xyz = points_xyz_all
+            to_add_pcd_dir = points_dir_all.squeeze()
+            to_add_pcd_embed = points_embedding_all.squeeze()
+            to_add_pcd_color = points_color_all.squeeze()
+            ### ''' for the first pcd '''#
+
+        cprint.info("add level {} res flour xyz {} and embed {} and {} color and {} dir number.".format(opt.gap, to_add_pcd_xyz.shape, to_add_pcd_embed.shape, to_add_pcd_color.shape, to_add_pcd_dir.shape))
 
         add_xyz       = torch.cat([add_xyz, to_add_pcd_xyz], dim=0)
         add_dir       = torch.cat([add_dir, to_add_pcd_dir], dim=0)
@@ -290,10 +329,11 @@ def get_latest_epoch(resume_dir):
 
 def main():
     opt = TrainOptions().parse()
-    cprint.err("opt name is {}".format(opt.name))
-    '''
-    ddp init
-    '''
+    #========================================#
+    #                                        #
+    #       ddp init                         #
+    #                                        #
+    #========================================#
     if opt.ddp_init_type == 'new':
         init_distributed_mode(opt, True)
         world_size = int(os.environ['WORLD_SIZE'])
@@ -309,7 +349,7 @@ def main():
 
     writer=None
     npz_file_number = world_size * len(opt.scans)
-    basedir = "./checkpoints/"
+    basedir = "../checkpoints/"
     if local_rank==0:
         writer = SummaryWriter(os.path.join(basedir, 'summaries', opt.name)) if local_rank==0 else None
     visualizer = Visualizer(opt)
@@ -317,12 +357,15 @@ def main():
     # ======= dataset load =======#
     #=============================#
     train_dataset = create_dataset(opt)
+
     sampler = torch.utils.data.distributed.DistributedSampler(train_dataset) if opt.ddp_train else None
     data_loader = torch.utils.data.DataLoader(train_dataset, \
         sampler=sampler, \
         shuffle=(sampler is None), \
         batch_size=opt.batch_size, \
         num_workers=int(opt.n_threads))
+    opt.maximum_step = 1500 * train_dataset.total + 1
+    cprint.err("maximum_step is {}.".format(opt.maximum_step))
     #=============================#
     # ======= teacher ============#
     #=============================#
@@ -337,10 +380,10 @@ def main():
         t_opt.agg_type='mlp'
         t_opt.k_type='voxel'
 
-        cprint.warn('original vsize is {}'.format(t_opt.vsize))
+        cprint.info('original vsize is {}'.format(t_opt.vsize))
         t_opt.vsize=[0.008 for value in t_opt.vsize]
         t_opt.radius_limit_scale=4
-        cprint.warn('t_model vsize is {}'.format(t_opt.vsize))
+        cprint.info('t_model vsize is {}'.format(t_opt.vsize))
         t_models = []
         for scan in opt.scans:
             t_opt.name=scan
@@ -352,9 +395,9 @@ def main():
             t_model.opt.no_loss = 1
             t_model.eval()
             t_models.append(t_model)
-        cprint.warn('| Check weather model loaded totally. |')
+        cprint.info('| Check weather model loaded totally. |')
     normRw2c = train_dataset.norm_w2c[:3,:3] # torch.eye(3, device="cuda") #
-    img_lst, frame_ids = None, None
+    img_lst = None
     best_PSNR, best_PSNR_ray_mask =0.0, 0.0
     best_iter, best_iter_ray_mask =0,0
     points_xyz_all, points_xyz_all_list=None, None
@@ -372,16 +415,12 @@ def main():
                 visualizer.print_details("No previous checkpoints, start from scratch!!!!")
             else:
                 opt.resume_iter = resume_iter
-                cprint.warn("init {} load.".format(os.path.join(resume_dir, '{}_states.pth'.format(resume_iter))))
+                cprint.info("init {} load.".format(os.path.join(resume_dir, '{}_states.pth'.format(resume_iter))))
                 states = torch.load(
                     os.path.join(resume_dir, '{}_states.pth'.format(resume_iter)), map_location='cpu')
                 epoch_count = states['epoch_count']
                 total_steps = states['total_steps']
                 opt.gap = states['gap']
-                if "frame_ids" in states:
-                    frame_ids = states['frame_ids']
-                else:
-                    cprint.err('| no frame_ids in model |')
                 best_PSNR = states['best_PSNR'] if 'best_PSNR' in states else best_PSNR
                 best_iter = states['best_iter'] if 'best_iter' in states else best_iter
                 best_PSNR = best_PSNR.item() if torch.is_tensor(best_PSNR) else best_PSNR
@@ -411,17 +450,17 @@ def main():
             opt.is_train = False
             opt.mode = 1
             opt.load_points = 0
-            model = create_model(opt)
-            model.setup(opt)
-            model.eval()
-            if load_points == 2:
+            mvs_model = create_model(opt)
+            mvs_model.setup(opt)
+            mvs_model.eval()
+            if load_points == 2 and opt.load_init_pcd_type=='pointnerf':
                 points_xyz_all_list, points_embedding_all_list, points_color_all_list, points_dir_all_list, points_conf_all_list = [],[],[],[],[]
                 for scan_idx, scan in enumerate(opt.scans):
                     if opt.load_init_pcd_type=='pointnerf':
                         points_xyz_all = train_dataset.load_init_depth_points(device="cuda", vox_res=100, scan=scan, seq_id=scan_idx)
                     else:
                         points_xyz_all = train_dataset.get_candicates(scan)
-                    cprint.warn('origin pcd shape {}.'.format(points_xyz_all.shape))
+                    cprint.info('origin pcd shape {}.'.format(points_xyz_all.shape))
                     if opt.ranges[0] > -99.0:
                         ranges = torch.as_tensor(opt.ranges, device=points_xyz_all.device, dtype=torch.float32)
                         mask = torch.prod(
@@ -441,7 +480,7 @@ def main():
                             print("after voxelize:", points_xyz.shape)
                             points_xyz_holder = torch.cat([points_xyz_holder, points_xyz], dim=0)
                         points_xyz_all = points_xyz_holder
-                        np.save('./scene0006_00_voxelized_pcd.npy', points_xyz_all.cpu().numpy())
+                        np.save('./scene0032_00_voxelized_pcd.npy', points_xyz_all.cpu().numpy())
                         exit()
 
                     if opt.embed_init_type=='random':
@@ -469,7 +508,7 @@ def main():
                             intrinsic = batch["intrinsic"].cuda()
                             # cam_xyz_all 252, 4
                             cam_xyz_all = (torch.cat([points_xyz_all[i], torch.ones_like(points_xyz_all[i][...,-1:])], dim=-1) @ w2c.transpose(0,1))[..., :3]
-                            embedding, color, dir, conf = model.query_embedding(HDWD, cam_xyz_all[None,...], None, batch['images'].cuda(), c2w[None, None,...], w2c[None, None,...], intrinsic[:, None,...], 0, pointdir_w=True)
+                            embedding, color, dir, conf = mvs_model.query_embedding(HDWD, cam_xyz_all[None,...], None, batch['images'].cuda(), c2w[None, None,...], w2c[None, None,...], intrinsic[:, None,...], 0, pointdir_w=True)
                             points_embedding_all = torch.cat([points_embedding_all, embedding], dim=1)
                             points_color_all = torch.cat([points_color_all, color], dim=1)
                             points_dir_all = torch.cat([points_dir_all, dir], dim=1)
@@ -479,19 +518,24 @@ def main():
                     points_xyz_all_list.append(points_xyz_all)
                     points_color_all_list.append(points_color_all)
                     points_dir_all_list.append(points_dir_all)
-
             opt.resume_iter = opt.resume_iter if opt.resume_iter != "latest" else get_latest_epoch(opt.resume_dir)
             opt.is_train = True
             opt.mode = 2
             model = create_model(opt)
-            model.set_points(points_xyz_all_list, points_embedding_all_list, points_color=points_color_all_list, points_dir=points_dir_all_list, Rw2c=normRw2c.cuda() if opt.load_points < 1 and opt.normview != 3 else None)
             epoch_count = 1
             total_steps = 0
-            del points_xyz_all, points_embedding_all, points_xyz_all_list, points_embedding_all_list, points_color_all_list, points_dir_all_list, points_conf_all_list
-    cprint.warn('| init model')
+            if opt.load_init_pcd_type=='pointnerf':
+                model.set_points(points_xyz_all_list, points_embedding_all_list, points_color=points_color_all_list, points_dir=points_dir_all_list, Rw2c=normRw2c.cuda() if opt.load_points < 1 and opt.normview != 3 else None)
+                del points_xyz_all, points_embedding_all, points_xyz_all_list, points_embedding_all_list, points_color_all_list, points_dir_all_list, points_conf_all_list
+    #========================================#
+    #                                        #
+    #       ddp model                        #
+    #                                        #
+    #========================================#
+    cprint.info('| init model')
     if opt.ddp_train:
         model.set_ddp()
-        cprint.warn("| init done")
+        cprint.info("| init done")
     model.setup(opt, train_len=len(train_dataset))
     model.train()
     opt.resume_dir = os.path.join(opt.checkpoints_dir, opt.name)
@@ -511,8 +555,9 @@ def main():
         shuffle=(sampler is None), \
         batch_size=opt.batch_size, \
         num_workers=int(opt.n_threads))
-    with open('/tmp/.neural-volumetric.name', 'w') as f:
-        f.write(opt.name + '\n')
+
+    #with open('/tmp/.neural-volumetric.name', 'w') as f:
+    #    f.write(opt.name + '\n')
 
     visualizer.reset()
     if total_steps > 0:
@@ -526,14 +571,50 @@ def main():
 
     real_start=total_steps
     train_random_sample_size = opt.random_sample_size
+
+    #========================================#
+    #                                        #
+    #         only_render                    #
+    #                                        #
+    #========================================#
     if opt.only_render:
-        torch.cuda.empty_cache()
+        test_opt.split = "train"
+        train_dataset_fortest = create_dataset(test_opt)
+        train_sampler_fortest = torch.utils.data.distributed.DistributedSampler(train_dataset_fortest) if opt.ddp_train else None
+        train_data_loader_fortest = torch.utils.data.DataLoader(train_dataset_fortest, \
+            sampler=train_sampler_fortest, \
+            shuffle=(train_sampler_fortest is None), \
+            batch_size=opt.batch_size, \
+            num_workers=int(opt.n_threads))
+        test_opt.split = "test"
+
+        #torch.cuda.empty_cache()
         model.opt.is_train = 0
         model.opt.no_loss = 1
         with torch.no_grad():
             dt = datetime.now()
+
+            cprint.err('-------------testset--------------')
             test_psnr_tensor, psnr_list, psnr_list_ray_masked = test(t_models, model, test_data_loader, Visualizer(test_opt), test_opt, test_bg_info, test_steps=total_steps, lpips=False, writer=writer, epoch=0, height=test_dataset.height, width=test_dataset.width, \
-                                                 dirname=os.path.join(opt.resume_dir, "inference_"+dt.strftime( '%y-%m-%d-%I-%M-%S-%p')))
+                                                 dirname=os.path.join(opt.resume_dir, "inference_testset_"+dt.strftime( '%y-%m-%d-%I-%M-%S-%p')))
+            dist.all_reduce(psnr_list, op=torch.distributed.ReduceOp.SUM)
+            psnr_list /= world_size
+            dist.all_reduce(psnr_list_ray_masked, op=torch.distributed.ReduceOp.SUM)
+            psnr_list_ray_masked /= world_size
+
+            dist.all_reduce(test_psnr_tensor, op=torch.distributed.ReduceOp.SUM)
+            test_psnr_tensor /= world_size
+
+            for seq_id in range(len(opt.scans)):
+                print_str = "| TEST | Scan {}'s psnr is {}, psnr_ray_masked is {}.".format(opt.scans[seq_id], psnr_list[seq_id], psnr_list_ray_masked[seq_id])
+                cprint.info(print_str)
+
+            visualizer.print_details(f"test at iter {total_steps}, PSNR: {test_psnr_tensor[0]}")
+            visualizer.print_details(f"test at iter {total_steps}, PSNR_ray_mask: {test_psnr_tensor[1]}")
+
+            cprint.err('-------------trainset--------------')
+            test_psnr_tensor, psnr_list, psnr_list_ray_masked = test(t_models, model, train_data_loader_fortest, Visualizer(test_opt), test_opt, test_bg_info, test_steps=total_steps, lpips=False, writer=writer, epoch=0, height=test_dataset.height, width=test_dataset.width, \
+                                                 dirname=os.path.join(opt.resume_dir, "inference_trainset_"+dt.strftime( '%y-%m-%d-%I-%M-%S-%p')))
             dist.all_reduce(psnr_list, op=torch.distributed.ReduceOp.SUM)
             psnr_list /= world_size
             dist.all_reduce(psnr_list_ray_masked, op=torch.distributed.ReduceOp.SUM)
@@ -542,17 +623,87 @@ def main():
             dist.all_reduce(test_psnr_tensor, op=torch.distributed.ReduceOp.SUM)
             test_psnr_tensor /= world_size
             for seq_id in range(len(opt.scans)):
-                print_str = "Scan {}'s psnr is {}, psnr_ray_masked is {}.".format(opt.scans[seq_id], psnr_list[seq_id], psnr_list_ray_masked[seq_id])
-                cprint.warn(print_str)
+                print_str = "| TRAIN | Scan {}'s psnr is {}, psnr_ray_masked is {}.".format(opt.scans[seq_id], psnr_list[seq_id], psnr_list_ray_masked[seq_id])
+                cprint.info(print_str)
+            visualizer.print_details(f"train at iter {total_steps}, PSNR: {test_psnr_tensor[0]}")
+            visualizer.print_details(f"train at iter {total_steps}, PSNR_ray_mask: {test_psnr_tensor[1]}")
+            exit()
 
-        model.opt.no_loss = 0
-        model.opt.is_train = 1
-        visualizer.print_details(f"test at iter {total_steps}, PSNR: {test_psnr_tensor[0]}")
-        visualizer.print_details(f"test at iter {total_steps}, PSNR_ray_mask: {test_psnr_tensor[1]}")
-        exit()
+    #========================================#
+    #                                        #
+    #         the first epoch generate pcd   #
+    #                                        #
+    #========================================#
+    if opt.load_init_pcd_type!='pointnerf' and epoch_count==1:
+        ori_prob_thresh = opt.prob_thresh
+        opt.prob_thresh=-1.0
+        cprint.info("| current opt.gap is {} and prob_thresh is {}.".format(opt.gap, opt.prob_thresh))
+        model.opt.is_train = 0
+        model.opt.no_loss = 1
+        with torch.no_grad():
+            prob_opt = copy.deepcopy(test_opt)
 
-    cprint.warn("| current opt.gap is {}.".format(opt.gap))
+            prob_opt.name = opt.name
+            prob_opt.gap = opt.gap
+            train_dataset.opt.random_sample = "no_crop"
+
+            train_dataset.opt.random_sample_size = min(32, train_random_sample_size)
+            prob_dataset = train_dataset
+            cprint.info("rank-{} {}/{} id_lst to add flour at NEXT step with gap {}.".format(local_rank, len(train_dataset), len(train_dataset), opt.gap/3))
+            model.eval()
+            output = progressive_distill(t_models, model, prob_dataset, Visualizer(prob_opt), prob_opt, None, test_steps=total_steps, opacity_thresh=opt.prob_thresh, epoch=epoch_count, mvs_model=mvs_model)
+            model.train()
+            model.opt.is_train = 1
+            model.opt.no_loss = 0
+            #========================================#
+            #                                        #
+            #       for sync between ranks           #
+            #                                        #
+            #========================================#
+            s = torch.cuda.Stream()
+            handle = dist.all_reduce(output, async_op=True)
+            handle.wait()
+            with torch.cuda.stream(s):
+                s.wait_stream(torch.cuda.default_stream())
+                output.add_(100)
+            flag=0
+            while flag==0:
+                current_npz_files = glob.glob(os.path.join(opt.resume_dir, "epoch"+str(epoch_count)+'_*.npz'))
+                if len(current_npz_files) == npz_file_number:
+                    flag=1
+            time.sleep(10)
+
+            add_xyz_list, add_embedding_list, add_color_list, add_dir_list = [],[],[],[]
+            for scan_idx, scan in enumerate(opt.scans):
+                add_xyz = torch.zeros([0, 3], device="cuda", dtype=torch.float32)
+                add_embedding = torch.zeros([0, opt.point_features_dim], device="cuda", dtype=torch.float32)
+                add_color = torch.zeros([0, 3], device="cuda", dtype=torch.float32)
+                add_dir = torch.zeros([0, 3], device="cuda", dtype=torch.float32)
+                files = glob.glob(os.path.join(opt.resume_dir, "epoch"+str(epoch_count)+"*seqid"+str(scan_idx)+'.npz'))
+                cprint.info("scan {}'s add files are {}.".format(scan, files))
+                for file_name in files:
+                    data = np.load(file_name, allow_pickle=True)
+                    add_xyz       = torch.cat([add_xyz, torch.as_tensor(data["xyz"]).cuda()], dim=0)
+                    add_embedding = torch.cat([add_embedding, torch.as_tensor(data["embed"]).cuda()],dim=0)
+                    add_color = torch.cat([add_color, torch.as_tensor(data["color"]).cuda()],dim=0)
+                    add_dir = torch.cat([add_dir, torch.as_tensor(data["dir"]).cuda()],dim=0)
+                add_xyz_list.append(add_xyz)
+                add_embedding_list.append(add_embedding[None,...])
+                add_color_list.append(add_color[None,...])
+                add_dir_list.append(add_dir[None,...])
+                cprint.err("scan init pcd shape :: xyz={}, embed={}, color={}, dir={}.".format(add_xyz.shape, add_embedding.shape, add_color.shape, add_dir.shape))
+                np.savetxt(os.path.join(opt.resume_dir, scan+'_init_pcd.txt'), add_xyz.cpu().numpy())
+            model.clean_optimizer_scheduler()
+            model.set_points(add_xyz_list, add_embedding_list, points_color=add_color_list, points_dir=add_dir_list,  Rw2c=normRw2c.cuda() if opt.load_points < 1 and opt.normview != 3 else None)
+            del add_xyz_list, add_embedding_list, add_color_list, add_dir_list
+            model.init_scheduler(total_steps, opt)
+            train_dataset.opt.random_sample = "random"
+            train_dataset.opt.random_sample_size = train_random_sample_size
+            opt.prob_thresh = ori_prob_thresh
+            cprint.warn('back to original prob_thresh is {}.'.format(opt.prob_thresh))
     for epoch in range(epoch_count, opt.maximum_epoch+1):
+        if total_steps>=opt.maximum_step and epoch>=opt.minimum_epoch:
+            break
         epoch_start_time = time.time()
         if opt.ddp_train:
             sampler.set_epoch(epoch)
@@ -591,10 +742,9 @@ def main():
                 visualizer.reset()
 
         if local_rank==0:
-            cprint.warn("epoch training time is {}.".format(time.time()-epoch_start_time))
+            cprint.info("epoch training time is {} for exp {}.".format(time.time()-epoch_start_time, opt.name))
 
-        torch.cuda.empty_cache()
-        #if local_rank==0 and epoch % opt.save_iter_freq == 0 and total_steps > 0 and epoch!=epoch_count and (epoch not in opt.prob_tiers):
+        #torch.cuda.empty_cache()
         if local_rank==0 and epoch % opt.save_iter_freq == 0 and total_steps > 0 and epoch!=epoch_count:
             other_states = {
                 "best_PSNR": best_PSNR,
@@ -605,13 +755,15 @@ def main():
             }
             visualizer.print_details('saving model ({}, epoch {}, total_steps {})'.format(opt.name, epoch, total_steps))
             model.save_networks(total_steps, epoch, other_states)
+            cprint.err("exp {} save epoch {}.".format(opt.name, epoch))
 
-        if  (epoch!=epoch_count and epoch % opt.test_freq == 0 and total_steps < (opt.maximum_step - 1) and total_steps > 0):
-            torch.cuda.empty_cache()
+        if  (epoch!=epoch_count and epoch % opt.test_freq == 0 and total_steps > 0):
+            #torch.cuda.empty_cache()
             model.opt.is_train = 0
             model.opt.no_loss = 1
             with torch.no_grad():
-                test_psnr_tensor, psnr_list, psnr_list_ray_masked = test(t_models, model, test_data_loader, Visualizer(test_opt), test_opt, test_bg_info, test_steps=total_steps, lpips=False, writer=writer, epoch=epoch, height=test_dataset.height, width=test_dataset.width,
+                cprint.err('-------------testset--------------')
+                test_psnr_tensor, psnr_list, psnr_list_ray_masked = test(t_models, model, test_data_loader, Visualizer(test_opt), test_opt, test_bg_info, test_steps=total_steps, lpips=False, writer=None, epoch=epoch, height=test_dataset.height, width=test_dataset.width,
                         dirname=os.path.join(opt.resume_dir, "test_epoch_"+str(epoch)))
                 dist.all_reduce(test_psnr_tensor, op=torch.distributed.ReduceOp.SUM)
                 test_psnr_tensor /= world_size
@@ -621,8 +773,6 @@ def main():
                 dist.all_reduce(psnr_list_ray_masked, op=torch.distributed.ReduceOp.SUM)
                 psnr_list_ray_masked = psnr_list_ray_masked / world_size
 
-            model.opt.no_loss = 0
-            model.opt.is_train = 1
             best_iter = total_steps if test_psnr_tensor[0] > best_PSNR else best_iter
             best_PSNR = max(test_psnr_tensor[0], best_PSNR)
             best_iter_ray_mask = total_steps if test_psnr_tensor[1] > best_PSNR_ray_mask else best_iter_ray_mask
@@ -630,9 +780,15 @@ def main():
             visualizer.print_details(f"test at iter {total_steps}, PSNR: {test_psnr_tensor[0]}, best_PSNR: {best_PSNR}, best_iter: {best_iter}")
             visualizer.print_details(f"test at iter {total_steps}, PSNR_ray_mask: {test_psnr_tensor[1]}, best_PSNR_ray_mask: {best_PSNR_ray_mask}, best_iter: {best_iter_ray_mask}")
             for seq_id in range(len(opt.scans)):
-                print_str = "Scan {}'s psnr is {}, psnr_ray_masked is {}.".format(opt.scans[seq_id], psnr_list[seq_id], psnr_list_ray_masked[seq_id])
-                cprint.warn(print_str)
+                print_str = "| TEST | Scan {}'s psnr is {}, psnr_ray_masked is {}.".format(opt.scans[seq_id], psnr_list[seq_id], psnr_list_ray_masked[seq_id])
+                cprint.info(print_str)
                 visualizer.print_details(print_str)
+                if writer is not None:
+                    writer.add_scalar('test_epoch_psnr_'+opt.scans[seq_id], psnr_list[seq_id], epoch)
+                    writer.add_scalar('test_epoch_psnr_masked_'+opt.scans[seq_id], psnr_list_ray_masked[seq_id], epoch)
+
+            model.opt.no_loss = 0
+            model.opt.is_train = 1
 
         if (epoch!=epoch_count and opt.prob_freq > 0 and real_start != total_steps and (epoch in opt.prob_tiers) and total_steps < (opt.prob_maximum_step - 1) and total_steps > 0 and opt.progressive_distill and epoch<opt.maximum_epoch):
             tier = np.sum(np.asarray(opt.prob_tiers) < total_steps)
@@ -649,15 +805,15 @@ def main():
                 train_dataset.opt.random_sample_size = min(32, train_random_sample_size)
                 if opt.prob_mode <= 0 or opt.prob_num_step<=1:
                     prob_dataset = train_dataset
-                    cprint.warn("rank-{} {}/{} id_lst to add flour at NEXT step with gap {}.".format(local_rank, len(train_dataset), len(train_dataset), opt.gap/3))
+                    cprint.info("rank-{} {}/{} id_lst to add flour at NEXT step with gap {}.".format(local_rank, len(train_dataset), len(train_dataset), opt.gap/3))
                 else:
                     max_num = len(train_dataset) // opt.prob_num_step + 1
                     frame_ids = list(range(len(train_dataset)))
                     random.shuffle(frame_ids)
                     frame_ids = torch.IntTensor(frame_ids[:max_num]).cuda()
-                    cprint.warn("rank-{} {}/{} id_lst to add flour at NEXT step with gap {}.".format(local_rank, len(frame_ids), len(train_dataset), opt.gap/3))
+                    cprint.info("rank-{} {}/{} id_lst to add flour at NEXT step with gap {}.".format(local_rank, len(frame_ids), len(train_dataset), opt.gap/3))
                     torch.distributed.broadcast(tensor=frame_ids, src=0)
-                    cprint.warn("local_rank {}, frame_ids: {}".format(local_rank, frame_ids))
+                    cprint.info("local_rank {}, frame_ids: {}".format(local_rank, frame_ids))
                     prob_dataset = create_diy_dataset(frame_ids, test_opt, opt, total_steps, test_num_step=1)
                     del frame_ids
                 model.eval()
@@ -688,7 +844,7 @@ def main():
                     add_color = torch.zeros([0, 3], device="cuda", dtype=torch.float32)
                     add_dir = torch.zeros([0, 3], device="cuda", dtype=torch.float32)
                     files = glob.glob(os.path.join(opt.resume_dir, "epoch"+str(epoch)+"*seqid"+str(scan_idx)+'.npz'))
-                    cprint.warn("scan {}'s add files are {}.".format(scan, files))
+                    cprint.info("scan {}'s add files are {}.".format(scan, files))
                     for file_name in files:
                         data = np.load(file_name, allow_pickle=True)
                         add_xyz       = torch.cat([add_xyz, torch.as_tensor(data["xyz"]).cuda()], dim=0)
@@ -720,17 +876,6 @@ def main():
     if local_rank==0:
         writer.close()
     del train_dataset
-
-    #if local_rank==0:
-    #    other_states = {
-    #    "best_PSNR": best_PSNR,
-    #    "best_iter": best_iter,
-    #    'epoch_count': epoch,
-    #    'total_steps': total_steps,
-    #    'gap': opt.gap,
-    #    }
-    #    visualizer.print_details('saving model ({}, epoch {}, total_steps {})'.format(opt.name, epoch, total_steps))
-    #    model.save_networks(total_steps, epoch, other_states)
 
 def save_points_conf(visualizer, xyz, points_color, points_conf, total_steps):
     print("total:", xyz.shape, points_color.shape, points_conf.shape)

@@ -656,10 +656,13 @@ class PerceiverDecoder(nn.Module):
             color_block.append(nn.Linear(in_channels, out_channels))
             color_block.append(nn.LeakyReLU(0.01))
             in_channels = out_channels
+
         color_block.append(nn.Linear(out_channels, 96))
         color_block.append(nn.LeakyReLU(0.01))
         color_block.append(nn.Linear(96, 3))
-        #color_block.append(nn.Linear(out_channels, num_output_query_channels))
+
+        #color_block.append(nn.Linear(out_channels, 3))
+
         self.color_branch = nn.Sequential(*color_block)
         self.color_act = torch.nn.Sigmoid()
 
@@ -669,6 +672,7 @@ class PerceiverDecoder(nn.Module):
             output_query = self.embedding(indexs)[:,None,:]
         else:
             output_query = self.initial_linear(output_query)
+        #print('----------', output_query.shape, x.shape)
         output = self.cross_attn(output_query, x)
         alpha = self.density_super_act(self.alpha_linear(output)-1)
         if local_dir is not None:

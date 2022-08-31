@@ -325,7 +325,7 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
                 assert "neural_points.points_conf" not in state_dict
                 state_dict["neural_points.points_conf"] = torch.ones_like(self.net_ray_marching.neural_points.points_conf) * self.opt.default_conf
             #cprint.warn(net)
-            if self.opt.load_points==10:
+            if self.opt.load_points==10 and 1==2:
                 net.load_state_dict(state_dict, strict=True)
                 cprint.warn("| load model totally. | {}".format(load_path))
             else:
@@ -335,7 +335,7 @@ class MvsPointsVolumetricModel(NeuralPointsVolumetricModel):
                 except:
                     keys=[]
                     for k,v in state_dict.items():
-                        if k.startswith('module.neural_points'):
+                        if k.startswith('module.neural_points') or k.startswith('neural_points'):
                             continue
                         keys.append(k)
                     new_dict = {k:state_dict[k] for k in keys}

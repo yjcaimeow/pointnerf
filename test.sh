@@ -1,14 +1,8 @@
 #!/bin/bash
-nrCheckpoint="../checkpoints"
-nrDataRoot="/mnt/cache/caiyingjie/data/scannet"
-name=$2
-resume_iter=latest
-
-data_root="${nrDataRoot}/scans/"
-scan="scene0006_00"
-scans="scene0006_00 "
-#scans="scene0003_00 scene0005_00 scene0006_00 scene0101_00 scene0032_00 scene0034_00 scene0035_00 scene0036_00 scene0039_00"
-#scans=$3
+port=$1
+resume_iter=$4
+name=$3
+config_yaml=$2
 
 load_points=2
 feat_grad=1
@@ -28,7 +22,6 @@ depth_vid="0"
 trgt_id=0
 manual_depth_view=1
 init_view_num=3
-pre_d_est="${nrCheckpoint}/MVSNet/model_000014.ckpt"
 manual_std_depth=0.0
 depth_conf_thresh=0.8
 geo_cnsst_num=0
@@ -107,14 +100,9 @@ random_sample_size=56 # 32 * 32 = 1024
 
 batch_size=1
 
-plr=0.02
-lr=0.0005 # 0.0005 #0.00015
 lr_policy="iter_exponential_decay"
 lr_decay_iters=1000000
 lr_decay_exp=0.1
-
-checkpoints_dir="${nrCheckpoint}/scannet/"
-resume_dir="${nrCheckpoint}/init/dtu_dgt_d012_img0123_conf_agg2_32_dirclr20"
 
 save_point_freq=10000 #301840 #1
 maximum_step=800000 #500000 #250000 #800000
@@ -129,13 +117,11 @@ test_num_step=1
 
 prob_maximum_step=150002 #500000 #250000 #800000
 prob_freq=100
-prob_num_step=2
+prob_num_step=1
 prob_kernel_size=" 3 3 3 1 1 1 "
 
 maximum_epoch=2000 #500000 #250000 #800000
-#prob_tiers=$4
 prob_tiers="100 200 300 2000"
-#prob_tiers="30 90 150 210 270 2000"
 test_freq=50 #  #100 #1200 #1200 #30184 #30184 #50000
 save_iter_freq=50
 
@@ -149,7 +135,7 @@ zero_one_loss_items='conf_coefficient' #regularize background to be either 0 or 
 zero_one_loss_weights=" 0.0001 "
 sparse_loss_weight=0
 
-color_loss_weights=" 1.0 0.0 0.0 "
+color_loss_weights="1.0 0.0 0.0"
 color_loss_items='ray_masked_coarse_raycolor ray_miss_coarse_raycolor coarse_raycolor'
 test_color_loss_items='coarse_raycolor ray_miss_coarse_raycolor ray_masked_coarse_raycolor'
 
@@ -158,40 +144,17 @@ split="train"
 
 n_threads=20
 PART=pat_taurus
-GPUNUM=4
-PROCESSNUM=8
-embed_init_type='model'
-
-progressive_distill=0
-agg_type='attention'
-k_type='knn'
-ddp_init_type='new'
-load_init_pcd_type='pointnerf'
-
-light_D=284
-light_C=284
-embed_color=0
-
-ray_dir_type='global'
-port=$1
+GPUNUM=1
+PROCESSNUM=1
 
 cd run
 
 TOOLS="srun --partition=$PART --quotatype=auto --preempt -n${PROCESSNUM} --gres=gpu:${GPUNUM} --ntasks-per-node=${GPUNUM} --cpus-per-task=4"
 $TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch train.py \
-        --progressive_distill ${progressive_distill} \
-        --load_init_pcd_type ${load_init_pcd_type} \
-        --ray_dir_type ${ray_dir_type} \
-        --embed_init_type ${embed_init_type} \
-        --embed_color ${embed_color} --light_D ${light_D} --light_C ${light_C} \
-        --ddp_init_type ${ddp_init_type} \
-        --k_type ${k_type} \
+        --only_render \
+        -c ${config_yaml} \
+        --name ${name} \
         --ddp_train --port ${port} \
-        --name $name \
-        --scan $scan \
-        --scans $scans \
-        --agg_type ${agg_type} \
-        --data_root $data_root \
         --dataset_name $dataset_name \
         --model $model \
         --which_render_func $which_render_func \
@@ -205,12 +168,9 @@ $TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch train.py \
         --maximum_epoch $maximum_epoch \
         --maximum_step $maximum_step \
         --prob_maximum_step $prob_maximum_step \
-        --plr $plr \
-        --lr $lr \
         --lr_policy $lr_policy \
         --lr_decay_iters $lr_decay_iters \
         --lr_decay_exp $lr_decay_exp \
-        --checkpoints_dir $checkpoints_dir \
         --save_iter_freq $save_iter_freq \
         --niter $niter \
         --niter_decay $niter_decay \
@@ -221,6 +181,8 @@ $TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch train.py \
         --test_freq $test_freq \
         --test_num_step $test_num_step \
         --test_color_loss_items $test_color_loss_items \
+        --color_loss_weights ${color_loss_weights} \
+        --color_loss_items ${color_loss_items} \
         --prob_freq $prob_freq \
         --prob_num_step $prob_num_step \
         --print_freq $print_freq \
@@ -232,7 +194,6 @@ $TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch train.py \
         --dir_norm $dir_norm \
         --which_tonemap_func $which_tonemap_func \
         --load_points $load_points \
-        --resume_dir $resume_dir \
         --resume_iter $resume_iter \
         --feature_init_method $feature_init_method \
         --agg_axis_weight $agg_axis_weight \
@@ -262,18 +223,15 @@ $TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch train.py \
         --shading_alpha_mlp_layer $shading_alpha_mlp_layer \
         --shading_color_mlp_layer $shading_color_mlp_layer \
         --which_agg_model $which_agg_model \
-        --color_loss_weights $color_loss_weights \
         --num_feat_freqs $num_feat_freqs \
         --dist_xyz_deno $dist_xyz_deno \
         --apply_pnt_mask $apply_pnt_mask \
         --point_features_dim $point_features_dim \
-        --color_loss_items $color_loss_items \
         --feedforward $feedforward \
         --trgt_id $trgt_id \
         --depth_vid $depth_vid \
         --ref_vid $ref_vid \
         --manual_depth_view $manual_depth_view \
-        --pre_d_est $pre_d_est \
         --depth_occ $depth_occ \
         --manual_std_depth $manual_std_depth \
         --visual_items $visual_items \

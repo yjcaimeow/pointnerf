@@ -662,7 +662,6 @@ class BaseRenderingModel(BaseModel):
             self.loss_total += loss * opt.sparse_loss_weight
             setattr(self, "loss_sparse", loss)
 
-        # self.loss_total = Variable(self.loss_total, requires_grad=True)
 
     def backward(self):
         self.optimizer.zero_grad()

@@ -250,21 +250,27 @@ class NeuralPoints(nn.Module):
             cprint.info('checkpoint is {}.'.format(checkpoint))
             if checkpoint:
                 saved_features = torch.load(checkpoint, map_location='cpu')
+                '''
                 #### new
-                #data = np.load('/mnt/cache/caiyingjie/code/pointnerf_new/run/scene0006_chair_for_seqid1.npz')
-                #insert_obj = data['xyz']
-                #extra_embed, extra_color, extra_dir, extra_conf = data['embed'], data['color'], data['dir'], data['dir'][...,0:1]
+                data = np.load('/mnt/cache/caiyingjie/code/pointnerf_new/run/scene0006_chair_for_seqid1.npz')
+                insert_obj = data['xyz']
+                extra_embed, extra_color, extra_dir, extra_conf = data['embed'], data['color'], data['dir'], data['dir'][...,0:1]
 
-                #insert_obj_x, insert_obj_y, insert_obj_z = insert_obj[...,0]-1, insert_obj[...,1]-4, insert_obj[...,2]
-                #extra_xyz = torch.from_numpy(np.concatenate((insert_obj_x[...,None], insert_obj_y[...,None], insert_obj_z[...,None]), -1))
+                insert_obj_x, insert_obj_y, insert_obj_z = insert_obj[...,0], insert_obj[...,1]-3.5, insert_obj[...,2]
+                extra_xyz = torch.from_numpy(np.concatenate((insert_obj_x[...,None], insert_obj_y[...,None], insert_obj_z[...,None]), -1))
 
-                #self.xyz = nn.Parameter(torch.cat((saved_features["neural_points.xyz"], extra_xyz), 0))
-                #cprint.info("self.xyz shape {}".format(self.xyz.shape))
-                #self.points_embeding = nn.Parameter(torch.cat((saved_features["neural_points.points_embeding"], torch.from_numpy(extra_embed[None,...])), 1)) if "neural_points.points_embeding" in saved_features else None
-                #self.points_conf = nn.Parameter(torch.cat((saved_features["neural_points.points_conf"], torch.from_numpy(extra_conf[None,...])), 1)) if "neural_points.points_conf" in saved_features else None
-                #self.points_dir = nn.Parameter(torch.cat((saved_features["neural_points.points_dir"], torch.from_numpy(extra_dir[None,...])), 1)) if "neural_points.points_dir" in saved_features else None
-                #self.points_color = nn.Parameter(torch.cat((saved_features["neural_points.points_color"], torch.from_numpy(extra_color[None,...])), 1)) if "neural_points.points_color" in saved_features else None
-
+                scene_name = checkpoint.split('/')[-2]
+                self.xyz = nn.Parameter(torch.cat((saved_features["neural_points.xyz"], extra_xyz), 0))
+                #np.savetxt(scene_name+'_scene.txt', saved_features["neural_points.xyz"].cpu().detach().numpy())
+                np.savetxt(scene_name+'_scene_with_chair_03.50.txt', extra_xyz.cpu().detach().numpy())
+                #if scene_name == 'scene0101_00':
+                #    exit()
+                cprint.info("self.xyz shape {}".format(self.xyz.shape))
+                self.points_embeding = nn.Parameter(torch.cat((saved_features["neural_points.points_embeding"], torch.from_numpy(extra_embed[None,...])), 1)) if "neural_points.points_embeding" in saved_features else None
+                self.points_conf = nn.Parameter(torch.cat((saved_features["neural_points.points_conf"], torch.from_numpy(extra_conf[None,...])), 1)) if "neural_points.points_conf" in saved_features else None
+                self.points_dir = nn.Parameter(torch.cat((saved_features["neural_points.points_dir"], torch.from_numpy(extra_dir[None,...])), 1)) if "neural_points.points_dir" in saved_features else None
+                self.points_color = nn.Parameter(torch.cat((saved_features["neural_points.points_color"], torch.from_numpy(extra_color[None,...])), 1)) if "neural_points.points_color" in saved_features else None
+                '''
                 self.xyz = nn.Parameter(saved_features["neural_points.xyz"])
                 cprint.info("self.xyz shape {}".format(self.xyz.shape))
                 self.points_embeding = nn.Parameter(saved_features["neural_points.points_embeding"]) if "neural_points.points_embeding" in saved_features else None
@@ -303,9 +309,9 @@ class NeuralPoints(nn.Module):
         local_rank = int(os.environ["LOCAL_RANK"])
         assert type(add_xyz).__name__=='list'
         for seq_id in range(len(add_xyz)):
-            if local_rank==0:
-                cprint.info("grow_points {} for seq {}.".format(add_xyz[seq_id].shape, seq_id))
-                np.savetxt(os.path.join(dstdir, "epoch{}_seqid{}_growxyz.txt".format(epoch, seq_id)), add_xyz[seq_id].cpu().numpy())
+            #if local_rank==0:
+            #    cprint.info("grow_points {} for seq {}.".format(add_xyz[seq_id].shape, seq_id))
+            #    np.savetxt(os.path.join(dstdir, "epoch{}_seqid{}_growxyz.txt".format(epoch, seq_id)), add_xyz[seq_id].cpu().numpy())
             self.xyz[seq_id] = nn.Parameter(torch.cat([self.xyz[seq_id], add_xyz[seq_id]], dim=0))
 
             self.xyz[seq_id].requires_grad = self.opt.xyz_grad > 0
@@ -640,7 +646,7 @@ class NeuralPoints(nn.Module):
         return input
 
     def forward(self, inputs):
-        mask = np.load('/mnt/cache/caiyingjie/code/pointnerf_new/run/610.npy')[1]
+        #mask = np.load('/mnt/cache/caiyingjie/code/pointnerf_new/run/610.npy')[1]
         pixel_idx, camrotc2w, campos, near_plane, far_plane, h, w, intrinsic = inputs["pixel_idx"].to(torch.int32), inputs["camrotc2w"], inputs["campos"], inputs["near"], inputs["far"], inputs["h"], inputs["w"], inputs["intrinsic"]
         if self.opt.load_points==10:
             sample_pidx, sample_loc, ray_mask_tensor, point_xyz_pers_tensor, sample_loc_w_tensor, sample_ray_dirs_tensor, sample_local_ray_dirs_tensor, vsize, raypos_tensor, index_tensor = self.get_point_indices(inputs, camrotc2w, campos, pixel_idx, torch.min(near_plane).cpu().numpy(), torch.max(far_plane).cpu().numpy(), torch.max(h).cpu().numpy(), torch.max(w).cpu().numpy(), intrinsic.cpu().numpy()[0], vox_query=self.opt.NN<0)
@@ -670,13 +676,18 @@ class NeuralPoints(nn.Module):
         #    np.savez('scene0006_chair_for_seqid1.npz', xyz=xyz_fov.cpu().numpy(), embed=points_embeding_fov.squeeze().cpu().numpy(), color=points_color_fov.squeeze().cpu().numpy(), dir=points_dir_fov.squeeze().cpu().numpy())
         #    exit()
         #cprint.info("NeuralPoints xyz{} embed{} color{}".format(len(self.xyz), len(self.points_embeding), len(self.points_color)))
-        self.xyz_fov, _, fov_ids, pts_2d = get_lidar_in_image_fov(self.xyz[inputs['seq_id']].squeeze(), inputs["c2w"].squeeze(), intrinsic.squeeze(), xmin=0, ymin=0, xmax=int(w), ymax=int(h), return_more=True)
-        self.points_embeding_fov = self.points_embeding[inputs['seq_id']].squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
-        self.points_color_fov = self.points_color[inputs['seq_id']].squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
-        self.points_dir_fov = self.points_dir[inputs['seq_id']].squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
+        try:
+            self.xyz_fov, _, fov_ids, pts_2d = get_lidar_in_image_fov(self.xyz[inputs['seq_id']].squeeze(), inputs["c2w"].squeeze(), intrinsic.squeeze(), xmin=0, ymin=0, xmax=int(w), ymax=int(h), return_more=True)
+            self.points_embeding_fov = self.points_embeding[inputs['seq_id']].squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
+            self.points_color_fov = self.points_color[inputs['seq_id']].squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
+            self.points_dir_fov = self.points_dir[inputs['seq_id']].squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
+        except:
+            self.xyz_fov, self.points_embeding_fov, self.points_color_fov, self.points_dir_fov = None, None, None, None
+            return
 
         if self.opt.progressive_distill and self.opt.all_sample_loc==False:
             return
+
         self.points_conf_fov = None
         sample_pidx, sample_loc, ray_mask_tensor, point_xyz_pers_tensor, sample_loc_w_tensor, sample_ray_dirs_tensor, sample_local_ray_dirs_tensor, vsize, raypos_tensor, index_tensor = self.get_point_indices(inputs, camrotc2w, campos, pixel_idx, torch.min(near_plane).cpu().numpy(), torch.max(far_plane).cpu().numpy(), torch.max(h).cpu().numpy(), torch.max(w).cpu().numpy(), intrinsic.cpu().numpy()[0], vox_query=self.opt.NN<0)
 
