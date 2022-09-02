@@ -3,6 +3,7 @@ port=$1
 resume_iter=$4
 name=$3
 config_yaml=$2
+scans=$5
 
 load_points=2
 feat_grad=1
@@ -154,6 +155,7 @@ $TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch train.py \
         --only_render \
         -c ${config_yaml} \
         --name ${name} \
+        --scans ${scans} \
         --ddp_train --port ${port} \
         --dataset_name $dataset_name \
         --model $model \

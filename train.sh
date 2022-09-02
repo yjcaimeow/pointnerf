@@ -126,8 +126,8 @@ split="train"
 
 n_threads=20
 PART=pat_taurus
-GPUNUM=4
-PROCESSNUM=4
+GPUNUM=$5
+PROCESSNUM=$6
 NODENUM=1
 cd run
 

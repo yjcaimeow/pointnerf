@@ -363,12 +363,34 @@ class NeuralPointsRayMarching(nn.Module):
             query_points_local = sample_loc[ray_valid][None, ...].contiguous()
             if self.opt.k_type == 'knn':
                 dists, assign_index, ref_xyz = knn_points(p1=query_points, p2=self.neural_points.xyz_fov[None, ...], K=self.opt.knn_k, return_nn=True)
+                #dists_flag = dists<=self.opt.radius
+#                ray_valid_new = torch.any(dists_flag, dim=-1)
+
+                #print(ref_xyz.shape, assign_index.shape, ray_valid_new.shape, torch.sum(ray_valid_new))
+                #ref_xyz = ref_xyz[ray_valid_new==True]
+                #assign_index = assign_index[ray_valid_new==True]
+                #print(ref_xyz.shape, assign_index.shape, ray_valid_new.shape)
+                #query_points = query_points[ray_valid_new==True]
+                #query_points_local = query_points_local[ray_valid_new==True]
+                #exit()
+
                 ref_xyz = ref_xyz.reshape(1, -1, self.opt.knn_k, 3)
                 ref_fea = self.neural_points.points_embeding_fov.squeeze()[assign_index.squeeze()].reshape(-1, self.opt.knn_k, self.neural_points.points_embeding_fov.shape[-1])
-                ref_xyz_pers = self.w2pers(ref_xyz.view(-1,3), camrotc2w, campos).reshape(1, -1, self.opt.knn_k, 3)
                 if self.opt.embed_color:
                     ref_col = self.neural_points.points_color_fov.squeeze()[assign_index.squeeze()].reshape(-1, self.opt.knn_k, self.neural_points.points_color_fov.shape[-1])
                     ref_dir = self.neural_points.points_dir_fov.squeeze()[assign_index.squeeze()].reshape(-1, self.opt.knn_k, self.neural_points.points_dir_fov.shape[-1])
+
+                if self.opt.clip_knn:
+                    dists_flag = (dists <= 0.008).squeeze()
+                    dists_flag_sorted, sorted_indices = torch.sort(dists_flag.float(), descending=True, dim=-1)
+                    assert (dists_flag_sorted[..., 0]>0).all() == True
+                    #pad = torch.gather(input=ref_xyz.squeeze(), dim=1, index=sorted_indices[...,0:1][...,None].repeat(1,1,3))
+                    #ref_xyz = torch.where(dists_flag[...,None].repeat(1,1,3), ref_xyz.squeeze(), pad.repeat(1,8,1))
+                    ref_xyz = torch.where(dists_flag[...,None], ref_xyz.squeeze(), torch.gather(input=ref_xyz.squeeze(), dim=1, index=sorted_indices[...,0:1][...,None])).reshape(1, -1, self.opt.knn_k, 3)
+                    ref_fea = torch.where(dists_flag[...,None], ref_fea, torch.gather(input=ref_fea, dim=1, index=sorted_indices[...,0:1][...,None]))
+                    ref_col = torch.where(dists_flag[...,None], ref_col, torch.gather(input=ref_col, dim=1, index=sorted_indices[...,0:1][...,None]))
+                    ref_dir = torch.where(dists_flag[...,None], ref_dir, torch.gather(input=ref_dir, dim=1, index=sorted_indices[...,0:1][...,None]))
+                ref_xyz_pers = self.w2pers(ref_xyz.view(-1,3), camrotc2w, campos).reshape(1, -1, self.opt.knn_k, 3)
                 #  torch_cluster knn
                 #assign_index = knn(self.neural_points.xyz_fov.squeeze(), query_points.squeeze().view(-1,3), 8)[1]
                 #ref_xyz = self.neural_points.xyz_fov.squeeze()[assign_index].reshape(1, -1, 8, 3)
@@ -503,13 +525,14 @@ class NeuralPointsRayMarching(nn.Module):
                 opacity_loss = self.l1loss(opacity[...,None], opacity_gt[...,None])
                 rgb_loss = torch.mean(self.l1loss(decoded_features[...,1:], decoded_features_loaded[...,1:]), dim=-1, keepdim=True)
             loss = opacity_loss + rgb_loss
-            #failed_index = loss > torch.max(loss).item()*self.opt.prob_thresh
-            failed_index = loss > self.opt.prob_thresh
+            if self.opt.relative_thresh:
+                failed_index = loss > torch.max(loss).item()*self.opt.prob_thresh
+            else:
+                failed_index = loss > self.opt.prob_thresh
             if self.opt.all_sample_loc:
                 failed_sample_loc = raypos_tensor.view(-1,3)[torch.flatten(failed_index)]
             else:
                 failed_sample_loc = query_points.squeeze()[failed_index.squeeze()]
-                #failed_sample_loc = query_points.squeeze()
             output['failed_sample_loc'] = failed_sample_loc
             output['loss_alpha'] = torch.mean(opacity_loss)
             output['loss_rgb'] = torch.mean(rgb_loss)

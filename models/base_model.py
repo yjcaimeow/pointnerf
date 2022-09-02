@@ -43,8 +43,11 @@ class BaseModel:
             net = getattr(self, 'net_{}'.format(name))
             assert isinstance(net, nn.Module)
             if self.opt.ddp_train:
-                net = nn.SyncBatchNorm.convert_sync_batchnorm(net.to(self.device))
-                net = DDP(net, device_ids=[self.local_rank], output_device=self.local_rank, find_unused_parameters=True)
+                if self.opt.sync_bn:
+                    net = nn.SyncBatchNorm.convert_sync_batchnorm(net.to(self.device))
+                    net = DDP(net, device_ids=[self.local_rank], output_device=self.local_rank, find_unused_parameters=True)
+                else:
+                    net = DDP(net.to(self.device), device_ids=[self.local_rank], output_device=self.local_rank, find_unused_parameters=True)
             else:
                 net = torch.nn.DataParallel(net.cuda())
             setattr(self, 'net_{}'.format(name), net)

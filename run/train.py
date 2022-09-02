@@ -21,7 +21,7 @@ import random
 import cv2
 from PIL import Image
 from tqdm import tqdm
-from utils.util import new_add_flour, init_distributed_mode, setup_for_distributed
+from utils.util import new_add_flour, init_distributed_mode, setup_for_distributed, our_unique
 import gc
 from tensorboardX import SummaryWriter
 import torch.backends.cudnn as cudnn
@@ -268,6 +268,7 @@ def progressive_distill(t_models, model, dataset, visualizer, opt, bg_info, test
         cprint.info("seqid {}'s failed_sample_loc shape is ....{}".format(seq_id, failed_sample_loc.shape))
 
         if epoch>1:
+            cprint.err('| create from Father! for epoch {}'.format(epoch))
             to_add_pcd_xyz, to_add_pcd_embed, to_add_pcd_color, to_add_pcd_dir = new_add_flour(failed_sample_loc, candidates=model.neural_points.xyz[seq_id], gap=opt.gap, radius=opt.gap, \
                                      embed = model.neural_points.points_embeding[seq_id], color=model.neural_points.points_color[seq_id], dir=model.neural_points.points_dir[seq_id], explicit_create_pcd=False)
         else:
@@ -364,8 +365,6 @@ def main():
         shuffle=(sampler is None), \
         batch_size=opt.batch_size, \
         num_workers=int(opt.n_threads))
-    opt.maximum_step = 1500 * train_dataset.total + 1
-    cprint.err("maximum_step is {}.".format(opt.maximum_step))
     #=============================#
     # ======= teacher ============#
     #=============================#
@@ -399,7 +398,7 @@ def main():
     normRw2c = train_dataset.norm_w2c[:3,:3] # torch.eye(3, device="cuda") #
     img_lst = None
     best_PSNR, best_PSNR_ray_mask =0.0, 0.0
-    best_iter, best_iter_ray_mask =0,0
+    best_iter, best_iter_ray_mask, best_epoch = 0,0,0
     points_xyz_all, points_xyz_all_list=None, None
 
     with torch.no_grad():
@@ -423,6 +422,7 @@ def main():
                 opt.gap = states['gap']
                 best_PSNR = states['best_PSNR'] if 'best_PSNR' in states else best_PSNR
                 best_iter = states['best_iter'] if 'best_iter' in states else best_iter
+                best_epoch = states['best_epoch'] if 'best_epoch' in states else best_epoch
                 best_PSNR = best_PSNR.item() if torch.is_tensor(best_PSNR) else best_PSNR
                 visualizer.print_details('++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++')
                 visualizer.print_details('Continue training from {} epoch'.format(opt.resume_iter))
@@ -480,7 +480,7 @@ def main():
                             print("after voxelize:", points_xyz.shape)
                             points_xyz_holder = torch.cat([points_xyz_holder, points_xyz], dim=0)
                         points_xyz_all = points_xyz_holder
-                        np.save('./scene0032_00_voxelized_pcd.npy', points_xyz_all.cpu().numpy())
+                        np.save('./scene0012_00_voxelized_pcd.npy', points_xyz_all.cpu().numpy())
                         exit()
 
                     if opt.embed_init_type=='random':
@@ -594,6 +594,7 @@ def main():
         with torch.no_grad():
             dt = datetime.now()
 
+            '''
             cprint.err('-------------testset--------------')
             test_psnr_tensor, psnr_list, psnr_list_ray_masked = test(t_models, model, test_data_loader, Visualizer(test_opt), test_opt, test_bg_info, test_steps=total_steps, lpips=False, writer=writer, epoch=0, height=test_dataset.height, width=test_dataset.width, \
                                                  dirname=os.path.join(opt.resume_dir, "inference_testset_"+dt.strftime( '%y-%m-%d-%I-%M-%S-%p')))
@@ -611,7 +612,7 @@ def main():
 
             visualizer.print_details(f"test at iter {total_steps}, PSNR: {test_psnr_tensor[0]}")
             visualizer.print_details(f"test at iter {total_steps}, PSNR_ray_mask: {test_psnr_tensor[1]}")
-
+            '''
             cprint.err('-------------trainset--------------')
             test_psnr_tensor, psnr_list, psnr_list_ray_masked = test(t_models, model, train_data_loader_fortest, Visualizer(test_opt), test_opt, test_bg_info, test_steps=total_steps, lpips=False, writer=writer, epoch=0, height=test_dataset.height, width=test_dataset.width, \
                                                  dirname=os.path.join(opt.resume_dir, "inference_trainset_"+dt.strftime( '%y-%m-%d-%I-%M-%S-%p')))
@@ -687,6 +688,16 @@ def main():
                     add_embedding = torch.cat([add_embedding, torch.as_tensor(data["embed"]).cuda()],dim=0)
                     add_color = torch.cat([add_color, torch.as_tensor(data["color"]).cuda()],dim=0)
                     add_dir = torch.cat([add_dir, torch.as_tensor(data["dir"]).cuda()],dim=0)
+                ### remove copy
+                cprint.err('| BEFORE UNIQUE | xyz={} embed={} color={} dir={}'.format(add_xyz.shape, \
+                        add_embedding.shape, add_color.shape, add_dir.shape))
+                add_xyz, indices = our_unique(add_xyz, dim=0)
+                add_embedding = add_embedding[indices]
+                add_color = add_color[indices]
+                add_dir = add_dir[indices]
+                cprint.err('| AFTER UNIQUE | xyz={} embed={} color={} dir={}'.format(add_xyz.shape,
+                        add_embedding.shape, add_color.shape, add_dir.shape))
+                ###
                 add_xyz_list.append(add_xyz)
                 add_embedding_list.append(add_embedding[None,...])
                 add_color_list.append(add_color[None,...])
@@ -702,8 +713,6 @@ def main():
             opt.prob_thresh = ori_prob_thresh
             cprint.warn('back to original prob_thresh is {}.'.format(opt.prob_thresh))
     for epoch in range(epoch_count, opt.maximum_epoch+1):
-        if total_steps>=opt.maximum_step and epoch>=opt.minimum_epoch:
-            break
         epoch_start_time = time.time()
         if opt.ddp_train:
             sampler.set_epoch(epoch)
@@ -749,6 +758,7 @@ def main():
             other_states = {
                 "best_PSNR": best_PSNR,
                 "best_iter": best_iter,
+                "best_epoch": best_epoch,
                 'epoch_count': epoch,
                 'total_steps': total_steps,
                 'gap': opt.gap,
@@ -774,11 +784,12 @@ def main():
                 psnr_list_ray_masked = psnr_list_ray_masked / world_size
 
             best_iter = total_steps if test_psnr_tensor[0] > best_PSNR else best_iter
+            best_epoch = epoch if test_psnr_tensor[0] > best_PSNR else best_epoch
             best_PSNR = max(test_psnr_tensor[0], best_PSNR)
             best_iter_ray_mask = total_steps if test_psnr_tensor[1] > best_PSNR_ray_mask else best_iter_ray_mask
             best_PSNR_ray_mask = max(test_psnr_tensor[1], best_PSNR_ray_mask)
-            visualizer.print_details(f"test at iter {total_steps}, PSNR: {test_psnr_tensor[0]}, best_PSNR: {best_PSNR}, best_iter: {best_iter}")
-            visualizer.print_details(f"test at iter {total_steps}, PSNR_ray_mask: {test_psnr_tensor[1]}, best_PSNR_ray_mask: {best_PSNR_ray_mask}, best_iter: {best_iter_ray_mask}")
+            visualizer.print_details(f"test at iter {total_steps}, PSNR: {test_psnr_tensor[0]}, best_PSNR: {best_PSNR}, best_epoch: {best_epoch}, best_iter: {best_iter}")
+            visualizer.print_details(f"test at iter {total_steps}, PSNR_ray_mask: {test_psnr_tensor[1]}, best_PSNR_ray_mask: {best_PSNR_ray_mask}, best_epoch: {best_epoch}, best_iter: {best_iter_ray_mask}")
             for seq_id in range(len(opt.scans)):
                 print_str = "| TEST | Scan {}'s psnr is {}, psnr_ray_masked is {}.".format(opt.scans[seq_id], psnr_list[seq_id], psnr_list_ray_masked[seq_id])
                 cprint.info(print_str)
@@ -790,7 +801,7 @@ def main():
             model.opt.no_loss = 0
             model.opt.is_train = 1
 
-        if (epoch!=epoch_count and opt.prob_freq > 0 and real_start != total_steps and (epoch in opt.prob_tiers) and total_steps < (opt.prob_maximum_step - 1) and total_steps > 0 and opt.progressive_distill and epoch<opt.maximum_epoch):
+        if (epoch!=epoch_count and opt.prob_freq > 0 and real_start != total_steps and (epoch in opt.prob_tiers) and total_steps > 0 and opt.progressive_distill and epoch<opt.maximum_epoch):
             tier = np.sum(np.asarray(opt.prob_tiers) < total_steps)
             model.opt.is_train = 0
             model.opt.no_loss = 1
@@ -851,6 +862,16 @@ def main():
                         add_embedding = torch.cat([add_embedding, torch.as_tensor(data["embed"]).cuda()],dim=0)
                         add_color = torch.cat([add_color, torch.as_tensor(data["color"]).cuda()],dim=0)
                         add_dir = torch.cat([add_dir, torch.as_tensor(data["dir"]).cuda()],dim=0)
+                    ### remove copy
+                    cprint.err('| BEFORE UNIQUE | xyz={} embed={} color={} dir={}'.format(add_xyz.shape, \
+                            add_embedding.shape, add_color.shape, add_dir.shape))
+                    add_xyz, indices = our_unique(add_xyz, dim=0)
+                    add_embedding = add_embedding[indices]
+                    add_color = add_color[indices]
+                    add_dir = add_dir[indices]
+                    cprint.err('| AFTER UNIQUE | xyz={} embed={} color={} dir={}'.format(add_xyz.shape,
+                        add_embedding.shape, add_color.shape, add_dir.shape))
+
                     add_xyz_list.append(add_xyz)
                     add_embedding_list.append(add_embedding)
                     add_color_list.append(add_color)
@@ -866,6 +887,7 @@ def main():
                     other_states = {
                         "best_PSNR": best_PSNR,
                         "best_iter": best_iter,
+                        "best_epoch": best_epoch,
                         'epoch_count': epoch,
                         'total_steps': total_steps,
                         'gap': opt.gap,

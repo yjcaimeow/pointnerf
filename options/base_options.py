@@ -46,6 +46,18 @@ class BaseOptions:
                                                  help='number of distributed processes')
         parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
 
+        parser.add_argument('--sync_bn',
+                            type=int,
+                            default=1,
+                            help='1 for render_only dataset')
+        parser.add_argument(
+            '--clip_knn',
+            action='store_true',
+            help='if specified, print more debugging information')
+        parser.add_argument(
+            '--relative_thresh',
+            action='store_true',
+            help='if specified, print more debugging information')
         parser.add_argument(
             '--verbose',
             action='store_true',
@@ -282,8 +294,8 @@ class BaseOptions:
             now = datetime.datetime.now().strftime('%y-%m-%d_%H:%M:%S')
             opt.name = opt.name + '_' + now
         sstr = "-".join(opt.scans)
-        opt.name = opt.name+'.'+sstr
-        #opt.name = opt.name+'.'+sstr+'.gpu'+str(opt.PROCESSNUM)
+        #opt.name = opt.name+'.'+sstr
+        opt.name = opt.name+'.'+sstr+'.gpu'+str(opt.PROCESSNUM)
 
         self.print_and_save_options(opt)
 
