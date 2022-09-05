@@ -1,4 +1,4 @@
-name: "checkpoints/scannet/online_distill/distill.withcolor.global_ray_dir.ray_valid.knn.self_attention1.woinitpcd.knn16.gap0.4.create2.self2.relative_thresh"
+name: "checkpoints/scannet/online_distill/distill.withcolor.global_ray_dir.ray_valid.knn.self_attention1.woinitpcd.knn16.gap0.4.create2.self2.relative_thresh.all_sample_loc"
 
 data_root: "/mnt/cache/caiyingjie/data/scannet/scans/"
 pre_d_est: "../checkpoints/MVSNet/model_000014.ckpt"
@@ -43,5 +43,7 @@ gap: 0.4
 knn_k: 16
 relative_thresh: True
 
+all_sample_loc: 1
+
 test_color_loss_items: ['coarse_raycolor', 'ray_miss_coarse_raycolor', 'ray_masked_coarse_raycolor']
-visual_items: ['coarse_raycolor', 'gt_image', 'sample_loc', 'sample_loc_w', 'ray_valid', 'decoded_features']
+visual_items: ['coarse_raycolor', 'gt_image', 'raypos_tensor', 'decoded_features']

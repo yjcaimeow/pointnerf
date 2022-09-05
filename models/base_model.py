@@ -95,7 +95,7 @@ class BaseModel:
             assert isinstance(name, str)
             if name not in ["gt_image_ray_masked", "ray_depth_masked_gt_image", "ray_depth_masked_coarse_raycolor", "ray_masked_coarse_raycolor"]:
                 if no_extra:
-                    if name not in ["sample_loc", "sample_loc_w", "ray_valid", "decoded_features"]:
+                    if name not in ["sample_loc", "sample_loc_w", "ray_valid",'raypos_tensor', "decoded_features"]:
                         ret[name] = getattr(self, name)
                 else:
                     ret[name] = getattr(self, name)

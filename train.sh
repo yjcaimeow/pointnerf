@@ -116,7 +116,6 @@ print_freq=40
 test_num_step=1
 zero_epsilon=1e-3
 
-visual_items='coarse_raycolor gt_image sample_loc sample_loc_w ray_valid decoded_features'
 zero_one_loss_items='conf_coefficient' #regularize background to be either 0 or 1
 zero_one_loss_weights=" 0.0001 "
 sparse_loss_weight=0
@@ -125,7 +124,7 @@ bg_color="white" #"0.0,0.0,0.0,1.0,1.0,1.0"
 split="train"
 
 n_threads=20
-PART=pat_taurus
+PART=openxdlab3
 GPUNUM=$5
 PROCESSNUM=$6
 NODENUM=1
@@ -136,7 +135,7 @@ cd run
 #TOOLS="srun --partition=$PART --quotatype=auto --preempt --gres=gpu:${GPUNUM} -n$NODENUM --ntasks-per-node=1 --cpus-per-task=8"
 #$TOOLS --job-name=$JOBNAME sh -c "CUDA_LAUNCH_BLOCKING=1 python -m torch.distributed.launch --nnodes=$NODENUM --nproc_per_node=$GPUNUM --node_rank \$SLURM_PROCID --master_addr=\$(sinfo -Nh -n \$SLURM_NODELIST | head -n 1 | cut -d ' ' -f 1) --master_port $1 train.py \
 
-TOOLS="srun --partition=$PART --quotatype=reserved --preempt -n${PROCESSNUM} --gres=gpu:${GPUNUM} --ntasks-per-node=${GPUNUM} --cpus-per-task=4"
+TOOLS="srun --partition=$PART --quotatype=auto --preempt -n${PROCESSNUM} --gres=gpu:${GPUNUM} --ntasks-per-node=${GPUNUM} --cpus-per-task=4"
 $TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch train.py \
         -c ${config_yaml} \
         --scans ${scans} \
@@ -212,7 +211,6 @@ $TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch train.py \
         --manual_depth_view $manual_depth_view \
         --depth_occ $depth_occ \
         --manual_std_depth $manual_std_depth \
-        --visual_items $visual_items \
         --appr_feature_str0 $appr_feature_str0 \
         --init_view_num $init_view_num \
         --feat_grad $feat_grad \

@@ -683,10 +683,10 @@ class NeuralPoints(nn.Module):
             self.points_dir_fov = self.points_dir[inputs['seq_id']].squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
         except:
             self.xyz_fov, self.points_embeding_fov, self.points_color_fov, self.points_dir_fov = None, None, None, None
-            return
+            return None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
 
         if self.opt.progressive_distill and self.opt.all_sample_loc==False:
-            return
+            return None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
 
         self.points_conf_fov = None
         sample_pidx, sample_loc, ray_mask_tensor, point_xyz_pers_tensor, sample_loc_w_tensor, sample_ray_dirs_tensor, sample_local_ray_dirs_tensor, vsize, raypos_tensor, index_tensor = self.get_point_indices(inputs, camrotc2w, campos, pixel_idx, torch.min(near_plane).cpu().numpy(), torch.max(far_plane).cpu().numpy(), torch.max(h).cpu().numpy(), torch.max(w).cpu().numpy(), intrinsic.cpu().numpy()[0], vox_query=self.opt.NN<0)

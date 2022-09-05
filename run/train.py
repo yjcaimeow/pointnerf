@@ -249,12 +249,14 @@ def progressive_distill(t_models, model, dataset, visualizer, opt, bg_info, test
                     data['sample_loc_loaded'] = curr_visuals['sample_loc']
                     data['sample_loc_w_loaded'] = curr_visuals['sample_loc_w']
                     data['ray_valid_loaded'] = curr_visuals['ray_valid']
+                if opt.all_sample_loc:
+                    data['raypos_tensor_loaded'] = curr_visuals['raypos_tensor']
                 data['decoded_features_loaded'] = curr_visuals['decoded_features']
 
             model.set_input(data)
             output = model.test()
             failed_sample_loc_list[seq_id].append(output["failed_sample_loc"].cuda())
-            output["ray_mask"] = output["ray_mask"][..., None]
+#            output["ray_mask"] = output["ray_mask"][..., None]
 
     local_rank = int(os.environ["LOCAL_RANK"])
 
@@ -556,9 +558,6 @@ def main():
         batch_size=opt.batch_size, \
         num_workers=int(opt.n_threads))
 
-    #with open('/tmp/.neural-volumetric.name', 'w') as f:
-    #    f.write(opt.name + '\n')
-
     visualizer.reset()
     if total_steps > 0:
         for scheduler in model.schedulers:
@@ -637,7 +636,7 @@ def main():
     #========================================#
     if opt.load_init_pcd_type!='pointnerf' and epoch_count==1:
         ori_prob_thresh = opt.prob_thresh
-        opt.prob_thresh=-1.0
+        opt.prob_thresh=0.0
         cprint.info("| current opt.gap is {} and prob_thresh is {}.".format(opt.gap, opt.prob_thresh))
         model.opt.is_train = 0
         model.opt.no_loss = 1
@@ -753,7 +752,6 @@ def main():
         if local_rank==0:
             cprint.info("epoch training time is {} for exp {}.".format(time.time()-epoch_start_time, opt.name))
 
-        #torch.cuda.empty_cache()
         if local_rank==0 and epoch % opt.save_iter_freq == 0 and total_steps > 0 and epoch!=epoch_count:
             other_states = {
                 "best_PSNR": best_PSNR,
@@ -768,7 +766,6 @@ def main():
             cprint.err("exp {} save epoch {}.".format(opt.name, epoch))
 
         if  (epoch!=epoch_count and epoch % opt.test_freq == 0 and total_steps > 0):
-            #torch.cuda.empty_cache()
             model.opt.is_train = 0
             model.opt.no_loss = 1
             with torch.no_grad():
