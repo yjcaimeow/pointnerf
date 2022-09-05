@@ -795,6 +795,8 @@ def main():
                 cprint.info(print_str)
                 visualizer.print_details(print_str)
                 if writer is not None:
+                    writer.add_scalar('test_iter_psnr_'+opt.scans[seq_id], psnr_list[seq_id], total_steps)
+                    writer.add_scalar('test_iter_psnr_masked_'+opt.scans[seq_id], psnr_list_ray_masked[seq_id], total_steps)
                     writer.add_scalar('test_epoch_psnr_'+opt.scans[seq_id], psnr_list[seq_id], epoch)
                     writer.add_scalar('test_epoch_psnr_masked_'+opt.scans[seq_id], psnr_list_ray_masked[seq_id], epoch)
 
