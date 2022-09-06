@@ -218,6 +218,7 @@ def progressive_distill(t_models, model, dataset, visualizer, opt, bg_info, test
     cprint.info("len of pro_distill_data_loader is {}.".format(len(pro_distill_data_loader)))
 
     for index, data in enumerate(pro_distill_data_loader):
+        cprint.err('process....{}'.format(index))
         failed_sample_loc = []
         vid = data["vid"]
         seq_id = data["seq_id"].item()
@@ -402,7 +403,7 @@ def main():
     best_PSNR, best_PSNR_ray_mask =0.0, 0.0
     best_iter, best_iter_ray_mask, best_epoch = 0,0,0
     points_xyz_all, points_xyz_all_list=None, None
-
+    load_resume=False
     with torch.no_grad():
         print(opt.checkpoints_dir + opt.name + "/*_net_ray_marching.pth")
         if len([n for n in glob.glob(opt.checkpoints_dir + opt.name + "/*_net_ray_marching.pth") if os.path.isfile(n)]) > 0:
@@ -415,6 +416,7 @@ def main():
                 total_steps = 0
                 visualizer.print_details("No previous checkpoints, start from scratch!!!!")
             else:
+                load_resume=True
                 opt.resume_iter = resume_iter
                 cprint.info("init {} load.".format(os.path.join(resume_dir, '{}_states.pth'.format(resume_iter))))
                 states = torch.load(
@@ -534,13 +536,13 @@ def main():
     #       ddp model                        #
     #                                        #
     #========================================#
+    opt.resume_dir = os.path.join(opt.checkpoints_dir, opt.name)
     cprint.info('| init model')
     if opt.ddp_train:
         model.set_ddp()
         cprint.info("| init done")
     model.setup(opt, train_len=len(train_dataset))
     model.train()
-    opt.resume_dir = os.path.join(opt.checkpoints_dir, opt.name)
     # create test loader
     test_opt = copy.deepcopy(opt)
     test_opt.is_train = False
@@ -634,7 +636,7 @@ def main():
     #         the first epoch generate pcd   #
     #                                        #
     #========================================#
-    if opt.load_init_pcd_type!='pointnerf' and epoch_count==1:
+    if opt.load_init_pcd_type!='pointnerf' and epoch_count==1 and load_resume==False:
         ori_prob_thresh = opt.prob_thresh
         opt.prob_thresh=0.0
         cprint.info("| current opt.gap is {} and prob_thresh is {}.".format(opt.gap, opt.prob_thresh))
@@ -711,6 +713,19 @@ def main():
             train_dataset.opt.random_sample_size = train_random_sample_size
             opt.prob_thresh = ori_prob_thresh
             cprint.warn('back to original prob_thresh is {}.'.format(opt.prob_thresh))
+            if local_rank==0:
+                other_states = {
+                    "best_PSNR": best_PSNR,
+                    "best_iter": best_iter,
+                    "best_epoch": best_epoch,
+                    'epoch_count': epoch_count,
+                    'total_steps': total_steps,
+                    'gap': opt.gap,
+                }
+                visualizer.print_details('saving model ({}, epoch {}, total_steps {})'.format(opt.name, epoch_count, total_steps))
+                model.save_networks(total_steps, epoch_count, other_states)
+                cprint.err("exp {} save epoch {}.".format(opt.name, epoch_count))
+
     for epoch in range(epoch_count, opt.maximum_epoch+1):
         epoch_start_time = time.time()
         if opt.ddp_train:

@@ -350,6 +350,11 @@ class NeuralPointsRayMarching(nn.Module):
                     sampled_xyz, sample_pnt_mask, sample_loc, sample_loc_w, sample_ray_dirs, sample_local_ray_dirs, \
                     ray_mask_tensor, vsize, grid_vox_sz, point_xyz_pers_tensor, raypos_tensor, index_tensor = self.neural_points({"pixel_idx": pixel_idx, "camrotc2w": camrotc2w, "campos": campos, "near": near, "far": far, \
                                     "focal": focal, "h": h, "w": w, "intrinsic": intrinsic,"gt_image":gt_image, "raydir":raydir, "c2w":c2w, "local_raydir":local_raydir, "seq_id":seq_id})
+            if sample_loc_w is not None:
+                if self.opt.load_points == 10:
+                    np.savetxt(str(id)+'_teacher_sample_loc.txt', sample_loc_w.reshape(-1,3).cpu().numpy())
+                else:
+                    np.savetxt(str(id)+'_student_sample_loc.txt', sample_loc_w.reshape(-1,3).cpu().numpy())
             if sample_pnt_mask is not None:
                 ray_valid = torch.any(sample_pnt_mask, dim=-1)
             output["ray_mask"] = ray_mask_tensor

@@ -182,7 +182,6 @@ class BaseOptions:
         parser.add_argument(
             '--model',
             type=str,
-            required=True,
             help='name of model, determine which network model to use')
 
         #================================ running ================================#

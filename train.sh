@@ -33,27 +33,6 @@ point_dir_mode="1" # 0 for only at features, 1 for color branch
 point_color_mode="1" # 0 for only at features, 1 for color branch
 default_conf=-1
 
-agg_feat_xyz_mode="None"
-agg_alpha_xyz_mode="None"
-agg_color_xyz_mode="None"
-feature_init_method="rand" #"rand" # "zeros"
-agg_axis_weight=" 1. 1. 1."
-agg_dist_pers=20
-radius_limit_scale=4
-depth_limit_scale=0
-vscale=" 2 2 2 "
-kernel_size=" 3 3 3 "
-query_size=" 3 3 3 "
-vsize=" 0.008 0.008 0.008 " #" 0.005 0.005 0.005 "
-wcoord_query=1
-z_depth_dim=400
-max_o=610000
-ranges=" -10.0 -10.0 -10.0 10.0 10.0 10.0 "
-SR=24
-K=8
-P=26
-NN=2
-
 act_type="LeakyReLU"
 
 agg_intrp_order=2
@@ -124,7 +103,7 @@ bg_color="white" #"0.0,0.0,0.0,1.0,1.0,1.0"
 split="train"
 
 n_threads=20
-PART=openxdlab3
+PART=pat_taurus
 GPUNUM=$5
 PROCESSNUM=$6
 NODENUM=1
@@ -135,7 +114,7 @@ cd run
 #TOOLS="srun --partition=$PART --quotatype=auto --preempt --gres=gpu:${GPUNUM} -n$NODENUM --ntasks-per-node=1 --cpus-per-task=8"
 #$TOOLS --job-name=$JOBNAME sh -c "CUDA_LAUNCH_BLOCKING=1 python -m torch.distributed.launch --nnodes=$NODENUM --nproc_per_node=$GPUNUM --node_rank \$SLURM_PROCID --master_addr=\$(sinfo -Nh -n \$SLURM_NODELIST | head -n 1 | cut -d ' ' -f 1) --master_port $1 train.py \
 
-TOOLS="srun --partition=$PART --quotatype=auto --preempt -n${PROCESSNUM} --gres=gpu:${GPUNUM} --ntasks-per-node=${GPUNUM} --cpus-per-task=4"
+TOOLS="srun --partition=$PART --quotatype=$7 --preempt -n${PROCESSNUM} --gres=gpu:${GPUNUM} --ntasks-per-node=${GPUNUM} --cpus-per-task=4"
 $TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch train.py \
         -c ${config_yaml} \
         --scans ${scans} \
@@ -172,23 +151,9 @@ $TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch train.py \
         --which_tonemap_func $which_tonemap_func \
         --load_points $load_points \
         --resume_iter $resume_iter \
-        --feature_init_method $feature_init_method \
-        --agg_axis_weight $agg_axis_weight \
         --agg_distance_kernel $agg_distance_kernel \
-        --radius_limit_scale $radius_limit_scale \
-        --depth_limit_scale $depth_limit_scale  \
-        --vscale $vscale    \
-        --kernel_size $kernel_size  \
-        --SR $SR  \
-        --K $K  \
-        --P $P \
-        --NN $NN \
-        --agg_feat_xyz_mode $agg_feat_xyz_mode \
-        --agg_alpha_xyz_mode $agg_alpha_xyz_mode \
-        --agg_color_xyz_mode $agg_color_xyz_mode  \
         --save_point_freq $save_point_freq  \
         --raydist_mode_unit $raydist_mode_unit  \
-        --agg_dist_pers $agg_dist_pers \
         --agg_intrp_order $agg_intrp_order \
         --shading_feature_mlp_layer0 $shading_feature_mlp_layer0 \
         --shading_feature_mlp_layer1 $shading_feature_mlp_layer1 \
@@ -233,10 +198,4 @@ $TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch train.py \
         --zero_one_loss_weights $zero_one_loss_weights \
         --default_conf $default_conf \
         --edge_filter $edge_filter \
-        --vsize $vsize \
-        --wcoord_query $wcoord_query \
-        --ranges $ranges \
-        --z_depth_dim $z_depth_dim \
-        --max_o $max_o \
-        --query_size $query_size \
         --debug"
