@@ -20,6 +20,7 @@ from os.path import join
 from .data_utils import get_dtu_raydir
 from plyfile import PlyData, PlyElement
 import io
+import random
 
 FLIP_Z = np.asarray([
     [1,0,0],
@@ -126,6 +127,10 @@ class ScannetFtDataset(BaseDataset):
             self.id_list = [self.id_list[i] for i in frame_ids]
             self.id_list_name = [self.id_list_name[i] for i in frame_ids]
             self.seq_ids = [self.seq_ids[i] for i in frame_ids]
+
+        mapIndexPosition = list(zip(self.id_list, self.id_list_name, self.seq_ids))
+        random.shuffle(mapIndexPosition)
+        self.id_list, self.id_list_name, self.seq_ids = zip(*mapIndexPosition)
 
         self.view_id_list=[]
         self.norm_w2c, self.norm_c2w = torch.eye(4, device="cuda", dtype=torch.float32), torch.eye(4, device="cuda", dtype=torch.float32)
@@ -262,20 +267,17 @@ class ScannetFtDataset(BaseDataset):
         image_paths = [f for f in os.listdir(colordir) if os.path.isfile(os.path.join(colordir, f))]
 
         image_paths = [os.path.join(self.data_dir, scan, "exported/color/{}.jpg".format(i)) for i in range(len(image_paths))]
-        self.image_paths.extend(image_paths)
+        #self.image_paths.extend(image_paths)
         all_id_list = self.filter_valid_id(list(range(len(image_paths))), scan)
         self.all_id_list=all_id_list #### hahahahaha
 
-        if len(self.all_id_list) > 2900:
-            train_id_list = [self.all_id_list[i] for i in range(len(self.all_id_list)) if (((i % 100) > 19) and ((i % 100) < 81 or (i//100+1)*100>=len(self.all_id_list)))]
-            test_id_list = self.all_id_list[::100]
+        step=5
+        train_id_list = all_id_list[::step]
+        test_id_list = [all_id_list[i] for i in range(len(all_id_list)) if (i % step) !=0] if self.opt.test_num_step != 0 else all_id_list
+        if len(self.opt.scans)>1:
+            test_id_list = test_id_list[::5]
         else:
-            step=5
-            train_id_list = all_id_list[::step]
-            test_id_list = [all_id_list[i] for i in range(len(all_id_list)) if (i % step) !=0] if self.opt.test_num_step != 0 else all_id_list
             test_id_list = test_id_list[::50]
-
-        #train_id_list = test_id_list #DEBUG
 
         if self.opt.all_frames:
             id_list = train_id_list+test_id_list

@@ -185,6 +185,10 @@ class BaseOptions:
             help='name of model, determine which network model to use')
 
         #================================ running ================================#
+        parser.add_argument('--clip_radius',
+                            type=float,
+                            default=1.0,
+                            help='input batch size')
         parser.add_argument('--batch_size',
                             type=int,
                             default=1,
@@ -201,6 +205,10 @@ class BaseOptions:
                             type=str,
                             default='./checkpoints',
                             help='models are saved here')
+        parser.add_argument('--new_local_knn',
+                            type=int,
+                            default=0,
+                            help='plot loss curves with tensorboard')
         parser.add_argument('--show_tensorboard',
                             type=int,
                             default=0,

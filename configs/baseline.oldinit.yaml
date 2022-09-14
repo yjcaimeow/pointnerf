@@ -1,4 +1,4 @@
-name: "checkpoints/scannet/online_distill_all_sample_loc/distill.withcolor.global_ray_dir.ray_valid.knn.self_attention1.woinitpcd.knn8.gap0.4.create2.relative_thresh.all_sample_loc.teacher24"
+name: "checkpoints/scannet/online_distill_all_sample_loc/distill.withcolor.global_ray_dir.ray_valid.knn.self_attention1.woinitpcd.knn16.gap0.4.create2.relative_thresh"
 
 data_root: "/mnt/cache/caiyingjie/data/scannet/scans/"
 pre_d_est: "../checkpoints/MVSNet/model_000014.ckpt"
@@ -12,7 +12,7 @@ embed_init_type: 'model'
 progressive_distill: 1
 
 # ddp init type
-ddp_init_type: 'new'
+ddp_init_type: 'old'
 
 agg_type: 'attention' # another is mlp
 k_type: 'knn'
@@ -40,13 +40,11 @@ prob_mode: 1 # 0, n, 1 t, 10 t&n
 prob_thresh: 0.9
 prob_mul: 0.4
 gap: 0.4
-knn_k: 8
+knn_k: 16
 relative_thresh: True
 
-all_sample_loc: 1
-
 test_color_loss_items: ['coarse_raycolor', 'ray_miss_coarse_raycolor', 'ray_masked_coarse_raycolor']
-visual_items: ['coarse_raycolor', 'gt_image', 'raypos_tensor', 'decoded_features']
+visual_items: ['coarse_raycolor', 'gt_image', 'sample_loc', 'sample_loc_w', 'ray_valid', 'decoded_features']
 
 agg_feat_xyz_mode: "None"
 agg_alpha_xyz_mode: "None"
@@ -64,7 +62,7 @@ wcoord_query: 1
 z_depth_dim: 400
 max_o: 610000
 ranges: [-10.0, -10.0, -10.0, 10.0, 10.0, 10.0]
-SR: 400
+SR: 24
 K: 8
 P: 26
 NN: 2

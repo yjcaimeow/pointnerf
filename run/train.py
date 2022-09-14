@@ -104,6 +104,8 @@ def test(t_models, model, data_loader, visualizer, opt, bg_info, test_steps=0, g
                         data['sample_loc_loaded'] = curr_visuals['sample_loc']
                         data['sample_loc_w_loaded'] = curr_visuals['sample_loc_w']
                         data['ray_valid_loaded'] = curr_visuals['ray_valid']
+                    if opt.all_sample_loc:
+                        data['raypos_tensor_loaded'] = curr_visuals['raypos_tensor']
                     data['decoded_features_loaded'] = curr_visuals['decoded_features']
 
             model.set_input(data)
@@ -262,64 +264,64 @@ def progressive_distill(t_models, model, dataset, visualizer, opt, bg_info, test
     local_rank = int(os.environ["LOCAL_RANK"])
 
     for seq_id in range(len(failed_sample_loc_list)):
-        failed_sample_loc = torch.cat(failed_sample_loc_list[seq_id])
         add_xyz = torch.zeros([0, 3], device="cuda", dtype=torch.float32)
         add_dir = torch.zeros([0, 3], device="cuda", dtype=torch.float32)
         add_color = torch.zeros([0, 3], device="cuda", dtype=torch.float32)
         add_embedding = torch.zeros([0, opt.point_features_dim], device="cuda", dtype=torch.float32)
+        if len(failed_sample_loc_list[seq_id])>0:
+            failed_sample_loc = torch.cat(failed_sample_loc_list[seq_id])
+            cprint.info("seqid {}'s failed_sample_loc shape is ....{}".format(seq_id, failed_sample_loc.shape))
 
-        cprint.info("seqid {}'s failed_sample_loc shape is ....{}".format(seq_id, failed_sample_loc.shape))
-
-        if epoch>1:
-            cprint.err('| create from Father! for epoch {}'.format(epoch))
-            to_add_pcd_xyz, to_add_pcd_embed, to_add_pcd_color, to_add_pcd_dir = new_add_flour(failed_sample_loc, candidates=model.neural_points.xyz[seq_id], gap=opt.gap, radius=opt.gap, \
-                                     embed = model.neural_points.points_embeding[seq_id], color=model.neural_points.points_color[seq_id], dir=model.neural_points.points_dir[seq_id], explicit_create_pcd=False)
-        else:
-            #'''
-            points_xyz_all, *_ = new_add_flour(failed_sample_loc)
-            if opt.embed_init_type=='random':
-                points_embedding_all = torch.randn([1, len(points_xyz_all), opt.point_features_dim], device=points_xyz_all.device, dtype=torch.float32)
-                points_color_all = torch.randn([1, len(points_xyz_all), 3], device=points_xyz_all.device, dtype=torch.float32)
-                points_dir_all = torch.randn([1, len(points_xyz_all), 3], device=points_xyz_all.device, dtype=torch.float32)
+            if epoch>1:
+                cprint.err('| create from Father! for epoch {}'.format(epoch))
+                to_add_pcd_xyz, to_add_pcd_embed, to_add_pcd_color, to_add_pcd_dir = new_add_flour(failed_sample_loc, candidates=model.neural_points.xyz[seq_id], gap=opt.gap, radius=opt.gap, \
+                                        embed = model.neural_points.points_embeding[seq_id], color=model.neural_points.points_color[seq_id], dir=model.neural_points.points_dir[seq_id], explicit_create_pcd=False)
             else:
-                campos, camdir = dataset.get_campos_ray(opt.scans[seq_id], seq_id)
-                base_num = torch.sum(torch.tensor(dataset.seq_ids) < seq_id)
-                cam_ind = nearest_view(campos, camdir, points_xyz_all)+base_num
-                unique_cam_ind = torch.unique(cam_ind)
-                print(seq_id,"====== extract unique_cam_ind=======", unique_cam_ind.shape, unique_cam_ind)
-                points_xyz_all = [points_xyz_all[cam_ind[:,0]==unique_cam_ind[i], :] for i in range(len(unique_cam_ind))]
-                featuredim = opt.point_features_dim
-                points_embedding_all = torch.zeros([1, 0, featuredim], device=unique_cam_ind.device, dtype=torch.float32)
-                points_color_all = torch.zeros([1, 0, 3], device=unique_cam_ind.device, dtype=torch.float32)
-                points_dir_all = torch.zeros([1, 0, 3], device=unique_cam_ind.device, dtype=torch.float32)
-                print("extract points embeding & colors", )
-                for i in tqdm(range(len(unique_cam_ind))):
-                    id = unique_cam_ind[i]
-                    batch = dataset.get_item(id, full_img=True, npz=False)
-                    HDWD = [dataset.height, dataset.width]
-                    c2w = batch["c2w"][0].cuda()
-                    w2c = torch.inverse(c2w)
-                    intrinsic = batch["intrinsic"].cuda()
-                    # cam_xyz_all 252, 4
-                    cam_xyz_all = (torch.cat([points_xyz_all[i], torch.ones_like(points_xyz_all[i][...,-1:])], dim=-1) @ w2c.transpose(0,1))[..., :3]
-                    embedding, color, dir, conf = mvs_model.query_embedding(HDWD, cam_xyz_all[None,...], None, batch['images'].cuda(), c2w[None, None,...], w2c[None, None,...], intrinsic[:, None,...], 0, pointdir_w=True)
-                    points_embedding_all = torch.cat([points_embedding_all, embedding], dim=1)
-                    points_color_all = torch.cat([points_color_all, color], dim=1)
-                    points_dir_all = torch.cat([points_dir_all, dir], dim=1)
-                points_xyz_all=torch.cat(points_xyz_all, dim=0)
+                #'''
+                points_xyz_all, *_ = new_add_flour(failed_sample_loc)
+                if opt.embed_init_type=='random':
+                    points_embedding_all = torch.randn([1, len(points_xyz_all), opt.point_features_dim], device=points_xyz_all.device, dtype=torch.float32)
+                    points_color_all = torch.randn([1, len(points_xyz_all), 3], device=points_xyz_all.device, dtype=torch.float32)
+                    points_dir_all = torch.randn([1, len(points_xyz_all), 3], device=points_xyz_all.device, dtype=torch.float32)
+                else:
+                    campos, camdir = dataset.get_campos_ray(opt.scans[seq_id], seq_id)
+                    base_num = torch.sum(torch.tensor(dataset.seq_ids) < seq_id)
+                    cam_ind = nearest_view(campos, camdir, points_xyz_all)+base_num
+                    unique_cam_ind = torch.unique(cam_ind)
+                    print(seq_id,"====== extract unique_cam_ind=======", unique_cam_ind.shape, unique_cam_ind)
+                    points_xyz_all = [points_xyz_all[cam_ind[:,0]==unique_cam_ind[i], :] for i in range(len(unique_cam_ind))]
+                    featuredim = opt.point_features_dim
+                    points_embedding_all = torch.zeros([1, 0, featuredim], device=unique_cam_ind.device, dtype=torch.float32)
+                    points_color_all = torch.zeros([1, 0, 3], device=unique_cam_ind.device, dtype=torch.float32)
+                    points_dir_all = torch.zeros([1, 0, 3], device=unique_cam_ind.device, dtype=torch.float32)
+                    print("extract points embeding & colors", )
+                    for i in tqdm(range(len(unique_cam_ind))):
+                        id = unique_cam_ind[i]
+                        batch = dataset.get_item(id, full_img=True, npz=False)
+                        HDWD = [dataset.height, dataset.width]
+                        c2w = batch["c2w"][0].cuda()
+                        w2c = torch.inverse(c2w)
+                        intrinsic = batch["intrinsic"].cuda()
+                        # cam_xyz_all 252, 4
+                        cam_xyz_all = (torch.cat([points_xyz_all[i], torch.ones_like(points_xyz_all[i][...,-1:])], dim=-1) @ w2c.transpose(0,1))[..., :3]
+                        embedding, color, dir, conf = mvs_model.query_embedding(HDWD, cam_xyz_all[None,...], None, batch['images'].cuda(), c2w[None, None,...], w2c[None, None,...], intrinsic[:, None,...], 0, pointdir_w=True)
+                        points_embedding_all = torch.cat([points_embedding_all, embedding], dim=1)
+                        points_color_all = torch.cat([points_color_all, color], dim=1)
+                        points_dir_all = torch.cat([points_dir_all, dir], dim=1)
+                    points_xyz_all=torch.cat(points_xyz_all, dim=0)
 
-            to_add_pcd_xyz = points_xyz_all
-            to_add_pcd_dir = points_dir_all.squeeze()
-            to_add_pcd_embed = points_embedding_all.squeeze()
-            to_add_pcd_color = points_color_all.squeeze()
-            ### ''' for the first pcd '''#
+                to_add_pcd_xyz = points_xyz_all
+                to_add_pcd_dir = points_dir_all.squeeze()
+                to_add_pcd_embed = points_embedding_all.squeeze()
+                to_add_pcd_color = points_color_all.squeeze()
+                ### ''' for the first pcd '''#
 
-        cprint.info("add level {} res flour xyz {} and embed {} and {} color and {} dir number.".format(opt.gap, to_add_pcd_xyz.shape, to_add_pcd_embed.shape, to_add_pcd_color.shape, to_add_pcd_dir.shape))
+            cprint.info("add level {} res flour xyz {} and embed {} and {} color and {} dir number.".format(opt.gap, to_add_pcd_xyz.shape, to_add_pcd_embed.shape, to_add_pcd_color.shape, to_add_pcd_dir.shape))
 
-        add_xyz       = torch.cat([add_xyz, to_add_pcd_xyz], dim=0)
-        add_dir       = torch.cat([add_dir, to_add_pcd_dir], dim=0)
-        add_color     = torch.cat([add_color, to_add_pcd_color], dim=0)
-        add_embedding = torch.cat([add_embedding, to_add_pcd_embed],dim=0)
+            add_xyz       = torch.cat([add_xyz, to_add_pcd_xyz], dim=0)
+            add_dir       = torch.cat([add_dir, to_add_pcd_dir], dim=0)
+            add_color     = torch.cat([add_color, to_add_pcd_color], dim=0)
+            add_embedding = torch.cat([add_embedding, to_add_pcd_embed],dim=0)
 
         np.savez('{}/epoch{}_rank{}_{}_seqid{}.npz'.format(opt.resume_dir, epoch, local_rank, os.getpid(), seq_id), xyz = add_xyz.cpu().numpy(), embed=add_embedding.cpu().numpy(), color=add_color.cpu().numpy(), dir=add_dir.cpu().numpy())
     output = torch.tensor([1]).cuda()
@@ -382,10 +384,11 @@ def main():
         t_opt.agg_type='mlp'
         t_opt.k_type='voxel'
 
-        cprint.info('original vsize is {}'.format(t_opt.vsize))
+        cprint.info('original vsize is {}, SR is {}'.format(t_opt.vsize, t_opt.SR))
         t_opt.vsize=[0.008 for value in t_opt.vsize]
+        t_opt.SR = 24
         t_opt.radius_limit_scale=4
-        cprint.info('t_model vsize is {}'.format(t_opt.vsize))
+        cprint.info('t_model vsize is {}, SR is {}'.format(t_opt.vsize, t_opt.SR))
         t_models = []
         for scan in opt.scans:
             t_opt.name=scan
@@ -402,6 +405,7 @@ def main():
     img_lst = None
     best_PSNR, best_PSNR_ray_mask =0.0, 0.0
     best_iter, best_iter_ray_mask, best_epoch = 0,0,0
+    psnr_list_best, psnr_list_ray_masked_best = torch.tensor([0.0 for idx in range(len(opt.scans))]).cuda(), torch.tensor([0.0 for idx in range(len(opt.scans))]).cuda()
     points_xyz_all, points_xyz_all_list=None, None
     load_resume=False
     with torch.no_grad():
@@ -472,7 +476,7 @@ def main():
                             dim=-1) > 0
                         points_xyz_all = points_xyz_all[mask]
 
-                    if opt.vox_res > 0 and opt.load_init_pcd_type=='pointnerf' and local_rank==0 and 1==2:
+                    if opt.vox_res > 0 and opt.load_init_pcd_type=='pointnerf' and local_rank==0:
                         points_xyz_all = [points_xyz_all] if not isinstance(points_xyz_all, list) else points_xyz_all
                         points_xyz_holder = torch.zeros([0,3], dtype=points_xyz_all[0].dtype, device="cuda")
                         for i in range(len(points_xyz_all)):
@@ -484,8 +488,8 @@ def main():
                             print("after voxelize:", points_xyz.shape)
                             points_xyz_holder = torch.cat([points_xyz_holder, points_xyz], dim=0)
                         points_xyz_all = points_xyz_holder
-                        np.save('./scene0012_00_voxelized_pcd.npy', points_xyz_all.cpu().numpy())
-                        exit()
+                        #np.save('./scene0012_00_voxelized_pcd.npy', points_xyz_all.cpu().numpy())
+                        #exit()
 
                     if opt.embed_init_type=='random':
                         points_embedding_all = torch.randn([1, len(points_xyz_all), opt.point_features_dim], device=points_xyz_all.device, dtype=torch.float32)
@@ -747,6 +751,8 @@ def main():
                         data['sample_loc_loaded'] = curr_visuals['sample_loc']
                         data['sample_loc_w_loaded'] = curr_visuals['sample_loc_w']
                         data['ray_valid_loaded'] = curr_visuals['ray_valid']
+                    if opt.all_sample_loc:
+                        data['raypos_tensor_loaded'] = curr_visuals['raypos_tensor']
                     data['decoded_features_loaded'] = curr_visuals['decoded_features']
             model.set_input(data)
 
@@ -791,9 +797,12 @@ def main():
                 test_psnr_tensor /= world_size
 
                 dist.all_reduce(psnr_list, op=torch.distributed.ReduceOp.SUM)
-                psnr_list = psnr_list / world_size
+                psnr_list = (psnr_list / world_size).float()
                 dist.all_reduce(psnr_list_ray_masked, op=torch.distributed.ReduceOp.SUM)
-                psnr_list_ray_masked = psnr_list_ray_masked / world_size
+                psnr_list_ray_masked = (psnr_list_ray_masked / world_size).float()
+
+                psnr_list_best = torch.where(psnr_list> psnr_list_best, psnr_list, psnr_list_best)
+                psnr_list_ray_masked_best = torch.where(psnr_list_ray_masked> psnr_list_ray_masked_best, psnr_list_ray_masked, psnr_list_ray_masked_best)
 
             best_iter = total_steps if test_psnr_tensor[0] > best_PSNR else best_iter
             best_epoch = epoch if test_psnr_tensor[0] > best_PSNR else best_epoch
@@ -803,6 +812,8 @@ def main():
             visualizer.print_details(f"test at iter {total_steps}, PSNR: {test_psnr_tensor[0]}, best_PSNR: {best_PSNR}, best_epoch: {best_epoch}, best_iter: {best_iter}")
             visualizer.print_details(f"test at iter {total_steps}, PSNR_ray_mask: {test_psnr_tensor[1]}, best_PSNR_ray_mask: {best_PSNR_ray_mask}, best_epoch: {best_epoch}, best_iter: {best_iter_ray_mask}")
             for seq_id in range(len(opt.scans)):
+                print_str = "| AAAA | Scan {}'s psnr is {}, psnr_ray_masked is {}.".format(opt.scans[seq_id], psnr_list_best[seq_id], psnr_list_ray_masked_best[seq_id])
+                cprint.info(print_str)
                 print_str = "| TEST | Scan {}'s psnr is {}, psnr_ray_masked is {}.".format(opt.scans[seq_id], psnr_list[seq_id], psnr_list_ray_masked[seq_id])
                 cprint.info(print_str)
                 visualizer.print_details(print_str)

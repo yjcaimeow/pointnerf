@@ -111,10 +111,8 @@ cd run
 
 #export NCCL_SOCKET_IFNAME=eth0
 #export NCCL_IB_DISABLE=1
-#TOOLS="srun --partition=$PART --quotatype=$7 --preempt --gres=gpu:${GPUNUM} -n$NODENUM --ntasks-per-node=1 --cpus-per-task=8"
-#$TOOLS --job-name=$JOBNAME sh -c "CUDA_LAUNCH_BLOCKING=1 python -m torch.distributed.launch --nnodes=$NODENUM --nproc_per_node=$GPUNUM --node_rank \$SLURM_PROCID --master_addr=\$(sinfo -Nh -n \$SLURM_NODELIST | head -n 1 | cut -d ' ' -f 1) --master_port $1 train.py \
-TOOLS="srun --partition=$PART --quotatype=auto --preempt -n${PROCESSNUM} --gres=gpu:${GPUNUM} --ntasks-per-node=${GPUNUM} --cpus-per-task=4"
-$TOOLS --job-name=$JOBNAME sh -c "python -m torch.distributed.launch train.py \
+TOOLS="srun --partition=$PART --quotatype=auto --preempt --gres=gpu:${GPUNUM} -n$NODENUM --ntasks-per-node=1 --cpus-per-task=8"
+$TOOLS --job-name=$JOBNAME sh -c "CUDA_LAUNCH_BLOCKING=1 python -m torch.distributed.launch --nnodes=$NODENUM --nproc_per_node=$GPUNUM --node_rank \$SLURM_PROCID --master_addr=\$(sinfo -Nh -n \$SLURM_NODELIST | head -n 1 | cut -d ' ' -f 1) --master_port $1 train.py \
         -c ${config_yaml} \
         --scans ${scans} \
         --ddp_train --port ${port} \

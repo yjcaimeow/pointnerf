@@ -1,4 +1,4 @@
-name: "checkpoints/scannet/online_distill_all_sample_loc/distill.withcolor.global_ray_dir.ray_valid.knn.self_attention1.woinitpcd.knn8.gap0.4.create2.relative_thresh.all_sample_loc.teacher24"
+name: "checkpoints/scannet/online_distill_all_sample_loc/distill.withcolor.global_ray_dir.ray_valid.knn.self_attention1.woinitpcd.knn8.gap0.4.create2.relative_thresh.all_sample_loc.teacher24.studenall.radius1"
 
 data_root: "/mnt/cache/caiyingjie/data/scannet/scans/"
 pre_d_est: "../checkpoints/MVSNet/model_000014.ckpt"
@@ -44,6 +44,8 @@ knn_k: 8
 relative_thresh: True
 
 all_sample_loc: 1
+new_local_knn: 1
+clip_knn: 1
 
 test_color_loss_items: ['coarse_raycolor', 'ray_miss_coarse_raycolor', 'ray_masked_coarse_raycolor']
 visual_items: ['coarse_raycolor', 'gt_image', 'raypos_tensor', 'decoded_features']
@@ -64,7 +66,7 @@ wcoord_query: 1
 z_depth_dim: 400
 max_o: 610000
 ranges: [-10.0, -10.0, -10.0, 10.0, 10.0, 10.0]
-SR: 400
+SR: 24
 K: 8
 P: 26
 NN: 2

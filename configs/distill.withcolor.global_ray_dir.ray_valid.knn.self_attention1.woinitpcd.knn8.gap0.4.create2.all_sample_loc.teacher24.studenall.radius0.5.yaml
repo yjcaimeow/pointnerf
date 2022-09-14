@@ -1,4 +1,4 @@
-name: "checkpoints/scannet/online_distill/distill.withcolor.global_ray_dir.ray_valid.knn.self_attention1.woinitpcd.knn16.gap0.4.create2.self1.relative_thresh"
+name: "checkpoints/scannet/online_distill_all_sample_loc/distill.withcolor.global_ray_dir.ray_valid.knn.self_attention1.woinitpcd.knn8.gap0.4.create2.all_sample_loc.teacher24.studenall.radius0.5"
 
 data_root: "/mnt/cache/caiyingjie/data/scannet/scans/"
 pre_d_est: "../checkpoints/MVSNet/model_000014.ckpt"
@@ -40,7 +40,34 @@ prob_mode: 1 # 0, n, 1 t, 10 t&n
 prob_thresh: 0.9
 prob_mul: 0.4
 gap: 0.4
-knn_k: 16
-relative_thresh: True
+knn_k: 8
+relative_thresh: False
+
+all_sample_loc: 1
+new_local_knn: 1
+clip_knn: 1
 
 test_color_loss_items: ['coarse_raycolor', 'ray_miss_coarse_raycolor', 'ray_masked_coarse_raycolor']
+visual_items: ['coarse_raycolor', 'gt_image', 'raypos_tensor', 'decoded_features']
+
+agg_feat_xyz_mode: "None"
+agg_alpha_xyz_mode: "None"
+agg_color_xyz_mode: "None"
+feature_init_method: "rand" #"rand" # "zeros"
+agg_axis_weight: [1., 1., 1.]
+agg_dist_pers: 20
+radius_limit_scale: 4
+depth_limit_scale: 0
+vscale: [2, 2, 2]
+kernel_size: [3, 3, 3]
+query_size: [3, 3, 3]
+vsize: [0.032, 0.032, 0.032]
+wcoord_query: 1
+z_depth_dim: 400
+max_o: 610000
+ranges: [-10.0, -10.0, -10.0, 10.0, 10.0, 10.0]
+SR: 24
+K: 8
+P: 26
+NN: 2
+gap_radius: 0.5

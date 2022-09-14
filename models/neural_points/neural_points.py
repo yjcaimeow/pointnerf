@@ -8,6 +8,7 @@ import torch.nn.utils.prune as prune_param
 from utils.kitti_object import get_lidar_in_image_fov
 import os
 from cprint import *
+from models.rendering.diff_ray_marching import near_far_linear_ray_generation
 class NeuralPoints(nn.Module):
 
     @staticmethod
@@ -676,20 +677,29 @@ class NeuralPoints(nn.Module):
         #    np.savez('scene0006_chair_for_seqid1.npz', xyz=xyz_fov.cpu().numpy(), embed=points_embeding_fov.squeeze().cpu().numpy(), color=points_color_fov.squeeze().cpu().numpy(), dir=points_dir_fov.squeeze().cpu().numpy())
         #    exit()
         #cprint.info("NeuralPoints xyz{} embed{} color{}".format(len(self.xyz), len(self.points_embeding), len(self.points_color)))
+        self.xyz_fov, self.points_embeding_fov, self.points_color_fov, self.points_dir_fov = None, None, None, None
         try:
             self.xyz_fov, _, fov_ids, pts_2d = get_lidar_in_image_fov(self.xyz[inputs['seq_id']].squeeze(), inputs["c2w"].squeeze(), intrinsic.squeeze(), xmin=0, ymin=0, xmax=int(w), ymax=int(h), return_more=True)
             self.points_embeding_fov = self.points_embeding[inputs['seq_id']].squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
             self.points_color_fov = self.points_color[inputs['seq_id']].squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
             self.points_dir_fov = self.points_dir[inputs['seq_id']].squeeze(0).squeeze(0)[fov_ids].unsqueeze(0)
         except:
-            self.xyz_fov, self.points_embeding_fov, self.points_color_fov, self.points_dir_fov = None, None, None, None
             return None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
 
         if self.opt.progressive_distill and self.opt.all_sample_loc==False:
             return None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
 
+        if self.opt.clip_knn > 0:
+            raypos_tensor, _, _, _ = near_far_linear_ray_generation(campos, inputs["raydir"], self.opt.z_depth_dim, \
+                near=near_plane.item(), far=far_plane.item(), jitter=0.3 if self.opt.is_train > 0 else 0.)
+            return None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
+            #return None, self.Rw2c, None, None, None, None, None, None, None, None, None, None, None, None, None, None, raypos_tensor, None
+
         self.points_conf_fov = None
-        sample_pidx, sample_loc, ray_mask_tensor, point_xyz_pers_tensor, sample_loc_w_tensor, sample_ray_dirs_tensor, sample_local_ray_dirs_tensor, vsize, raypos_tensor, index_tensor = self.get_point_indices(inputs, camrotc2w, campos, pixel_idx, torch.min(near_plane).cpu().numpy(), torch.max(far_plane).cpu().numpy(), torch.max(h).cpu().numpy(), torch.max(w).cpu().numpy(), intrinsic.cpu().numpy()[0], vox_query=self.opt.NN<0)
+        sample_pidx, sample_loc, ray_mask_tensor, point_xyz_pers_tensor, sample_loc_w_tensor, sample_ray_dirs_tensor, sample_local_ray_dirs_tensor, \
+            vsize, raypos_tensor, index_tensor = self.get_point_indices(inputs, camrotc2w, campos, pixel_idx, torch.min(near_plane).cpu().numpy(), \
+            torch.max(far_plane).cpu().numpy(), torch.max(h).cpu().numpy(), torch.max(w).cpu().numpy(), intrinsic.cpu().numpy()[0], \
+            vox_query=self.opt.NN<0)
 
         sample_pnt_mask = sample_pidx >= 0
         B, R, SR, K = sample_pidx.shape
