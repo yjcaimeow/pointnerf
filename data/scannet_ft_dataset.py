@@ -105,10 +105,12 @@ class ScannetFtDataset(BaseDataset):
         self.define_transforms()
 
         self.id_list, self.id_list_name, self.image_paths, self.seq_ids = [],[],[],[]
+        self.all_id_list, self.seq_ids_all = [],[]
         self.intrinsics, self.depth_intrinsics = [],[]
         for seq_id, scan in enumerate(self.scans):
-            seq_len = self.build_init_metas(scan)
+            seq_len, seq_len_all = self.build_init_metas(scan)
             self.seq_ids.extend([seq_id]*seq_len)
+            self.seq_ids_all.extend([seq_id]*seq_len_all)
 
             img = Image.open(os.path.join(self.data_dir, scan, "exported/color/0.jpg"))
             ori_img_shape = list(self.transform(img).shape)
@@ -267,14 +269,12 @@ class ScannetFtDataset(BaseDataset):
         image_paths = [f for f in os.listdir(colordir) if os.path.isfile(os.path.join(colordir, f))]
 
         image_paths = [os.path.join(self.data_dir, scan, "exported/color/{}.jpg".format(i)) for i in range(len(image_paths))]
-        #self.image_paths.extend(image_paths)
         all_id_list = self.filter_valid_id(list(range(len(image_paths))), scan)
-        self.all_id_list=all_id_list #### hahahahaha
 
         step=5
         train_id_list = all_id_list[::step]
         test_id_list = [all_id_list[i] for i in range(len(all_id_list)) if (i % step) !=0] if self.opt.test_num_step != 0 else all_id_list
-        if len(self.opt.scans)>1:
+        if len(self.opt.scans)>1 and 1==2:
             test_id_list = test_id_list[::5]
         else:
             test_id_list = test_id_list[::50]
@@ -288,8 +288,9 @@ class ScannetFtDataset(BaseDataset):
         print("test_id_list",len(test_id_list))
         print("train_id_list",len(train_id_list))
         self.id_list.extend(id_list)
+        self.all_id_list.extend(all_id_list)
         self.id_list_name.extend([scan]*len(id_list))
-        return len(id_list)
+        return len(id_list), len(all_id_list)
 
     def filter_valid_id(self, id_list, scan):
         empty_lst=[]
@@ -381,6 +382,8 @@ class ScannetFtDataset(BaseDataset):
         reverse_intrin = torch.inverse(torch.as_tensor(self.depth_intrinsics[seq_id])).t().to(device)
         world_xyz_all = torch.zeros([0,3], device=device, dtype=torch.float32)
         for i in tqdm(range(len(self.all_id_list))):
+            if self.seq_ids_all[i]!=seq_id:
+                continue
             id = self.all_id_list[i]
             c2w = torch.as_tensor(np.loadtxt(os.path.join(self.data_dir, scan, "exported/pose", "{}.txt".format(id))).astype(np.float32), device=device, dtype=torch.float32)  #@ self.blender2opencv
             # 480, 640, 1

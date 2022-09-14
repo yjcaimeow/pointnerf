@@ -1,4 +1,4 @@
-name: "checkpoints/scannet/online_distill_all_sample_loc/distill.withcolor.global_ray_dir.ray_valid.knn.self_attention1.woinitpcd.knn16.gap0.4.create2.relative_thresh.all_sample_loc_manual_local_knn_radius0.008"
+name: "checkpoints/scannet/debug/distill.withcolor.global_ray_dir.ray_valid.knn.self_attention1.woinitpcd.knn16.gap0.4.create2.relative_thresh.all_sample_loc_manual_local_knn_radius0.008"
 
 data_root: "/mnt/cache/caiyingjie/data/scannet/scans/"
 pre_d_est: "../checkpoints/MVSNet/model_000014.ckpt"

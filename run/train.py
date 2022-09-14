@@ -476,7 +476,7 @@ def main():
                             dim=-1) > 0
                         points_xyz_all = points_xyz_all[mask]
 
-                    if opt.vox_res > 0 and opt.load_init_pcd_type=='pointnerf' and local_rank==0:
+                    if opt.vox_res > 0 and opt.load_init_pcd_type=='pointnerf' and local_rank==0 and 1==2:
                         points_xyz_all = [points_xyz_all] if not isinstance(points_xyz_all, list) else points_xyz_all
                         points_xyz_holder = torch.zeros([0,3], dtype=points_xyz_all[0].dtype, device="cuda")
                         for i in range(len(points_xyz_all)):
@@ -488,7 +488,7 @@ def main():
                             print("after voxelize:", points_xyz.shape)
                             points_xyz_holder = torch.cat([points_xyz_holder, points_xyz], dim=0)
                         points_xyz_all = points_xyz_holder
-                        #np.save('./scene0012_00_voxelized_pcd.npy', points_xyz_all.cpu().numpy())
+                        np.save(scan+'_voxelized_pcd.npy', points_xyz_all.cpu().numpy())
                         #exit()
 
                     if opt.embed_init_type=='random':
